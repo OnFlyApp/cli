@@ -1,0 +1,13 @@
+/bin/
+.onfly/vector.db
+*.log
+*.wasm
+*.exe
+*.test
+*.out
+coverage.txt
+vendor/
+
+.DS_Store
+.idea/
+.vscode/

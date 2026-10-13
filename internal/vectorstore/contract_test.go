@@ -1,0 +1,160 @@
+package vectorstore
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/axitdev/onfly/internal/parser"
+)
+
+func runStoreContract(t *testing.T, st Store) {
+	t.Helper()
+	ctx := context.Background()
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	user := parser.Chunk{FilePath: "a.php", Type: "function", Content: "function getUserId() {}", Metadata: map[string]string{"name": "User"}}
+	other := parser.Chunk{FilePath: "b.php", Type: "function", Content: "function other() {}", Metadata: map[string]string{"name": "Other"}}
+	near := []float32{1, 0, 0, 0}
+	far := []float32{0, 1, 0, 0}
+	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: user, Vector: near}, {Chunk: other, Vector: far}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SearchSemantic(ctx, near, 2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].FilePath != "a.php" {
+		t.Fatalf("semantic = %+v", got)
+	}
+	got, err = st.SearchKeyword(ctx, "user", 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || got[0].Content != user.Content {
+		t.Fatalf("keyword = %+v", got)
+	}
+	user.Outbound = []string{"OrderService.Execute"}
+	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: user, Vector: near, Workspace: "backend"}}); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := st.GetReferences(ctx, "OrderService.Execute")
+	if err != nil || len(refs) != 1 || refs[0].FilePath != "a.php" {
+		t.Fatalf("refs = %+v %v", refs, err)
+	}
+	if refs[0].Outbound[0] != "OrderService.Execute" {
+		t.Fatalf("outbound = %+v", refs[0].Outbound)
+	}
+	got, err = st.SearchKeyword(ctx, "getUserId", 10, "frontend")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("workspace filter = %+v %v", got, err)
+	}
+	got, err = st.SearchKeyword(ctx, "getUserId", 10, "backend")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("backend = %+v %v", got, err)
+	}
+	names, err := st.WorkspacesForName(ctx, "User")
+	if err != nil || len(names) != 1 || names[0] != "backend" {
+		t.Fatalf("workspaces = %v %v", names, err)
+	}
+	names, err = st.WorkspacesForName(ctx, "missing")
+	if err != nil || names == nil || len(names) != 0 {
+		t.Fatalf("missing workspaces = %v %v", names, err)
+	}
+	win := user
+	win.FilePath = `src\main.go`
+	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: win, Vector: near, Workspace: ""}}); err != nil {
+		t.Fatal(err)
+	}
+	files, err := st.ListFiles(ctx)
+	if err != nil || !containsPath(files, "src/main.go") {
+		t.Fatalf("files = %v %v", files, err)
+	}
+	before, err := st.Generation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetFileHash(ctx, "src/main.go", "abc"); err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := st.FileHashes(ctx)
+	if err != nil || hashes["src/main.go"] != "abc" {
+		t.Fatalf("hashes = %v %v", hashes, err)
+	}
+	after, err := st.Generation(ctx)
+	if err != nil || after <= before {
+		t.Fatalf("generation %d -> %d", before, after)
+	}
+	if err := st.DeleteFiles(ctx, []string{"src/main.go"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SearchKeyword(ctx, `say "hello"`, 10, ""); err != nil {
+		t.Fatal(err)
+	}
+	comp, err := st.GetComponentAST(ctx, "User")
+	if err != nil || comp.Metadata["name"] != "User" {
+		t.Fatalf("component = %+v %v", comp, err)
+	}
+	if _, err := st.GetComponentAST(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing = %v", err)
+	}
+	replaced := user
+	replaced.Content = "function getUserId() { return 1 }"
+	if err := st.SaveChunks(ctx, []EmbeddedChunk{
+		{Chunk: user, Vector: near},
+		{Chunk: parser.Chunk{FilePath: "a.php", Type: "function", Content: "second", Metadata: map[string]string{"name": "Two"}}, Vector: near},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: replaced, Vector: near}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = st.SearchKeyword(ctx, "return 1", 10, "")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("replaced = %+v %v", got, err)
+	}
+	if _, err := st.GetComponentAST(ctx, "Two"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("old chunk survived replace")
+	}
+	if err := st.SaveChunks(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetComponentAST(ctx, "User"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: user, Vector: []float32{1}}}); err == nil {
+		t.Fatal("expected dimension error")
+	}
+	if _, err := st.GetComponentAST(ctx, "User"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Init(ctx, 8); !errors.Is(err, ErrDimensionMismatch) {
+		t.Fatalf("mismatch = %v", err)
+	}
+	if _, err := st.GetComponentAST(ctx, "User"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFiles(ctx, []string{"a.php", "b.php"}); err != nil {
+		t.Fatal(err)
+	}
+	files, err = st.ListFiles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("files = %v", files)
+	}
+}
+
+func containsPath(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
