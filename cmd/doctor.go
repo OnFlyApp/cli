@@ -12,13 +12,14 @@ import (
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
+	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Check config, database, embedder, and parsers",
+	Short: "Check config, database, embedder, parsers, and rules",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
@@ -39,6 +40,9 @@ func Doctor(ctx context.Context, cfg config.Config, out io.Writer) error {
 		failed = true
 	}
 	if err := checkPlugins(cfg, out); err != nil {
+		failed = true
+	}
+	if err := checkRules(cfg, out); err != nil {
 		failed = true
 	}
 	if failed {
@@ -178,5 +182,33 @@ func checkPlugins(cfg config.Config, out io.Writer) error {
 		line += " " + strings.Join(parts, " ")
 	}
 	fmt.Fprintln(out, line)
+	return nil
+}
+
+func checkRules(cfg config.Config, out io.Writer) error {
+	eng := rules.Load(cfg)
+	if err := eng.ReadError(); err != nil {
+		fmt.Fprintf(out, "rules: %s\n", err)
+		return err
+	}
+	maxTokens := cfg.Server.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 8192
+	}
+	rep := eng.Report(maxTokens)
+	if len(rep.Syntax) > 0 {
+		msg := strings.Join(rep.Syntax, "; ")
+		fmt.Fprintf(out, "rules: %s\n", msg)
+		return fmt.Errorf("%s", msg)
+	}
+	if rep.Warning != "" {
+		fmt.Fprintf(out, "rules: [WARNING] %s\n", rep.Warning)
+		return nil
+	}
+	if rep.Tokens == 0 {
+		fmt.Fprintln(out, "rules: ok")
+		return nil
+	}
+	fmt.Fprintf(out, "rules: ok %d tokens\n", rep.Tokens)
 	return nil
 }

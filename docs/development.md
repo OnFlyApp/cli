@@ -1,6 +1,6 @@
 # Development
 
-Repository: <https://github.com/OnFlyApp/cli>. Module path: `github.com/axitdev/onfly`. The `go` line in `go.mod` is 1.27.1.
+Module path: `github.com/axitdev/onfly`. The `go` line in `go.mod` is 1.27.1.
 
 ```sh
 make build   # CGO_ENABLED=0 go build -o bin/onfly .
@@ -29,6 +29,8 @@ internal/index/         hash skip, embed, save, prune, dry-run cost
 internal/watch/         fsnotify debounce
 internal/vectorstore/   sqlite and postgres, schema version 2
 internal/mcp/           MCP tools, token budget, trace, index resource
+internal/rules/         rule frontmatter, templates, token budget, fallback files
+specs/                  system design documents
 ```
 
 ## Store interface

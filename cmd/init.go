@@ -30,8 +30,20 @@ rules:
   - ".onfly/rules/frontend_style.md"
   - ".onfly/rules/architecture.md"
 
+rules_engine:
+  max_token_budget_percent: 15
+  auto_discovery:
+    enabled: true
+    fallback_order:
+      - ".cursorrules"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "AGENT.md"
+      - ".clinerules"
+      - ".github/copilot-instructions.md"
+
 indexer:
-  include: ["src/**/*", "assets/**/*", "docs/**/*.md"]
+  include: ["**/*.go", "src/**/*", "cmd/**/*", "internal/**/*", "pkg/**/*", "assets/**/*", "docs/**/*.md"]
   exclude: ["vendor", "node_modules", "var", "public"]
   parsers: []
 
@@ -99,9 +111,9 @@ func runInit(dir string, overwrite, ci bool) error {
 		return err
 	}
 	rules := map[string]string{
-		"backend_style.md":  "# Backend\n\nReturn errors to the caller. Keep request handlers thin.\n",
-		"frontend_style.md": "# Frontend\n\nKeep components focused on one view.\n",
-		"architecture.md":   "# Architecture\n\nIndex source with Onfly. Serve search over MCP stdio.\n",
+		"backend_style.md":  "---\nname: Backend\nscope: [\"**/*.go\", \"**/*.php\", \"**/*.rs\"]\nignore: [\"**/*_test.go\", \"vendor/**\"]\npriority: 50\n---\n# Backend\n\nReturn errors to the caller. Keep request handlers thin.\n",
+		"frontend_style.md": "---\nname: Frontend\nscope: [\"**/*.ts\", \"**/*.tsx\", \"**/*.js\"]\npriority: 40\n---\n# Frontend\n\nKeep components focused on one view.\n",
+		"architecture.md":   "---\nname: Architecture\nscope: [\"*\"]\npriority: 10\n---\n# Architecture\n\nIndex source with Onfly. Serve search over MCP stdio.\nYou are assisting in the {{ .Project.Name }} repository.\n",
 	}
 	for name, body := range rules {
 		if err := os.WriteFile(filepath.Join(onfly, "rules", name), []byte(body), 0o644); err != nil {

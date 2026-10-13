@@ -92,7 +92,7 @@ func TestTools(t *testing.T) {
 		t.Fatalf("%s", mustJSON(res.StructuredContent))
 	}
 	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "who is the user", "limit": 100},
 	})
 	if err != nil || res.IsError {
@@ -274,12 +274,37 @@ func (e fixedEmbedder) EmbedBatch(context.Context, []string) ([][]float32, error
 	return nil, nil
 }
 
+func decodeList(t *testing.T, v any, dest any) {
+	t.Helper()
+	raw := []byte(mustJSON(v))
+	if len(raw) > 0 && raw[0] == '{' {
+		var box map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &box); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"hits", "chunks", "entries"} {
+			if inner, ok := box[key]; ok {
+				raw = inner
+				break
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, dest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func decodeHits(t *testing.T, v any) []hitDTO {
+	t.Helper()
+	var got []hitDTO
+	decodeList(t, v, &got)
+	return got
+}
+
 func decodeChunks(t *testing.T, v any) []chunkDTO {
 	t.Helper()
 	var got []chunkDTO
-	if err := json.Unmarshal([]byte(mustJSON(v)), &got); err != nil {
-		t.Fatal(err)
-	}
+	decodeList(t, v, &got)
 	return got
 }
 
@@ -310,37 +335,37 @@ func TestSemanticBudgetDropsTail(t *testing.T) {
 	if err := store.SaveChunks(context.Background(), saved); err != nil {
 		t.Fatal(err)
 	}
-	one, err := tokens.Count(mustJSON(toDTO([]parser.Chunk{saved[0].Chunk, truncation(2)})))
+	one, err := tokens.Count(mustJSON([]hitDTO{toHit(saved[0].Chunk), diagnosticHit(2)}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	session := openServer(t, config.Config{Server: config.Server{MaxTokens: one + 8}}, store, fixedEmbedder{v: []float32{1, 0, 0, 0}})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "a", "limit": 10},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got := decodeChunks(t, res.StructuredContent)
-	if len(got) != 2 || got[0].Metadata["name"] != "A" {
+	got := decodeHits(t, res.StructuredContent)
+	if len(got) != 2 || got[0].Symbol != "A" {
 		t.Fatalf("%+v", got)
 	}
-	want := "// [Truncated: 2 matches omitted due to context limits. Use search_keyword to refine.]"
-	if got[1].Content != want {
-		t.Fatalf("diagnostic = %q", got[1].Content)
+	want := "// [Truncated: 2 matches omitted due to context limits.]"
+	if got[1].Lines != want {
+		t.Fatalf("diagnostic = %q", got[1].Lines)
 	}
 
 	tight := openServer(t, config.Config{Server: config.Server{MaxTokens: 8}}, store, fixedEmbedder{v: []float32{1, 0, 0, 0}})
 	res, err = tight.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "a", "limit": 10},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got = decodeChunks(t, res.StructuredContent)
-	if len(got) != 1 || got[0].Content != "// [Truncated: 3 matches omitted due to context limits. Use search_keyword to refine.]" {
+	got = decodeHits(t, res.StructuredContent)
+	if len(got) != 1 || got[0].Lines != "// [Truncated: 3 matches omitted due to context limits.]" {
 		t.Fatalf("%+v", got)
 	}
 }
@@ -544,7 +569,7 @@ func TestSemanticElicitsCollidingName(t *testing.T) {
 		},
 	})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "User"},
 	})
 	if err != nil || res.IsError {
@@ -558,7 +583,7 @@ func TestSemanticElicitsCollidingName(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	info := session.InitializeResult().ServerInfo
-	if info == nil || info.Name != "onfly" || info.Version != "0.3.0" {
+	if info == nil || info.Name != "onfly" || info.Version != "0.4.0" {
 		t.Fatalf("%+v", info)
 	}
 }
@@ -572,7 +597,7 @@ func TestSemanticDeclineDoesNotEmbed(t *testing.T) {
 		},
 	})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "User"},
 	})
 	if err != nil {
@@ -596,7 +621,7 @@ func TestSemanticStarDoesNotElicit(t *testing.T) {
 		},
 	})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "User", "workspace": "*"},
 	})
 	if err != nil || res.IsError {
@@ -617,7 +642,7 @@ func TestSemanticSentenceDoesNotElicit(t *testing.T) {
 		},
 	})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_semantic",
+		Name:      "search",
 		Arguments: map[string]any{"query": "who is the user"},
 	})
 	if err != nil || res.IsError {
@@ -668,4 +693,198 @@ func TestComponentASTIsObject(t *testing.T) {
 	if !ok || !strings.HasPrefix(strings.TrimSpace(text.Text), "{") {
 		t.Fatalf("%+v", res.Content)
 	}
+}
+
+func TestSearchToolsAndFusion(t *testing.T) {
+	store, err := vectorstore.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if err := store.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveChunks(ctx, []vectorstore.EmbeddedChunk{
+		{Chunk: parser.Chunk{
+			FilePath: "far.go", Type: "method", Content: "func getUserId() {}",
+			Metadata: map[string]string{"name": "getUserId", "receiver": "Service", "start_line": "4", "end_line": "4"},
+		}, Vector: []float32{0, 1, 0, 0}},
+		{Chunk: parser.Chunk{
+			FilePath: "near.go", Type: "function", Content: "func other() {}",
+			Metadata: map[string]string{"name": "other"},
+		}, Vector: []float32{1, 0, 0, 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emb := &countEmbedder{}
+	session := openServer(t, config.Config{}, store, fixedEmbedder{v: []float32{1, 0, 0, 0}})
+	listed, err := session.ListTools(ctx, &sdkmcp.ListToolsParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, tool := range listed.Tools {
+		names[tool.Name] = true
+	}
+	if !names["search"] || !names["search_keyword"] || names["search_semantic"] {
+		t.Fatalf("%v", names)
+	}
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "getUserId", "limit": 2},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("%v %+v", err, res)
+	}
+	raw := mustJSON(res.StructuredContent)
+	var wrapped struct {
+		Hits []map[string]any `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(raw), &wrapped); err != nil {
+		t.Fatal(err)
+	}
+	rows := wrapped.Hits
+	if len(rows) != 2 || rows[0]["file_path"] != "far.go" || rows[1]["file_path"] != "near.go" {
+		t.Fatalf("%s", raw)
+	}
+	if rows[0]["symbol"] != "getUserId" || rows[0]["receiver"] != "Service" || rows[0]["start_line"] != float64(4) || rows[0]["lines"] != "func getUserId() {}" {
+		t.Fatalf("%s", raw)
+	}
+	for _, key := range []string{"type", "metadata", "outbound", "receiver"} {
+		if _, ok := rows[1][key]; ok {
+			t.Fatalf("near has %s: %s", key, raw)
+		}
+	}
+	if _, ok := rows[0]["type"]; ok || rows[0]["metadata"] != nil || rows[0]["outbound"] != nil {
+		t.Fatalf("%s", raw)
+	}
+	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search_keyword",
+		Arguments: map[string]any{"keyword": "getUserId"},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("%v %+v", err, res)
+	}
+	hits := decodeHits(t, res.StructuredContent)
+	if len(hits) != 1 || hits[0].FilePath != "far.go" || hits[0].Lines != "func getUserId() {}" {
+		t.Fatalf("%+v", hits)
+	}
+	blank := openServer(t, config.Config{}, store, emb)
+	res, err = blank.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "search",
+		Arguments: map[string]any{"query": "  "},
+	})
+	if err != nil || !res.IsError {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if emb.n != 0 {
+		t.Fatalf("embeds = %d", emb.n)
+	}
+}
+
+func TestRulesFollowTheRequest(t *testing.T) {
+	root := t.TempDir()
+	rulesDir := filepath.Join(root, ".onfly", "rules")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		filepath.Join(rulesDir, "db.md"):    "---\nname: Database\nscope: [\"**/*.go\"]\npriority: 100\n---\nNO RAW SQL\n",
+		filepath.Join(rulesDir, "iface.md"): "---\nname: Interfaces\nscope: [\"interface\"]\npriority: 80\n---\nDOCUMENT THE INTERFACE\n",
+		filepath.Join(rulesDir, "all.md"):   "---\nname: Always\nscope: [\"*\"]\npriority: 1\n---\nALWAYS ON\n",
+		filepath.Join(root, "src", "a.go"):  "package a\n",
+		filepath.Join(root, "README.md"):    "readme\n",
+	}
+	for path, body := range files {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := vectorstore.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.Init(context.Background(), 4); err != nil {
+		t.Fatal(err)
+	}
+	err = store.SaveChunks(context.Background(), []vectorstore.EmbeddedChunk{{
+		Chunk: parser.Chunk{
+			FilePath: "src/a.go",
+			Type:     "interface",
+			Content:  "type Widget interface {}",
+			Metadata: map[string]string{"name": "Widget"},
+		},
+		Vector: []float32{1, 0, 0, 1},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := openSession(t, config.Config{ProjectRoot: root, Server: config.Server{MaxTokens: 8192}}, store, fakeEmbedder{}, nil)
+	ctx := context.Background()
+
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "read_file_raw", Arguments: map[string]any{"path": "src/a.go"}})
+	if err != nil || res.IsError {
+		t.Fatalf("read go %v %+v", err, res)
+	}
+	if !strings.Contains(contentText(t, res), "NO RAW SQL") || !strings.Contains(contentText(t, res), "ALWAYS ON") {
+		t.Fatalf("go file rules: %s", contentText(t, res))
+	}
+	if !strings.Contains(mustJSON(res.StructuredContent), "NO RAW SQL") || !strings.Contains(mustJSON(res.StructuredContent), "ALWAYS ON") {
+		t.Fatalf("structured %s", mustJSON(res.StructuredContent))
+	}
+	if instr := session.InitializeResult().Instructions; !strings.Contains(instr, "ALWAYS ON") || strings.Contains(instr, "NO RAW SQL") {
+		t.Fatalf("instructions %s", instr)
+	}
+
+	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "read_file_raw", Arguments: map[string]any{"path": "README.md"}})
+	if err != nil || res.IsError {
+		t.Fatalf("read md %v %+v", err, res)
+	}
+	readme := contentText(t, res)
+	if strings.Contains(readme, "NO RAW SQL") || !strings.Contains(readme, "ALWAYS ON") {
+		t.Fatalf("readme rules: %s", readme)
+	}
+
+	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_component_ast", Arguments: map[string]any{"name": "Widget"}})
+	if err != nil || res.IsError {
+		t.Fatalf("ast %v %+v", err, res)
+	}
+	ast := contentText(t, res)
+	if !strings.Contains(ast, "DOCUMENT THE INTERFACE") || !strings.Contains(ast, "NO RAW SQL") {
+		t.Fatalf("ast rules: %s", ast)
+	}
+
+	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_project_rules", Arguments: map[string]any{}})
+	if err != nil || res.IsError {
+		t.Fatalf("rules %v %+v", err, res)
+	}
+	body := mustJSON(res.StructuredContent)
+	if !strings.Contains(body, "ALWAYS ON") || strings.Contains(body, "NO RAW SQL") {
+		t.Fatalf("project rules: %s", body)
+	}
+
+	missing := openSession(t, config.Config{ProjectRoot: root, Rules: []string{filepath.Join(root, "missing.md")}, Server: config.Server{MaxTokens: 8192}}, store, fakeEmbedder{}, nil)
+	res, err = missing.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_project_rules", Arguments: map[string]any{}})
+	if err != nil || !res.IsError {
+		t.Fatalf("missing rule %v %+v", err, res)
+	}
+}
+
+func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
+	t.Helper()
+	var b strings.Builder
+	for _, item := range res.Content {
+		text, ok := item.(*sdkmcp.TextContent)
+		if !ok {
+			t.Fatalf("%T", item)
+		}
+		b.WriteString(text.Text)
+	}
+	return b.String()
 }

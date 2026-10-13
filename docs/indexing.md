@@ -50,8 +50,10 @@ Rates per million tokens are 0.02 for `text-embedding-3-small`, 0.13 for `text-e
 
 ## What gets stored
 
-SQLite keeps text, metadata, `outbound`, and `workspace` in `chunk_meta`, the content hash in `index_state`, vectors in a `vec0` table, and an FTS5 index maintained by insert and delete triggers. Semantic search uses sqlite-vec `MATCH` (the default L2 distance for a `float[N]` column). Keyword search is a case-insensitive substring match, then an FTS5 phrase query. A bad FTS query still returns the substring hits.
+SQLite keeps text, metadata, `outbound`, and `workspace` in `chunk_meta`, the content hash in `index_state`, vectors in a `vec0` table, and an FTS5 index maintained by insert and delete triggers. Semantic search uses sqlite-vec `MATCH` with `distance_metric=cosine`. `Init` rewrites an existing L2 `vec0` table in place and leaves the schema version at `2`. After the parser returns, the indexer fills `metadata.start_line` and `metadata.end_line` when the parser left them empty, using the first match of the chunk text in the file. Keyword search is a case-insensitive substring match, then an FTS5 phrase query. A bad FTS query still returns the substring hits.
 
 Postgres keeps one `chunks` row with a `vector(N)` column and a stored `tsvector`. Semantic search orders by cosine distance (`<=>`). An HNSW index is created when `N` is at most 2000. Wider vectors are scanned exactly. Keyword search is `ILIKE` or `plainto_tsquery('simple', ...)`.
 
-`get_component_ast` looks up `metadata.name` and returns one row. If several chunks share a name, SQLite returns the lowest `rowid`.
+After indexing, outbound lists are filled from symbol names used as `Name(` or `.Name` in the chunk text. The chunk's own name is not added. An outbound value that contains `.` or `\` is kept when that text is still in the chunk.
+
+`get_component_ast` looks up `metadata.name`. Split parts of that symbol in the same file are joined in part order, and the shared overlap is kept once. A name stored in several files returns the earliest row.

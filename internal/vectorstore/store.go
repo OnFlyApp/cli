@@ -18,12 +18,19 @@ var (
 	ErrDimensionMismatch = errors.New("vectorstore: dimension mismatch")
 )
 
+type StoredChunk struct {
+	ID    int64
+	Chunk parser.Chunk
+}
+
 type Store interface {
 	Init(ctx context.Context, dimensions int) error
 	SaveChunks(ctx context.Context, chunks []EmbeddedChunk) error
 	CommitFile(ctx context.Context, path, hash string, chunks []EmbeddedChunk) error
 	DeleteFiles(ctx context.Context, filePaths []string) error
 	ListFiles(ctx context.Context) ([]string, error)
+	ListChunks(ctx context.Context) ([]StoredChunk, error)
+	UpdateOutbound(ctx context.Context, outbound map[int64][]string) error
 	SearchSemantic(ctx context.Context, queryVector []float32, limit int, workspace string) ([]parser.Chunk, error)
 	SearchKeyword(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error)
 	GetComponentAST(ctx context.Context, name string) (*parser.Chunk, error)

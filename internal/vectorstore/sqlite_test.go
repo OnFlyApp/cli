@@ -135,6 +135,39 @@ func TestSQLiteMigratesV1(t *testing.T) {
 	}
 }
 
+func TestComponentJoinsParts(t *testing.T) {
+	st, err := OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ctx := context.Background()
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	vec := []float32{1, 0, 0, 0}
+	err = st.SaveChunks(ctx, []EmbeddedChunk{
+		{Chunk: parser.Chunk{
+			FilePath: "a.go", Type: "function", Content: "aaaaaaBB",
+			Metadata: map[string]string{"name": "User", "part": "1/2", "start_line": "1", "end_line": "2"},
+		}, Vector: vec},
+		{Chunk: parser.Chunk{
+			FilePath: "a.go", Type: "function", Content: "BBcccccc",
+			Metadata: map[string]string{"name": "User", "part": "2/2", "start_line": "2", "end_line": "4"},
+		}, Vector: vec},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.GetComponentAST(ctx, "User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "aaaaaaBBcccccc" || got.Metadata["part"] != "" || got.Metadata["end_line"] != "4" || got.Metadata["start_line"] != "1" {
+		t.Fatalf("%q %+v", got.Content, got.Metadata)
+	}
+}
+
 func TestSQLiteStore(t *testing.T) {
 	st, err := OpenSQLite(filepath.Join(t.TempDir(), "vector.db"))
 	if err != nil {
@@ -256,5 +289,98 @@ func TestSQLiteSemanticWorkspaceIsNotHidden(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].FilePath != "mine.go" {
 		t.Fatalf("semantic = %+v", got)
+	}
+}
+
+func TestSQLiteCosineDistance(t *testing.T) {
+	t.Run("new", func(t *testing.T) {
+		st, err := OpenSQLite(":memory:")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { st.Close() })
+		ctx := context.Background()
+		if err := st.Init(ctx, 4); err != nil {
+			t.Fatal(err)
+		}
+		assertCosineSchema(t, st)
+		if err := st.SaveChunks(ctx, []EmbeddedChunk{
+			{Chunk: parser.Chunk{FilePath: "scaled.go", Type: "function", Content: "scaled", Metadata: map[string]string{"name": "Scaled"}}, Vector: []float32{3, 0, 0, 0}},
+			{Chunk: parser.Chunk{FilePath: "ortho.go", Type: "function", Content: "ortho", Metadata: map[string]string{"name": "Ortho"}}, Vector: []float32{0, 1, 0, 0}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		assertScaledFirst(t, st)
+	})
+	t.Run("migrated", func(t *testing.T) {
+		dbPath := filepath.Join(t.TempDir(), "vector.db")
+		db, err := sql.Open("sqlite", dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stmts := []string{
+			`CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+			`INSERT INTO schema_meta(key, value) VALUES ('version', '2'), ('dimensions', '4')`,
+			`CREATE TABLE chunk_meta (
+				rowid INTEGER PRIMARY KEY,
+				file_path TEXT NOT NULL,
+				type TEXT NOT NULL,
+				content TEXT NOT NULL,
+				metadata TEXT NOT NULL,
+				outbound TEXT NOT NULL DEFAULT '[]',
+				workspace TEXT NOT NULL DEFAULT ''
+			)`,
+			`INSERT INTO chunk_meta(rowid, file_path, type, content, metadata) VALUES
+				(1, 'scaled.go', 'function', 'scaled', '{"name":"Scaled"}'),
+				(2, 'ortho.go', 'function', 'ortho', '{"name":"Ortho"}')`,
+			`CREATE VIRTUAL TABLE chunk_vecs USING vec0(embedding float[4])`,
+			`INSERT INTO chunk_vecs(rowid, embedding) VALUES (1, '[3,0,0,0]'), (2, '[0,1,0,0]')`,
+		}
+		for _, stmt := range stmts {
+			if _, err := db.Exec(stmt); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		st, err := OpenSQLite(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { st.Close() })
+		if err := st.Init(context.Background(), 4); err != nil {
+			t.Fatal(err)
+		}
+		assertCosineSchema(t, st)
+		assertScaledFirst(t, st)
+	})
+}
+
+func assertCosineSchema(t *testing.T, st *SQLite) {
+	t.Helper()
+	var version, create string
+	if err := st.db.QueryRow(`SELECT value FROM schema_meta WHERE key = 'version'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("version = %s", version)
+	}
+	if err := st.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'chunk_vecs'`).Scan(&create); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(create, "distance_metric=cosine") {
+		t.Fatal(create)
+	}
+}
+
+func assertScaledFirst(t *testing.T, st *SQLite) {
+	t.Helper()
+	got, err := st.SearchSemantic(context.Background(), []float32{1, 0, 0, 0}, 2, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].FilePath != "scaled.go" || got[1].FilePath != "ortho.go" {
+		t.Fatalf("%+v", got)
 	}
 }

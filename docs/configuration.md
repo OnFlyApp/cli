@@ -30,8 +30,20 @@ rules:
   - .onfly/rules/frontend_style.md
   - .onfly/rules/architecture.md
 
+rules_engine:
+  max_token_budget_percent: 15   # share of server.max_tokens used for injected rules
+  auto_discovery:
+    enabled: true                # when no explicit rule file exists, read the first fallback that is present
+    fallback_order:
+      - .cursorrules
+      - AGENTS.md
+      - CLAUDE.md
+      - AGENT.md
+      - .clinerules
+      - .github/copilot-instructions.md
+
 indexer:
-  include: ["src/**/*", "assets/**/*", "docs/**/*.md"]
+  include: ["**/*.go", "src/**/*", "cmd/**/*", "internal/**/*", "pkg/**/*", "assets/**/*", "docs/**/*.md"]
   exclude: ["vendor", "node_modules", "var", "public"]
   debounce_ms: 2000              # onfly watch; default 2000
   parsers:
@@ -64,6 +76,30 @@ These names are never read, even when `include` matches: any path segment that s
 `indexer.include` must contain at least one pattern. Patterns use [doublestar](https://github.com/bmatcuk/doublestar) syntax: `src/**/*` matches `src/main.go` and `src/a/b.go`, and `docs/**/*.md` matches Markdown under `docs/`.
 
 `indexer.exclude` matches a path segment. `vendor` skips `vendor/lib/a.go` and `src/vendor/a.go`. `.onfly` and `.git` are always skipped.
+
+## Rules
+
+Markdown files in `.onfly/rules/` and the paths in `rules` are the explicit rules. Each file may start with YAML frontmatter:
+
+```markdown
+---
+name: Database Safety Rules
+scope: ["**/*.go", "**/*.php", "interface"]
+ignore: ["**/*_test.go", "vendor/**"]
+priority: 100
+---
+Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers }}.
+```
+
+`scope` entries are doublestar globs, language names (`go`, `php`, `rust`, `typescript`, `javascript`, `python`, `ruby`, `java`), or chunk types such as `interface`. `*` and an empty scope apply to every MCP request. A file with no frontmatter does too. `ignore` uses the same glob syntax. A higher `priority` is sent first. A directory request matches a glob when the directory is that glob's literal prefix, so `frontend/src` matches `frontend/src/**`.
+
+`{{ .Project.Name }}` comes from `go.mod`, then `composer.json`, then `package.json`, then `project`. `{{ .Env.OS }}` and `{{ .Env.Arch }}` are the host `GOOS` and `GOARCH`. `{{ .ActiveParsers }}` is a JSON list of languages derived from parser extensions, such as `["go","php"]`.
+
+`rules_engine.max_token_budget_percent` defaults to 15 and must be from 1 to 100. Injected rules stop at that share of `server.max_tokens`. Lower-priority rules are dropped first. When a whole rule is dropped, the text ends with `// [Truncated: N rules omitted due to context limits.]`. `search`, `search_keyword`, and `get_references` fit their code results into the tokens that remain. `get_project_rules` returns only the rules that apply to every request. Path and chunk-type rules are on the tool result, in the text and in the structured `rules` field. Global rules are also in the server instructions, so they are present before a search.
+
+`auto_discovery.enabled` defaults to true. When `.onfly/rules/` and `rules` are both empty, Onfly reads the first existing file in `fallback_order` and stops. Set `enabled` to false to ignore those files. Fallback paths stay inside the project root.
+
+`onfly doctor` reads the same files. `rules: ok N tokens` means the rendered rules fit in the budget. A frontmatter or template error fails the check. When the rendered rules exceed the budget, doctor prints `rules: [WARNING]` and exits 0 if every other check passed. That warning names the files whose scopes overlap.
 
 ## Embedders
 

@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/axitdev/onfly/internal/parser"
 )
@@ -75,6 +77,82 @@ func scanOutbound(raw string) ([]string, error) {
 		v = []string{}
 	}
 	return v, nil
+}
+
+// assembleComponent returns the earliest chunk with a name. Later split parts
+// of that same file are joined in part order. The overlap shared by two
+// adjacent parts is written once.
+func assembleComponent(chunks []parser.Chunk) (*parser.Chunk, error) {
+	if len(chunks) == 0 {
+		return nil, ErrNotFound
+	}
+	first := chunks[0]
+	name := metaName(first)
+	group := make([]parser.Chunk, 0, len(chunks))
+	for _, c := range chunks {
+		if c.FilePath == first.FilePath && metaName(c) == name {
+			group = append(group, c)
+		}
+	}
+	if len(group) == 1 {
+		c := group[0]
+		return &c, nil
+	}
+	sort.SliceStable(group, func(i, j int) bool {
+		return partIndex(group[i]) < partIndex(group[j])
+	})
+	out := group[0]
+	meta := map[string]string{}
+	for k, v := range group[0].Metadata {
+		if k != "part" {
+			meta[k] = v
+		}
+	}
+	content := group[0].Content
+	for _, part := range group[1:] {
+		content = joinOverlap(content, part.Content)
+	}
+	if end := group[len(group)-1].Metadata["end_line"]; end != "" {
+		meta["end_line"] = end
+	}
+	out.Content = content
+	out.Metadata = meta
+	return &out, nil
+}
+
+func metaName(c parser.Chunk) string {
+	if c.Metadata == nil {
+		return ""
+	}
+	return c.Metadata["name"]
+}
+
+func partIndex(c parser.Chunk) int {
+	if c.Metadata == nil {
+		return 0
+	}
+	raw, _, _ := strings.Cut(c.Metadata["part"], "/")
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+func joinOverlap(prev, next string) string {
+	max := len(prev)
+	if len(next) < max {
+		max = len(next)
+	}
+	for n := max; n > 0; n-- {
+		if !utf8.ValidString(next[:n]) {
+			continue
+		}
+		if strings.HasSuffix(prev, next[:n]) {
+			return prev + next[n:]
+		}
+	}
+	return prev + next
 }
 
 func chunkFrom(filePath, typ, content, meta, outbound string) (parser.Chunk, error) {

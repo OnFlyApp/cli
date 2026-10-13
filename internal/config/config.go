@@ -10,14 +10,15 @@ import (
 )
 
 type Config struct {
-	Project     string   `mapstructure:"project"`
-	Workspace   string   `mapstructure:"workspace"`
-	Database    Database `mapstructure:"database"`
-	Embedder    Embedder `mapstructure:"embedder"`
-	Rules       []string `mapstructure:"rules"`
-	Indexer     Indexer  `mapstructure:"indexer"`
-	Server      Server   `mapstructure:"server"`
-	ProjectRoot string   `mapstructure:"-"`
+	Project     string      `mapstructure:"project"`
+	Workspace   string      `mapstructure:"workspace"`
+	Database    Database    `mapstructure:"database"`
+	Embedder    Embedder    `mapstructure:"embedder"`
+	Rules       []string    `mapstructure:"rules"`
+	RulesEngine RulesEngine `mapstructure:"rules_engine"`
+	Indexer     Indexer     `mapstructure:"indexer"`
+	Server      Server      `mapstructure:"server"`
+	ProjectRoot string      `mapstructure:"-"`
 }
 
 type Database struct {
@@ -54,6 +55,16 @@ type Server struct {
 	LogFile   string `mapstructure:"log_file"`
 	MaxTokens int    `mapstructure:"max_tokens"`
 	TraceFile string `mapstructure:"trace_file"`
+}
+
+type RulesEngine struct {
+	MaxTokenBudgetPercent int           `mapstructure:"max_token_budget_percent"`
+	AutoDiscovery         AutoDiscovery `mapstructure:"auto_discovery"`
+}
+
+type AutoDiscovery struct {
+	Enabled       *bool    `mapstructure:"enabled"`
+	FallbackOrder []string `mapstructure:"fallback_order"`
 }
 
 func Load(startDir, explicitPath string) (Config, error) {
@@ -135,6 +146,19 @@ func ApplyDefaults(cfg *Config) {
 	}
 	if cfg.Server.TraceFile == "" {
 		cfg.Server.TraceFile = ".onfly/mcp_trace.jsonl"
+	}
+	if cfg.RulesEngine.MaxTokenBudgetPercent == 0 {
+		cfg.RulesEngine.MaxTokenBudgetPercent = 15
+	}
+	if len(cfg.RulesEngine.AutoDiscovery.FallbackOrder) == 0 {
+		cfg.RulesEngine.AutoDiscovery.FallbackOrder = []string{
+			".cursorrules",
+			"AGENTS.md",
+			"CLAUDE.md",
+			"AGENT.md",
+			".clinerules",
+			".github/copilot-instructions.md",
+		}
 	}
 }
 
@@ -228,6 +252,15 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if len(child.Rules) > 0 {
 		out.Rules = child.Rules
+	}
+	if child.RulesEngine.MaxTokenBudgetPercent != 0 {
+		out.RulesEngine.MaxTokenBudgetPercent = child.RulesEngine.MaxTokenBudgetPercent
+	}
+	if child.RulesEngine.AutoDiscovery.Enabled != nil {
+		out.RulesEngine.AutoDiscovery.Enabled = child.RulesEngine.AutoDiscovery.Enabled
+	}
+	if len(child.RulesEngine.AutoDiscovery.FallbackOrder) > 0 {
+		out.RulesEngine.AutoDiscovery.FallbackOrder = child.RulesEngine.AutoDiscovery.FallbackOrder
 	}
 	if len(child.Indexer.Include) > 0 {
 		out.Indexer.Include = prefixPatterns(child.Indexer.Include, gitRoot, childRoot)
@@ -417,6 +450,15 @@ func (c Config) validate() error {
 	}
 	if c.Server.MaxTokens < 0 {
 		return fmt.Errorf("server.max_tokens must be >= 0")
+	}
+	if c.RulesEngine.MaxTokenBudgetPercent < 1 || c.RulesEngine.MaxTokenBudgetPercent > 100 {
+		return fmt.Errorf("rules_engine.max_token_budget_percent must be from 1 to 100")
+	}
+	for _, item := range c.RulesEngine.AutoDiscovery.FallbackOrder {
+		clean := filepath.Clean(item)
+		if item == "" || filepath.IsAbs(item) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("rules_engine.auto_discovery.fallback_order entry %q is invalid", item)
+		}
 	}
 	if len(c.Indexer.Include) == 0 {
 		return fmt.Errorf("indexer.include is required")

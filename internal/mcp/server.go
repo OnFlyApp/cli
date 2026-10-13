@@ -21,6 +21,7 @@ import (
 	"github.com/axitdev/onfly/internal/embedder"
 	"github.com/axitdev/onfly/internal/ignore"
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -36,11 +37,36 @@ const (
 var componentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type chunkDTO struct {
+	Rules    string            `json:"rules,omitempty"`
 	FilePath string            `json:"file_path"`
 	Type     string            `json:"type"`
 	Content  string            `json:"content"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 	Outbound []string          `json:"outbound,omitempty"`
+}
+
+type hitDTO struct {
+	FilePath  string `json:"file_path"`
+	Symbol    string `json:"symbol"`
+	Receiver  string `json:"receiver,omitempty"`
+	StartLine int    `json:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty"`
+	Lines     string `json:"lines"`
+}
+
+type hitList struct {
+	Rules string   `json:"rules,omitempty"`
+	Hits  []hitDTO `json:"hits"`
+}
+
+type chunkList struct {
+	Rules  string     `json:"rules,omitempty"`
+	Chunks []chunkDTO `json:"chunks"`
+}
+
+type dirList struct {
+	Rules   string     `json:"rules,omitempty"`
+	Entries []dirEntry `json:"entries"`
 }
 
 type semanticIn struct {
@@ -63,6 +89,7 @@ type pathIn struct {
 }
 
 type fileOut struct {
+	Rules   string `json:"rules,omitempty"`
 	Path    string `json:"path"`
 	Content string `json:"content"`
 }
@@ -80,11 +107,11 @@ type rulesOut struct {
 
 type tools struct {
 	root      string
-	rules     []string
 	store     vectorstore.Store
 	emb       embedder.Embedder
 	workspace string
 	maxTokens int
+	engine    *rules.Engine
 	logger    *slog.Logger
 	trace     io.Writer
 	traceMu   sync.Mutex
@@ -99,8 +126,15 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		maxTokens = 8192
 	}
 	h := &tools{
-		root: cfg.ProjectRoot, rules: cfg.Rules, store: store, emb: emb,
+		root: cfg.ProjectRoot, store: store, emb: emb,
 		workspace: cfg.Workspace, maxTokens: maxTokens, logger: logger,
+		engine: rules.Load(cfg),
+	}
+	if err := h.engine.ReadError(); err != nil {
+		logger.Warn("rules", "err", err)
+	}
+	for _, msg := range h.engine.Report(maxTokens).Syntax {
+		logger.Warn("rules", "err", msg)
 	}
 	closer := func() {}
 	if cfg.Server.TraceFile != "" {
@@ -111,19 +145,23 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		h.trace = f
 		closer = func() { f.Close() }
 	}
-	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "onfly", Version: "0.3.0"}, &sdkmcp.ServerOptions{
+	instructions := "Search the indexed project. stdout is JSON-RPC only."
+	if text := h.engine.Inject(rules.Query{}, maxTokens); text != "" {
+		instructions = text + "\n\n" + instructions
+	}
+	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "onfly", Version: "0.4.0"}, &sdkmcp.ServerOptions{
 		Logger:             logger,
-		Instructions:       "Search the indexed project. stdout is JSON-RPC only.",
+		Instructions:       instructions,
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_semantic", Description: "Embed the query and return the nearest chunks."}, h.searchSemantic)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks by case-insensitive substring or full-text search."}, h.searchKeyword)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the chunk whose metadata name matches."}, h.component)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does. Returns the path, the symbol, and the lines to edit."}, h.search)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier you already know. For a description of behavior, call search."}, h.searchKeyword)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the chunk whose metadata name matches. Split parts of that symbol are joined."}, h.component)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_references", Description: "Return chunks whose outbound references include the name."}, h.references)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the configured architecture rule files."}, h.projectRules)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
 	srv.AddResource(&sdkmcp.Resource{URI: "onfly://index", Name: "index", MIMEType: "text/plain"}, func(ctx context.Context, _ *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
 		n, err := store.Generation(ctx)
 		if err != nil {
@@ -173,31 +211,35 @@ func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) 
 	return srv.Run(ctx, &sdkmcp.IOTransport{Reader: io.NopCloser(in), Writer: nopWriteCloser{out}})
 }
 
-func (h *tools) searchSemantic(ctx context.Context, req *sdkmcp.CallToolRequest, in semanticIn) (*sdkmcp.CallToolResult, []chunkDTO, error) {
+func (h *tools) search(ctx context.Context, req *sdkmcp.CallToolRequest, in semanticIn) (*sdkmcp.CallToolResult, hitList, error) {
 	start := time.Now()
+	if strings.TrimSpace(in.Query) == "" {
+		h.record("search", in, start, nil, 0)
+		return nil, hitList{}, fmt.Errorf("query is required")
+	}
 	if in.Workspace == "" {
 		ws, asked, err := workspaceChoice(req)
 		if err != nil {
-			h.record("search_semantic", in, start, nil, 0)
-			return nil, nil, err
+			h.record("search", in, start, nil, 0)
+			return nil, hitList{}, err
 		}
 		if asked {
 			names, err := h.store.WorkspacesForName(ctx, in.Query)
 			if err != nil {
-				h.record("search_semantic", in, start, nil, 0)
-				return nil, nil, err
+				h.record("search", in, start, nil, 0)
+				return nil, hitList{}, err
 			}
 			if !containsString(names, ws) {
-				h.record("search_semantic", in, start, nil, 0)
-				return nil, nil, fmt.Errorf("workspace %q is not in the index", ws)
+				h.record("search", in, start, nil, 0)
+				return nil, hitList{}, fmt.Errorf("workspace %q is not in the index", ws)
 			}
-			return h.finishSemantic(ctx, in, ws, start)
+			return h.finishSearch(ctx, in, ws, start)
 		}
 		if componentName.MatchString(in.Query) {
 			names, err := h.store.WorkspacesForName(ctx, in.Query)
 			if err != nil {
-				h.record("search_semantic", in, start, nil, 0)
-				return nil, nil, err
+				h.record("search", in, start, nil, 0)
+				return nil, hitList{}, err
 			}
 			if len(names) >= 2 {
 				return &sdkmcp.CallToolResult{
@@ -213,29 +255,45 @@ func (h *tools) searchSemantic(ctx context.Context, req *sdkmcp.CallToolRequest,
 							},
 						},
 					},
-				}, nil, nil
+				}, hitList{}, nil
 			}
 		}
 	}
-	return h.finishSemantic(ctx, in, h.scope(in.Workspace), start)
+	return h.finishSearch(ctx, in, h.scope(in.Workspace), start)
 }
 
-func (h *tools) finishSemantic(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, []chunkDTO, error) {
+func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
 	vec, err := h.emb.Embed(ctx, in.Query)
 	if err != nil {
-		h.record("search_semantic", in, start, nil, 0)
-		return nil, nil, err
+		h.record("search", in, start, nil, 0)
+		return nil, hitList{}, err
 	}
-	chunks, err := h.store.SearchSemantic(ctx, vec, clampLimit(in.Limit), workspace)
+	pool := candidatePool(in.Limit)
+	semantic, err := h.store.SearchSemantic(ctx, vec, pool, workspace)
 	if err != nil {
-		h.record("search_semantic", in, start, nil, 0)
-		return nil, nil, err
+		h.record("search", in, start, nil, 0)
+		return nil, hitList{}, err
 	}
-	dtos, err := fit(chunks, h.maxTokens)
+	keyword, err := h.store.SearchKeyword(ctx, in.Query, pool, workspace)
+	if err != nil {
+		h.logger.Warn("search keyword", "err", err)
+		keyword = nil
+	}
+	fused := fuseChunks(semantic, keyword)
+	limit := clampLimit(in.Limit)
+	if len(fused) > limit {
+		fused = fused[:limit]
+	}
+	budget, text := h.fitBudget(chunkQuery(fused))
+	hits, err := fitHits(fused, budget)
 	logged := in
 	logged.Workspace = workspace
-	h.record("search_semantic", logged, start, dtos, len(dtos))
-	return nil, dtos, err
+	h.record("search", logged, start, hits, len(hits))
+	out := hitList{Rules: text, Hits: hits}
+	if out.Hits == nil {
+		out.Hits = []hitDTO{}
+	}
+	return contentWithRules(text, out), out, err
 }
 
 func workspaceChoice(req *sdkmcp.CallToolRequest) (string, bool, error) {
@@ -266,16 +324,21 @@ func containsString(list []string, want string) bool {
 	return false
 }
 
-func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in keywordIn) (*sdkmcp.CallToolResult, []chunkDTO, error) {
+func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in keywordIn) (*sdkmcp.CallToolResult, hitList, error) {
 	start := time.Now()
 	chunks, err := h.store.SearchKeyword(ctx, in.Keyword, keywordLimit, h.scope(in.Workspace))
 	if err != nil {
 		h.record("search_keyword", in, start, nil, 0)
-		return nil, nil, err
+		return nil, hitList{}, err
 	}
-	dtos, err := fit(chunks, h.maxTokens)
-	h.record("search_keyword", in, start, dtos, len(dtos))
-	return nil, dtos, err
+	budget, text := h.fitBudget(chunkQuery(chunks))
+	hits, err := fitHits(chunks, budget)
+	h.record("search_keyword", in, start, hits, len(hits))
+	out := hitList{Rules: text, Hits: hits}
+	if out.Hits == nil {
+		out.Hits = []hitDTO{}
+	}
+	return contentWithRules(text, out), out, err
 }
 
 func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in nameIn) (*sdkmcp.CallToolResult, chunkDTO, error) {
@@ -289,27 +352,40 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in nam
 		return nil, chunkDTO{}, err
 	}
 	dto := toDTO([]parser.Chunk{*chunk})[0]
+	text := h.rulesText(chunkQuery([]parser.Chunk{*chunk}))
 	h.record("get_component_ast", in, start, dto, 1)
-	return nil, dto, nil
+	dto.Rules = text
+	return contentWithRules(text, dto), dto, nil
 }
 
-func (h *tools) references(ctx context.Context, _ *sdkmcp.CallToolRequest, in nameIn) (*sdkmcp.CallToolResult, []chunkDTO, error) {
+func (h *tools) references(ctx context.Context, _ *sdkmcp.CallToolRequest, in nameIn) (*sdkmcp.CallToolResult, chunkList, error) {
 	start := time.Now()
 	chunks, err := h.store.GetReferences(ctx, in.Name)
 	if err != nil {
 		h.record("get_references", in, start, nil, 0)
-		return nil, nil, err
+		return nil, chunkList{}, err
 	}
-	dtos, err := fit(chunks, h.maxTokens)
+	budget, text := h.fitBudget(chunkQuery(chunks))
+	dtos, err := fit(chunks, budget)
 	h.record("get_references", in, start, dtos, len(dtos))
-	return nil, dtos, err
+	if dtos == nil {
+		dtos = []chunkDTO{}
+	}
+	out := chunkList{Rules: text, Chunks: dtos}
+	return contentWithRules(text, out), out, err
 }
 
 func (h *tools) readFile(_ context.Context, _ *sdkmcp.CallToolRequest, in pathIn) (*sdkmcp.CallToolResult, fileOut, error) {
 	start := time.Now()
 	out, err := h.readFileBody(in)
+	if err != nil {
+		h.record("read_file_raw", in, start, nil, 0)
+		return nil, fileOut{}, err
+	}
+	text := h.rulesText(rules.Query{Targets: []rules.Target{{Path: requestPath(h.root, in.Path)}}})
 	h.record("read_file_raw", in, start, out, 0)
-	return nil, out, err
+	out.Rules = text
+	return contentWithRules(text, out), out, nil
 }
 
 func rejectSensitive(root, full string) error {
@@ -364,11 +440,24 @@ func (h *tools) readFileBody(in pathIn) (fileOut, error) {
 	return fileOut{Path: in.Path, Content: string(body)}, nil
 }
 
-func (h *tools) listDir(_ context.Context, _ *sdkmcp.CallToolRequest, in pathIn) (*sdkmcp.CallToolResult, []dirEntry, error) {
+func (h *tools) listDir(_ context.Context, _ *sdkmcp.CallToolRequest, in pathIn) (*sdkmcp.CallToolResult, dirList, error) {
 	start := time.Now()
-	out, err := h.listDirBody(in)
-	h.record("list_directory", in, start, out, 0)
-	return nil, out, err
+	entries, err := h.listDirBody(in)
+	if err != nil {
+		h.record("list_directory", in, start, nil, 0)
+		return nil, dirList{}, err
+	}
+	path := in.Path
+	if path == "" {
+		path = "."
+	}
+	text := h.rulesText(rules.Query{Targets: []rules.Target{{Path: requestPath(h.root, path)}}})
+	h.record("list_directory", in, start, entries, 0)
+	if entries == nil {
+		entries = []dirEntry{}
+	}
+	out := dirList{Rules: text, Entries: entries}
+	return contentWithRules(text, out), out, nil
 }
 
 func (h *tools) listDirBody(in pathIn) ([]dirEntry, error) {
@@ -410,18 +499,63 @@ func (h *tools) projectRules(context.Context, *sdkmcp.CallToolRequest, emptyIn) 
 }
 
 func (h *tools) projectRulesBody() (rulesOut, error) {
-	var b strings.Builder
-	for i, path := range h.rules {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return rulesOut{}, fmt.Errorf("rule %s: %w", path, err)
-		}
-		if i > 0 {
-			b.WriteString("\n\n")
-		}
-		fmt.Fprintf(&b, "# %s\n\n%s", path, string(body))
+	if h.engine == nil {
+		return rulesOut{}, nil
 	}
-	return rulesOut{Rules: b.String()}, nil
+	if err := h.engine.ReadError(); err != nil {
+		return rulesOut{}, err
+	}
+	return rulesOut{Rules: h.engine.Inject(rules.Query{}, h.maxTokens)}, nil
+}
+
+func (h *tools) rulesText(q rules.Query) string {
+	if h.engine == nil {
+		return ""
+	}
+	return h.engine.Inject(q, h.maxTokens)
+}
+
+func (h *tools) fitBudget(q rules.Query) (int, string) {
+	text := h.rulesText(q)
+	if text == "" {
+		return h.maxTokens, ""
+	}
+	n, err := tokens.Count(text)
+	if err != nil || n <= 0 {
+		return h.maxTokens, text
+	}
+	if n >= h.maxTokens {
+		return 1, text
+	}
+	return h.maxTokens - n, text
+}
+
+func chunkQuery(chunks []parser.Chunk) rules.Query {
+	q := rules.Query{Targets: make([]rules.Target, 0, len(chunks))}
+	for _, chunk := range chunks {
+		q.Targets = append(q.Targets, rules.Target{Path: chunk.FilePath, Type: chunk.Type})
+	}
+	return q
+}
+
+func requestPath(root, p string) string {
+	if filepath.IsAbs(p) {
+		if rel, err := filepath.Rel(root, p); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(p)
+}
+
+func contentWithRules(text string, out any) *sdkmcp.CallToolResult {
+	if text == "" {
+		return nil
+	}
+	raw, err := json.Marshal(out)
+	if err != nil || len(raw) == 0 || raw[0] != '{' {
+		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}}}
+	}
+	return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text + "\n" + string(raw)}}}
 }
 
 func (h *tools) scope(arg string) string {
@@ -434,11 +568,16 @@ func (h *tools) scope(arg string) string {
 	return arg
 }
 
+func truncationText(omitted int) string {
+	return fmt.Sprintf("// [Truncated: %d matches omitted due to context limits.]", omitted)
+}
+
 func truncation(omitted int) parser.Chunk {
-	return parser.Chunk{
-		Type:    "diagnostic",
-		Content: fmt.Sprintf("// [Truncated: %d matches omitted due to context limits. Use search_keyword to refine.]", omitted),
-	}
+	return parser.Chunk{Type: "diagnostic", Content: truncationText(omitted)}
+}
+
+func diagnosticHit(omitted int) hitDTO {
+	return hitDTO{Lines: truncationText(omitted)}
 }
 
 func fit(chunks []parser.Chunk, maxTokens int) ([]chunkDTO, error) {
@@ -561,6 +700,130 @@ func clampLimit(n int) int {
 		return maxSemLimit
 	}
 	return n
+}
+
+func candidatePool(limit int) int {
+	n := clampLimit(limit)
+	if n < keywordLimit {
+		return keywordLimit
+	}
+	return n
+}
+
+func fitHits(chunks []parser.Chunk, maxTokens int) ([]hitDTO, error) {
+	var kept []parser.Chunk
+	for _, ch := range chunks {
+		trial := append(append([]parser.Chunk{}, kept...), ch)
+		omitted := len(chunks) - len(trial)
+		payload := toHits(trial)
+		if omitted > 0 {
+			payload = append(payload, diagnosticHit(omitted))
+		}
+		n, err := tokens.Count(mustJSON(payload))
+		if err != nil {
+			return nil, err
+		}
+		if n > maxTokens {
+			break
+		}
+		kept = trial
+	}
+	omitted := len(chunks) - len(kept)
+	if omitted == 0 {
+		return toHits(kept), nil
+	}
+	only := []hitDTO{diagnosticHit(len(chunks))}
+	if len(kept) == 0 {
+		return only, nil
+	}
+	return append(toHits(kept), diagnosticHit(omitted)), nil
+}
+
+func toHits(chunks []parser.Chunk) []hitDTO {
+	out := make([]hitDTO, 0, len(chunks))
+	for _, chunk := range chunks {
+		out = append(out, toHit(chunk))
+	}
+	return out
+}
+
+func toHit(chunk parser.Chunk) hitDTO {
+	hit := hitDTO{FilePath: chunk.FilePath, Lines: chunk.Content}
+	if chunk.Metadata == nil {
+		return hit
+	}
+	hit.Symbol = chunk.Metadata["name"]
+	if r := chunk.Metadata["receiver"]; r != "" {
+		hit.Receiver = r
+	}
+	hit.StartLine = lineNum(chunk.Metadata["start_line"])
+	hit.EndLine = lineNum(chunk.Metadata["end_line"])
+	return hit
+}
+
+func lineNum(raw string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
+}
+
+func fuseChunks(lists ...[]parser.Chunk) []parser.Chunk {
+	const k = 60
+	type acc struct {
+		chunk parser.Chunk
+		score float64
+	}
+	order := []string{}
+	by := map[string]*acc{}
+	for _, list := range lists {
+		seen := map[string]bool{}
+		rank := 0
+		for _, ch := range list {
+			key := chunkKey(ch)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			rank++
+			item := by[key]
+			if item == nil {
+				item = &acc{chunk: ch}
+				by[key] = item
+				order = append(order, key)
+			}
+			item.score += 1 / float64(k+rank)
+		}
+	}
+	out := make([]parser.Chunk, 0, len(order))
+	for _, key := range order {
+		out = append(out, by[key].chunk)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		si := by[chunkKey(out[i])].score
+		sj := by[chunkKey(out[j])].score
+		if si != sj {
+			return si > sj
+		}
+		if out[i].FilePath != out[j].FilePath {
+			return out[i].FilePath < out[j].FilePath
+		}
+		return out[i].Content < out[j].Content
+	})
+	return out
+}
+
+func chunkKey(c parser.Chunk) string {
+	meta, err := json.Marshal(c.Metadata)
+	if err != nil {
+		meta = []byte("null")
+	}
+	out, err := json.Marshal(c.Outbound)
+	if err != nil {
+		out = []byte("null")
+	}
+	return c.FilePath + "\x00" + c.Type + "\x00" + c.Content + "\x00" + string(meta) + "\x00" + string(out)
 }
 
 func logLevel(name string) slog.Level {

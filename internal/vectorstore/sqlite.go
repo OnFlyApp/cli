@@ -121,7 +121,6 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 	}
 	stmts := []string{
 		`CREATE INDEX IF NOT EXISTS idx_chunk_meta_file ON chunk_meta(file_path)`,
-		fmt.Sprintf(`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vecs USING vec0(embedding float[%d])`, dimensions),
 		`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
 			content, file_path, content='chunk_meta', content_rowid='rowid'
 		)`,
@@ -145,6 +144,9 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 		if _, err := s.db.ExecContext(ctx, `INSERT INTO chunk_fts(chunk_fts) VALUES('rebuild')`); err != nil {
 			return err
 		}
+	}
+	if err := s.ensureCosine(ctx, dimensions); err != nil {
+		return err
 	}
 	if width, ok, err := vecWidth(ctx, s.db); err != nil {
 		return err
@@ -176,6 +178,48 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 	}
 	s.dimensions = dimensions
 	return nil
+}
+
+func cosineVecSQL(dimensions int) string {
+	return fmt.Sprintf(`CREATE VIRTUAL TABLE chunk_vecs USING vec0(embedding float[%d] distance_metric=cosine)`, dimensions)
+}
+
+// ensureCosine creates chunk_vecs with cosine distance. An existing L2 vec0
+// table is rebuilt in place: rowid and embedding are copied, and schema_meta
+// is left unchanged.
+func (s *SQLite) ensureCosine(ctx context.Context, dimensions int) error {
+	var create string
+	err := s.db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE name = 'chunk_vecs'`).Scan(&create)
+	if errors.Is(err, sql.ErrNoRows) {
+		_, err = s.db.ExecContext(ctx, cosineVecSQL(dimensions))
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if strings.Contains(strings.ToLower(create), "distance_metric=cosine") {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, `DROP TABLE IF EXISTS chunk_vecs_l2_copy`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE chunk_vecs_l2_copy(rowid INTEGER PRIMARY KEY, embedding TEXT NOT NULL)`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chunk_vecs_l2_copy(rowid, embedding) SELECT rowid, vec_to_json(embedding) FROM chunk_vecs`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `DROP TABLE chunk_vecs`); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, cosineVecSQL(dimensions)); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO chunk_vecs(rowid, embedding) SELECT rowid, embedding FROM chunk_vecs_l2_copy`); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `DROP TABLE chunk_vecs_l2_copy`)
+	return err
 }
 
 func (s *SQLite) migrateV1(ctx context.Context) error {
@@ -499,22 +543,62 @@ func (s *SQLite) SearchKeyword(ctx context.Context, keyword string, limit int, w
 }
 
 func (s *SQLite) GetComponentAST(ctx context.Context, name string) (*parser.Chunk, error) {
-	var filePath, typ, content, meta, outbound string
-	err := s.db.QueryRowContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT file_path, type, content, metadata, outbound FROM chunk_meta
 		WHERE json_extract(metadata, '$.name') = ?
-		ORDER BY rowid LIMIT 1`, name).Scan(&filePath, &typ, &content, &meta, &outbound)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
+		ORDER BY rowid`, name)
 	if err != nil {
 		return nil, err
 	}
-	ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+	chunks, err := scanChunks(rows)
 	if err != nil {
 		return nil, err
 	}
-	return &ch, nil
+	return assembleComponent(chunks)
+}
+
+func (s *SQLite) ListChunks(ctx context.Context) ([]StoredChunk, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT rowid, file_path, type, content, metadata, outbound FROM chunk_meta
+		ORDER BY rowid`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StoredChunk
+	for rows.Next() {
+		var id int64
+		var filePath, typ, content, meta, outbound string
+		if err := rows.Scan(&id, &filePath, &typ, &content, &meta, &outbound); err != nil {
+			return nil, err
+		}
+		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, StoredChunk{ID: id, Chunk: ch})
+	}
+	return out, rows.Err()
+}
+
+func (s *SQLite) UpdateOutbound(ctx context.Context, outbound map[int64][]string) error {
+	if len(outbound) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for id, refs := range outbound {
+		if _, err := tx.ExecContext(ctx, `UPDATE chunk_meta SET outbound = ? WHERE rowid = ?`, outboundJSON(refs), id); err != nil {
+			return err
+		}
+	}
+	if err := bumpSQLite(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *SQLite) GetReferences(ctx context.Context, name string) ([]parser.Chunk, error) {

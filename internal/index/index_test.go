@@ -11,8 +11,59 @@ import (
 	"testing"
 
 	"github.com/axitdev/onfly/internal/config"
+	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
+
+func TestFillChunkLines(t *testing.T) {
+	file := []byte("package p\n\n\nfunc getUserId() {}\n\nfunc getUserId() {}\n")
+	chunks := []parser.Chunk{
+		{Content: "func getUserId() {}", Metadata: map[string]string{"name": "getUserId"}},
+		{Content: "not in file", Metadata: map[string]string{}},
+		{Content: "func getUserId() {}", Metadata: map[string]string{"start_line": "9", "end_line": "11"}},
+	}
+	fillChunkLines(file, chunks)
+	if chunks[0].Metadata["start_line"] != "4" || chunks[0].Metadata["end_line"] != "4" {
+		t.Fatalf("%v", chunks[0].Metadata)
+	}
+	if _, ok := chunks[1].Metadata["start_line"]; ok {
+		t.Fatalf("%v", chunks[1].Metadata)
+	}
+	if chunks[2].Metadata["start_line"] != "9" || chunks[2].Metadata["end_line"] != "11" {
+		t.Fatalf("%v", chunks[2].Metadata)
+	}
+}
+
+func TestIndexStoresStartLine(t *testing.T) {
+	srv := fakeOllama(t)
+	defer srv.Close()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "chunk.sh")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '[{\"type\":\"function\",\"content\":\"func getUserId() {}\",\"metadata\":{\"name\":\"getUserId\"}}]'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, dir, srv.URL, script)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "user.go"), []byte("package p\n\n\nfunc getUserId() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustLoad(t, dir)
+	if _, err := Run(context.Background(), cfg, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	store := openStore(t, cfg)
+	defer store.Close()
+	got, err := store.GetComponentAST(context.Background(), "getUserId")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Metadata["start_line"] != "4" || got.Metadata["end_line"] != "4" || got.Content != "func getUserId() {}" {
+		t.Fatalf("%+v", got)
+	}
+}
 
 func TestSpecGlobs(t *testing.T) {
 	ok, err := matchAny("src/User.go", []string{"src/**/*"})

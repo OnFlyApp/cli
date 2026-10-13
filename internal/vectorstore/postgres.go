@@ -392,24 +392,64 @@ func (p *Postgres) SearchKeyword(ctx context.Context, keyword string, limit int,
 }
 
 func (p *Postgres) GetComponentAST(ctx context.Context, name string) (*parser.Chunk, error) {
-	var filePath, typ, content, meta, outbound string
-	err := p.pool.QueryRow(ctx, `
+	rows, err := p.pool.Query(ctx, `
 		SELECT file_path, type, content, metadata::text, outbound::text
 		FROM chunks
 		WHERE metadata->>'name' = $1
-		ORDER BY id
-		LIMIT 1`, name).Scan(&filePath, &typ, &content, &meta, &outbound)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrNotFound
-	}
+		ORDER BY id`, name)
 	if err != nil {
 		return nil, err
 	}
-	ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+	chunks, err := collect(rows)
 	if err != nil {
 		return nil, err
 	}
-	return &ch, nil
+	return assembleComponent(chunks)
+}
+
+func (p *Postgres) ListChunks(ctx context.Context) ([]StoredChunk, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, file_path, type, content, metadata::text, outbound::text
+		FROM chunks
+		ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StoredChunk
+	for rows.Next() {
+		var id int64
+		var filePath, typ, content, meta, outbound string
+		if err := rows.Scan(&id, &filePath, &typ, &content, &meta, &outbound); err != nil {
+			return nil, err
+		}
+		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, StoredChunk{ID: id, Chunk: ch})
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) UpdateOutbound(ctx context.Context, outbound map[int64][]string) error {
+	if len(outbound) == 0 {
+		return nil
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	for id, refs := range outbound {
+		if _, err := tx.Exec(ctx, `UPDATE chunks SET outbound = $1::jsonb WHERE id = $2`, outboundJSON(refs), id); err != nil {
+			return err
+		}
+	}
+	if err := bumpPostgres(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) GetReferences(ctx context.Context, name string) ([]parser.Chunk, error) {

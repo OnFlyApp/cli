@@ -2,9 +2,9 @@
 
 Onfly indexes a codebase and serves that index to an IDE over the Model Context Protocol (MCP) on stdin and stdout.
 
-Parsers are separate programs. A WASM module or a shell command reads one source file and returns JSON chunks. Onfly embeds those chunks and stores them in SQLite (`sqlite-vec` and FTS5) or Postgres (`pgvector`). `onfly serve` answers search and file tools. It does not write logs to stdout.
+Parsers are separate programs. A WASM module or a shell command reads one source file and returns JSON chunks. Onfly embeds those chunks and stores them in SQLite (`sqlite-vec` and FTS5) or Postgres (`pgvector`). `onfly serve` answers search and file tools, and attaches project rules from `.onfly/rules/` to those results. It does not write logs to stdout.
 
-Operator guides are under [docs/](docs/). Source: <https://github.com/OnFlyApp/cli>.
+The design notes are in [specs/01_system_design_document.md](specs/01_system_design_document.md). Operator guides are under [docs/](docs/).
 
 ## Requirements
 
@@ -67,6 +67,18 @@ embedder:
 rules:
   - .onfly/rules/architecture.md
 
+rules_engine:
+  max_token_budget_percent: 15
+  auto_discovery:
+    enabled: true
+    fallback_order:
+      - .cursorrules
+      - AGENTS.md
+      - CLAUDE.md
+      - AGENT.md
+      - .clinerules
+      - .github/copilot-instructions.md
+
 indexer:
   include: ["**/*.go"]
   exclude: ["vendor"]
@@ -96,7 +108,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 
 | Command | What it does |
 | --- | --- |
-| `onfly init` | Create `.onfly/`, a sample config, and three rule files. |
+| `onfly init` | Create `.onfly/`, a sample config with `rules_engine`, and three rule files. |
 | `onfly init --force` | Overwrite that config and those rule files. |
 | `onfly init --ci` | Also write `.github/workflows/onfly-index.yml`. An existing config is left in place. `--force` overwrites the workflow. |
 | `onfly index` | Parse matching files, embed the chunks, and update the database. |
@@ -105,7 +117,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly watch` | Reindex changed files after `indexer.debounce_ms`. |
 | `onfly serve` | Serve the MCP tools on stdio. |
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
-| `onfly doctor` | Check config, the database, the embedder, and parser files. |
+| `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |
 | `onfly ext install go` | Download the published Go parser, check SHA-256, and add it to the config. |
 | `onfly ext install go@1.0.0` | Install that published version. |
@@ -116,6 +128,30 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `--config path` | Use this config file instead of walking parent directories. |
 
 `onfly ext` reads `https://raw.githubusercontent.com/OnFlyApp/registry/main/registry.json`, or the URL in `ONFLY_REGISTRY_URL`. A downloaded file is kept only when its SHA-256 matches the registry. A mismatch deletes the temp file and leaves the project unchanged. Installed plugins are recorded in `.onfly/plugins/installed.json`. `onfly ext list` waits at most three seconds for the registry, then prints the table. A failed fetch adds a `registry:` line.
+
+## Rules
+
+`onfly init` includes `**/*.go`, `src/**/*`, `cmd/**/*`, `internal/**/*`, `pkg/**/*`, `assets/**/*`, and `docs/**/*.md`. `parsers` stays empty until `onfly ext install`.
+
+`onfly init` writes `.onfly/rules/backend_style.md`, `frontend_style.md`, and `architecture.md`. A rule file can start with YAML frontmatter:
+
+```markdown
+---
+name: Database Safety Rules
+scope: ["**/*.go", "interface"]
+ignore: ["**/*_test.go"]
+priority: 100
+---
+Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers }}.
+```
+
+`scope` takes a doublestar glob, a language name (`go`, `php`, `rust`, `typescript`, `javascript`, `python`, `ruby`, `java`), or a chunk type such as `interface`. `*` applies to every MCP call. A file with no frontmatter does too. Higher `priority` is sent first. `ignore` uses the same glob syntax.
+
+`{{ .Project.Name }}` comes from `go.mod`, then `composer.json`, then `package.json`, then the `project` field. `{{ .Env.OS }}` and `{{ .Env.Arch }}` are the host system. `{{ .ActiveParsers }}` is a JSON list of languages taken from the configured parser extensions.
+
+Injected rules use at most `rules_engine.max_token_budget_percent` (default 15) of `server.max_tokens`. Lower-priority rules are dropped. `onfly doctor` fails when frontmatter or a template cannot be read. When the rules are larger than that budget it prints `rules: [WARNING]` and exits 0 if the other checks passed.
+
+With no file in `.onfly/rules/` and an empty `rules` list, serve reads the first existing path in `auto_discovery.fallback_order`. The default order starts `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, `AGENT.md`. Set `auto_discovery.enabled` to false to skip those files. Global rules are in the server instructions. Matching rules are also a `rules` field on the tool result. The field list is in [docs/configuration.md](docs/configuration.md).
 
 ## Guides
 

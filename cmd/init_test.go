@@ -27,6 +27,12 @@ func TestInitWritesSpecConfig(t *testing.T) {
 	if cfg.Database.Driver != "sqlite" {
 		t.Fatalf("%+v", cfg)
 	}
+	joined := strings.Join(cfg.Indexer.Include, " ")
+	for _, pattern := range []string{"**/*.go", "cmd/**/*", "internal/**/*", "pkg/**/*"} {
+		if !strings.Contains(joined, pattern) {
+			t.Fatalf("include %v", cfg.Indexer.Include)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(dir, ".onfly", "plugins")); err != nil {
 		t.Fatal(err)
 	}

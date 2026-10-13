@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/axitdev/onfly/internal/config"
@@ -201,6 +202,9 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 	if err := s.prune(ctx, protected, &stats); err != nil {
 		return stats, err
 	}
+	if err := s.linkRefs(ctx); err != nil {
+		return stats, err
+	}
 	if stats.Failed > 0 {
 		if first == nil {
 			first = fmt.Errorf("index failed")
@@ -226,14 +230,28 @@ func (s *Session) Sync(ctx context.Context, rel string) (FileResult, error) {
 	if err != nil {
 		return FileResult{}, err
 	}
-	return s.indexFile(ctx, rel, hashes[rel])
+	result, err := s.indexFile(ctx, rel, hashes[rel])
+	if err != nil || result.Failed || result.Skipped {
+		return result, err
+	}
+	if err := s.linkRefs(ctx); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *Session) deletePaths(ctx context.Context, paths []string) error {
+	if s.store == nil || len(paths) == 0 {
+		return nil
+	}
+	return s.store.DeleteFiles(ctx, paths)
 }
 
 func (s *Session) Drop(ctx context.Context, rel string) error {
-	if s.store == nil {
-		return nil
+	if err := s.deletePaths(ctx, []string{slash(rel)}); err != nil {
+		return err
 	}
-	return s.store.DeleteFiles(ctx, []string{slash(rel)})
+	return s.linkRefs(ctx)
 }
 
 func (s *Session) DropAbsent(ctx context.Context) error {
@@ -268,7 +286,10 @@ func (s *Session) DropAbsent(ctx context.Context) error {
 			drop = append(drop, path)
 		}
 	}
-	return s.store.DeleteFiles(ctx, drop)
+	if err := s.deletePaths(ctx, drop); err != nil {
+		return err
+	}
+	return s.linkRefs(ctx)
 }
 
 func (s *Session) eligible(rel string) bool {
@@ -323,7 +344,10 @@ func (s *Session) DropTree(ctx context.Context, rel string) error {
 			drop = append(drop, path)
 		}
 	}
-	return s.store.DeleteFiles(ctx, drop)
+	if err := s.deletePaths(ctx, drop); err != nil {
+		return err
+	}
+	return s.linkRefs(ctx)
 }
 
 func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResult, error) {
@@ -333,7 +357,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	if lerr != nil {
 		if os.IsNotExist(lerr) {
 			if !s.opt.DryRun {
-				if err := s.Drop(ctx, rel); err != nil {
+				if err := s.deletePaths(ctx, []string{rel}); err != nil {
 					return FileResult{}, err
 				}
 			}
@@ -346,7 +370,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		target, err := filepath.EvalSymlinks(full)
 		if err != nil || !withinRoot(s.cfg.ProjectRoot, target) || !linkTargetOK(s.cfg.ProjectRoot, target, s.ign, s.cfg.Indexer.Exclude) {
 			if !s.opt.DryRun {
-				if err := s.Drop(ctx, rel); err != nil {
+				if err := s.deletePaths(ctx, []string{rel}); err != nil {
 					return FileResult{}, err
 				}
 			}
@@ -360,7 +384,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	}
 	if !info.Mode().IsRegular() {
 		if !s.opt.DryRun {
-			if err := s.Drop(ctx, rel); err != nil {
+			if err := s.deletePaths(ctx, []string{rel}); err != nil {
 				return FileResult{}, err
 			}
 		}
@@ -369,7 +393,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	if info.Size() > maxFileBytes {
 		s.logger.Warn("skip large file", "path", rel, "size", info.Size())
 		if !s.opt.DryRun {
-			if err := s.Drop(ctx, rel); err != nil {
+			if err := s.deletePaths(ctx, []string{rel}); err != nil {
 				return FileResult{}, err
 			}
 		}
@@ -397,6 +421,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 			chunks[i].Metadata = map[string]string{}
 		}
 	}
+	fillChunkLines(body, chunks)
 	if s.opt.DryRun {
 		n := 0
 		for _, chunk := range chunks {
@@ -422,6 +447,34 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		return FileResult{}, fmt.Errorf("save %s: %w", rel, err)
 	}
 	return FileResult{Chunks: len(chunks)}, nil
+}
+
+// fillChunkLines sets start_line and end_line when the parser left both empty.
+// The line is 1 plus the newlines before the first match of the chunk text.
+// The end line adds the newlines inside that text. A missing match leaves both unset.
+func fillChunkLines(file []byte, chunks []parser.Chunk) {
+	text := string(file)
+	for i := range chunks {
+		meta := chunks[i].Metadata
+		if meta == nil {
+			meta = map[string]string{}
+			chunks[i].Metadata = meta
+		}
+		if strings.TrimSpace(meta["start_line"]) != "" || strings.TrimSpace(meta["end_line"]) != "" {
+			continue
+		}
+		content := chunks[i].Content
+		if content == "" {
+			continue
+		}
+		idx := strings.Index(text, content)
+		if idx < 0 {
+			continue
+		}
+		start := 1 + strings.Count(text[:idx], "\n")
+		meta["start_line"] = strconv.Itoa(start)
+		meta["end_line"] = strconv.Itoa(start + strings.Count(content, "\n"))
+	}
 }
 
 func (s *Session) prune(ctx context.Context, protected map[string]struct{}, stats *Stats) error {

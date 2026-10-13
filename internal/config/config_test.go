@@ -323,3 +323,59 @@ server: {transport: http, log_file: .onfly/server.log}
 		})
 	}
 }
+
+func TestRulesEngineDefaultsAndMerge(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig(t, root, validYAML())
+	cfg, err := Load(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RulesEngine.MaxTokenBudgetPercent != 15 || cfg.RulesEngine.AutoDiscovery.Enabled != nil {
+		t.Fatalf("defaults %+v", cfg.RulesEngine)
+	}
+	order := cfg.RulesEngine.AutoDiscovery.FallbackOrder
+	if len(order) != 6 || order[0] != ".cursorrules" || order[1] != "AGENTS.md" || order[2] != "CLAUDE.md" || order[3] != "AGENT.md" {
+		t.Fatalf("fallback %v", order)
+	}
+
+	sub := filepath.Join(root, "svc")
+	writeConfig(t, sub, `
+rules_engine:
+  max_token_budget_percent: 30
+  auto_discovery:
+    enabled: false
+    fallback_order: ["AGENTS.md"]
+indexer:
+  include: ["**/*"]
+`)
+	cfg, err = Load(sub, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RulesEngine.MaxTokenBudgetPercent != 30 {
+		t.Fatalf("percent %d", cfg.RulesEngine.MaxTokenBudgetPercent)
+	}
+	if cfg.RulesEngine.AutoDiscovery.Enabled == nil || *cfg.RulesEngine.AutoDiscovery.Enabled {
+		t.Fatalf("enabled %+v", cfg.RulesEngine.AutoDiscovery.Enabled)
+	}
+	if len(cfg.RulesEngine.AutoDiscovery.FallbackOrder) != 1 || cfg.RulesEngine.AutoDiscovery.FallbackOrder[0] != "AGENTS.md" {
+		t.Fatalf("order %v", cfg.RulesEngine.AutoDiscovery.FallbackOrder)
+	}
+
+	bad := t.TempDir()
+	writeConfig(t, bad, `
+database: {driver: sqlite, dsn: .onfly/vector.db}
+embedder: {provider: ollama, model: m, dimensions: 4}
+indexer: {include: ["src/**/*"]}
+server: {transport: stdio, log_file: .onfly/server.log}
+rules_engine:
+  max_token_budget_percent: 150
+`)
+	if _, err := Load(bad, ""); err == nil {
+		t.Fatal("expected percent error")
+	}
+}

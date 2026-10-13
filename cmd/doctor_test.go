@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,6 +96,49 @@ func touchSQLite(t *testing.T, path string) {
 	defer db.Close()
 	var one int
 	if err := db.QueryRow("SELECT 1").Scan(&one); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDoctorRulesWarningAndSyntax(t *testing.T) {
+	dir := t.TempDir()
+	writeRulesConfig(t, dir, 1)
+	writeMD(t, dir, "one.md", "---\nname: One\nscope: [\"*\"]\npriority: 2\n---\n"+strings.Repeat("alpha ", 80))
+	writeMD(t, dir, "two.md", "---\nname: Two\nscope: [\"*\"]\npriority: 1\n---\n"+strings.Repeat("beta ", 80))
+	cfg := mustDoctorConfig(t, dir)
+	var buf strings.Builder
+	if err := checkRules(cfg, &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "[WARNING]") || !strings.Contains(buf.String(), "overlapping scopes") {
+		t.Fatalf("%s", buf.String())
+	}
+
+	bad := t.TempDir()
+	writeRulesConfig(t, bad, 15)
+	writeMD(t, bad, "broken.md", "---\nscope: [\n")
+	cfg = mustDoctorConfig(t, bad)
+	buf.Reset()
+	err := checkRules(cfg, &buf)
+	if err == nil || !strings.Contains(buf.String(), "broken.md") {
+		t.Fatalf("%v\n%s", err, buf.String())
+	}
+}
+
+func writeRulesConfig(t *testing.T, dir string, percent int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, ".onfly", "rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := fmt.Sprintf("project: demo\ndatabase:\n  driver: sqlite\n  dsn: .onfly/vector.db\nembedder:\n  provider: ollama\n  endpoint: http://127.0.0.1:1\n  model: fake\n  dimensions: 4\nrules_engine:\n  max_token_budget_percent: %d\nindexer:\n  include: [\"**/*\"]\nserver:\n  transport: stdio\n  log_file: .onfly/server.log\n", percent)
+	if err := os.WriteFile(filepath.Join(dir, ".onfly", "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeMD(t *testing.T, dir, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, ".onfly", "rules", name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

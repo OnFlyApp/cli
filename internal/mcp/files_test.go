@@ -50,7 +50,7 @@ func TestSafePathBlocksEscape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 || entries[0].Name != "leak" || entries[1].Name != "ok.txt" || entries[1].Kind != "file" {
+	if len(entries.Entries) != 2 || entries.Entries[0].Name != "leak" || entries.Entries[1].Name != "ok.txt" || entries.Entries[1].Kind != "file" {
 		t.Fatalf("%+v", entries)
 	}
 }
