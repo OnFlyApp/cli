@@ -4,7 +4,7 @@ Onfly indexes a codebase and serves that index to an IDE over the Model Context 
 
 Parsers are separate programs. A WASM module or a shell command reads one source file and returns JSON chunks. Onfly embeds those chunks and stores them in SQLite (`sqlite-vec` and FTS5) or Postgres (`pgvector`). `onfly serve` answers search and file tools, and attaches project rules from `.onfly/rules/` to those results. It does not write logs to stdout.
 
-The design notes are in [specs/01_system_design_document.md](specs/01_system_design_document.md). Operator guides are under [docs/](docs/).
+Operator guides are under [docs/](docs/).
 
 ## Requirements
 
@@ -122,6 +122,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly ext install go` | Download the published Go parser, check SHA-256, and add it to the config. |
 | `onfly ext install go@1.0.0` | Install that published version. |
 | `onfly ext install ./parser.wasm --extensions=".twig,.html"` | Install a local wasm file without the registry. |
+| `onfly ext install ... --yes` | Replace a parser that already owns one of the extensions, without asking. |
 | `onfly ext update` | Upgrade installed registry parsers. |
 | `onfly ext remove go` | Remove the wasm file and its config entry. |
 | `onfly ext list` | Show name, version, and `active`, `outdated`, or `corrupted`. |

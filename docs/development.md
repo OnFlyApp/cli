@@ -30,7 +30,6 @@ internal/watch/         fsnotify debounce
 internal/vectorstore/   sqlite and postgres, schema version 2
 internal/mcp/           MCP tools, token budget, trace, index resource
 internal/rules/         rule frontmatter, templates, token budget, fallback files
-specs/                  system design documents
 ```
 
 ## Store interface
