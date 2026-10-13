@@ -29,8 +29,9 @@ const (
 )
 
 type Options struct {
-	CI     bool
-	DryRun bool
+	CI       bool
+	DryRun   bool
+	Progress func(Event)
 }
 
 type Stats struct {
@@ -52,14 +53,17 @@ type FileResult struct {
 }
 
 type Session struct {
-	cfg    config.Config
-	logger *slog.Logger
-	opt    Options
-	store  vectorstore.Store
-	emb    embedder.Embedder
-	router *parser.Router
-	ign    *ignore.Set
-	count  func(string) int
+	cfg      config.Config
+	logger   *slog.Logger
+	opt      Options
+	store    vectorstore.Store
+	emb      embedder.Embedder
+	router   *parser.Router
+	ign      *ignore.Set
+	count    func(string) int
+	progress func(Event)
+	n        int
+	total    int
 }
 
 func ContentHash(b []byte) string {
@@ -80,12 +84,14 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	config.ApplyDefaults(&cfg)
+	reportOpt(opt, "loading tokenizer")
 	if _, err := tokens.Count("x"); err != nil {
 		return nil, err
 	}
 	var store vectorstore.Store
 	var emb embedder.Embedder
 	if !opt.DryRun {
+		reportOpt(opt, "opening database")
 		var err error
 		store, err = vectorstore.New(ctx, cfg.Database)
 		if err != nil {
@@ -101,6 +107,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 			return nil, err
 		}
 	}
+	reportOpt(opt, "loading parsers")
 	router, err := parser.NewRouter(cfg.Indexer, cfg.ProjectRoot)
 	if err != nil {
 		if store != nil {
@@ -131,6 +138,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 			}
 			return n
 		},
+		progress: opt.Progress,
 	}, nil
 }
 
@@ -148,6 +156,7 @@ func (s *Session) Close() error {
 }
 
 func (s *Session) Run(ctx context.Context) (Stats, error) {
+	s.report("walking", "")
 	files, err := walk(s.cfg.ProjectRoot, s.cfg.Indexer.Include, s.cfg.Indexer.Exclude, s.ign, s.router.HasParser)
 	if err != nil {
 		return Stats{}, err
@@ -162,10 +171,12 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 	var stats Stats
 	var first error
 	protected := map[string]struct{}{}
-	for _, rel := range files {
+	s.total = len(files)
+	for i, rel := range files {
 		if err := ctx.Err(); err != nil {
 			return stats, err
 		}
+		s.n = i + 1
 		result, err := s.indexFile(ctx, rel, hashes[rel])
 		if err != nil {
 			return stats, err
@@ -199,9 +210,11 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 		}
 		return stats, nil
 	}
+	s.report("pruning", "")
 	if err := s.prune(ctx, protected, &stats); err != nil {
 		return stats, err
 	}
+	s.report("linking references", "")
 	if err := s.linkRefs(ctx); err != nil {
 		return stats, err
 	}
@@ -364,6 +377,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 			return FileResult{Omit: true}, nil
 		}
 		s.logger.Warn("stat", "path", rel, "err", lerr)
+		s.report("failed", rel)
 		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, lerr)}, nil
 	}
 	if lst.Mode()&os.ModeSymlink != 0 {
@@ -380,6 +394,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	info, err := os.Stat(full)
 	if err != nil {
 		s.logger.Warn("stat", "path", rel, "err", err)
+		s.report("failed", rel)
 		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	if !info.Mode().IsRegular() {
@@ -402,15 +417,19 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	body, err := os.ReadFile(full)
 	if err != nil {
 		s.logger.Warn("read", "path", rel, "err", err)
+		s.report("failed", rel)
 		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	hash := ContentHash(body)
 	if oldHash != "" && oldHash == hash {
+		s.report("unchanged", rel)
 		return FileResult{Skipped: true}, nil
 	}
+	s.report("parsing", rel)
 	chunks, err := s.router.Parse(full, body)
 	if err != nil {
 		s.logger.Warn("parse", "path", rel, "err", err)
+		s.report("failed", rel)
 		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	overlap := s.cfg.Embedder.MaxInputTokens * 12 / 100
@@ -435,6 +454,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	}
 	var embedded []vectorstore.EmbeddedChunk
 	if len(chunks) > 0 {
+		s.report("embedding", rel)
 		embedded, err = embedChunks(ctx, s.emb, chunks, batchSize(s.opt))
 		if err != nil {
 			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)

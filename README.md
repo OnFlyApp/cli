@@ -100,7 +100,7 @@ onfly index
 onfly serve
 ```
 
-`onfly index` prints a one-line summary on stderr. It exits 1 if any file failed to parse. An unchanged file is not parsed again. `onfly serve` speaks JSON-RPC on stdout. Logs go to `.onfly/server.log`.
+`onfly index` prints the current step on stderr, then a one-line summary. On a terminal that step stays on one line (`parsing`, `embedding`, `unchanged`, then `pruning` and `linking references`). It exits 1 if any file failed to parse. An unchanged file is not parsed again. `onfly serve` speaks JSON-RPC on stdout. Logs go to `.onfly/server.log`.
 
 Point the IDE at the project directory, or pass `--config` with the absolute path of `config.yaml`. The client config is in [docs/mcp.md](docs/mcp.md).
 

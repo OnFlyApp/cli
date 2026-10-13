@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/axitdev/onfly/internal/index"
@@ -22,8 +21,11 @@ var indexCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-		stats, err := index.Run(cmd.Context(), cfg, logger, index.Options{CI: indexCI, DryRun: indexDryRun})
+		progress := newIndexProgress(os.Stderr)
+		stats, err := index.Run(cmd.Context(), cfg, progress.logger(), index.Options{
+			CI: indexCI, DryRun: indexDryRun, Progress: progress.Event,
+		})
+		progress.Finish()
 		if indexDryRun {
 			usd, known := index.EstimateUSD(cfg.Embedder.Model, stats.Tokens)
 			if !known {

@@ -34,6 +34,52 @@ func TestFillChunkLines(t *testing.T) {
 	}
 }
 
+func TestProgressNamesTheSlowSteps(t *testing.T) {
+	srv := fakeOllama(t)
+	defer srv.Close()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "chunk.sh")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '[{\"type\":\"function\",\"content\":\"func getUserId() {}\",\"metadata\":{\"name\":\"getUserId\"}}]'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, dir, srv.URL, script)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "user.go"), []byte("package p\nfunc getUserId() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustLoad(t, dir)
+	var got []string
+	opt := Options{Progress: func(ev Event) {
+		got = append(got, ev.Action+" "+ev.Path)
+	}}
+	if _, err := Run(context.Background(), cfg, nil, opt); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"loading tokenizer ",
+		"opening database ",
+		"loading parsers ",
+		"walking ",
+		"parsing src/user.go",
+		"embedding src/user.go",
+		"pruning ",
+		"linking references ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s", strings.Join(got, "\n"))
+	}
+	got = nil
+	if _, err := Run(context.Background(), cfg, nil, opt); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, "\n") != "loading tokenizer \nopening database \nloading parsers \nwalking \nunchanged src/user.go\npruning \nlinking references " {
+		t.Fatalf("second run\n%s", strings.Join(got, "\n"))
+	}
+}
+
 func TestIndexStoresStartLine(t *testing.T) {
 	srv := fakeOllama(t)
 	defer srv.Close()

@@ -25,13 +25,19 @@ After a finished walk, stored paths that were not seen and did not fail are dele
 
 Opening the database or a dimension mismatch stops the run.
 
-Stderr gets one summary line:
+Stderr names the current step. On a terminal it stays on one line:
+
+```text
+[######--------------] 12/73 parsing internal/mcp/server.go
+```
+
+The steps are `loading tokenizer`, `opening database`, `loading parsers`, `walking`, then `N/Total` with `parsing`, `embedding`, `unchanged`, or `failed`, then `pruning` and `linking references`. A pipe or a log file gets one line per step and no bar. Per-file warnings are logged there too. The run ends with:
 
 ```text
 indexed 12 files, 40 chunks, skipped 3, pruned 2, failed 1
 ```
 
-Progress and per-file warnings also go to stderr. A normal index leaves stdout empty.
+A normal index leaves stdout empty.
 
 `onfly index --dry-run` walks, ignores, parses, splits, and counts tokens. It does not open the database and does not call the embedder. Stdout is:
 
