@@ -62,6 +62,7 @@ type Session struct {
 	opt      Options
 	store    vectorstore.Store
 	emb      embedder.Embedder
+	chat     embedder.Chat // writes chunk summaries; nil when indexer.summaries is off
 	router   *parser.Router
 	filter   *ignore.Filter
 	count    func(string) int
@@ -95,9 +96,13 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 	}
 	var store vectorstore.Store
 	var emb embedder.Embedder
+	var chat embedder.Chat
 	if !opt.DryRun {
-		reportOpt(opt, "opening database")
 		var err error
+		if chat, err = embedder.NewChat(cfg.Indexer.Summaries); err != nil {
+			return nil, fmt.Errorf("indexer.summaries: %w", err)
+		}
+		reportOpt(opt, "opening database")
 		store, err = vectorstore.New(ctx, cfg.Database)
 		if err != nil {
 			return nil, err
@@ -134,6 +139,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		opt:    opt,
 		store:  store,
 		emb:    emb,
+		chat:   chat,
 		router: router,
 		filter: filter,
 		count: func(s string) int {
@@ -524,6 +530,13 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 			s.logger.Warn("vectors by file", "path", rel, "err", perr)
 			prev = nil
 		}
+		if s.chat != nil {
+			s.report("summarising", rel)
+			if prev == nil {
+				prev = map[string][]float32{}
+			}
+			prev = s.addSummaries(ctx, rel, chunks, prev)
+		}
 		embedded, reused, err = s.embedWithReuse(ctx, chunks, prev)
 		if err != nil {
 			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
@@ -665,17 +678,23 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 // embedText is the text sent to the embedder. With context it leads with the
 // path and symbol, so a query naming a file or function can match the vector.
 func embedText(c parser.Chunk, withContext bool) string {
-	if !withContext {
+	summary := c.Metadata["summary"]
+	if !withContext && summary == "" {
 		return c.Content
 	}
 	var b strings.Builder
-	b.WriteString("path: " + c.FilePath + "\n")
-	if name := c.Metadata["name"]; name != "" {
-		sym := name
-		if r := c.Metadata["receiver"]; r != "" {
-			sym = r + "." + name
+	if withContext {
+		b.WriteString("path: " + c.FilePath + "\n")
+		if name := c.Metadata["name"]; name != "" {
+			sym := name
+			if r := c.Metadata["receiver"]; r != "" {
+				sym = r + "." + name
+			}
+			b.WriteString("symbol: " + sym + "\n")
 		}
-		b.WriteString("symbol: " + sym + "\n")
+	}
+	if summary != "" {
+		b.WriteString("summary: " + summary + "\n")
 	}
 	b.WriteString("\n")
 	b.WriteString(c.Content)

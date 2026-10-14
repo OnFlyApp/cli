@@ -13,7 +13,9 @@ import (
 )
 
 var (
-	evalCases     string
+	evalCases     []string
+	evalSplit     string
+	evalFileLevel bool
 	evalK         int
 	evalMinRecall float64
 	evalJSON      bool
@@ -32,12 +34,11 @@ var evalCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		path := evalCases
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(cfg.ProjectRoot, path)
-		}
-		cases, err := eval.Load(path)
+		cases, err := loadEvalCases(cfg.ProjectRoot, evalCases)
 		if err != nil {
+			return err
+		}
+		if cases, err = eval.Split(cases, evalSplit); err != nil {
 			return err
 		}
 		s, closeStore, err := query.Open(cmd.Context(), cfg)
@@ -46,9 +47,9 @@ var evalCmd = &cobra.Command{
 		}
 		defer closeStore()
 		ws := query.Scope(cfg.Workspace, "")
-		rep, err := eval.Run(cmd.Context(), cases, func(ctx context.Context, q string, limit int) ([]parser.Chunk, error) {
+		rep, err := eval.RunLevel(cmd.Context(), cases, func(ctx context.Context, q string, limit int) ([]parser.Chunk, error) {
 			return s.Search(ctx, q, limit, ws)
-		}, evalK)
+		}, evalK, evalFileLevel)
 		if err != nil {
 			return err
 		}
@@ -87,12 +88,25 @@ var evalCmd = &cobra.Command{
 }
 
 func init() {
-	evalCmd.Flags().StringVar(&evalCases, "cases", ".onfly/eval.yaml", "path to the cases file, relative to the project root")
+	evalCmd.PersistentFlags().StringSliceVar(&evalCases, "cases", []string{".onfly/eval.yaml"}, "cases file, relative to the project root; repeat or comma-separate to combine several")
+	evalCmd.Flags().StringVar(&evalSplit, "split", "", "score only the even or odd cases (the halves \"eval tune\" fits and checks on)")
+	evalCmd.Flags().BoolVar(&evalFileLevel, "file-level", false, "count a hit when the file matches, whatever the symbol")
 	evalCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalCmd.Flags().Float64Var(&evalMinRecall, "min-recall", 0, "exit non-zero when recall is below this value")
 	evalCmd.Flags().StringVar(&evalBaseline, "baseline", "", "baseline file, relative to the project root; exit non-zero when recall or mrr drops below it")
 	evalCmd.Flags().BoolVar(&evalUpdate, "update-baseline", false, "write the current scores to --baseline instead of comparing")
 	evalCmd.Flags().BoolVar(&evalJSON, "json", false, "print the report as JSON")
+}
+
+func loadEvalCases(root string, paths []string) ([]eval.Case, error) {
+	abs := make([]string, len(paths))
+	for i, p := range paths {
+		abs[i] = p
+		if !filepath.IsAbs(p) {
+			abs[i] = filepath.Join(root, p)
+		}
+	}
+	return eval.LoadAll(abs)
 }
 
 func checkEvalK(k int) error {

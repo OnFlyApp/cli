@@ -60,6 +60,36 @@ type Search struct {
 	// RecencyDays days (git), most recent first. 0 turns it off.
 	RecencyWeight float64 `yaml:"recency_weight"`
 	RecencyDays   int     `yaml:"recency_days"`
+	// WordWeight and FieldWeight scale the per-word keyword list and the
+	// symbol-name/path/comment list against the keyword weight. Unset takes the
+	// default; 0 turns the list off.
+	WordWeight  *float64 `yaml:"word_weight"`
+	FieldWeight *float64 `yaml:"field_weight"`
+	// RRFK is the reciprocal-rank-fusion constant; 0 means 60.
+	RRFK int `yaml:"rrf_k"`
+	// GroupBy "file" returns one chunk per file ("chunk", the default, returns chunks).
+	GroupBy string `yaml:"group_by"`
+	// Dedupe drops a chunk whose type, name and text repeat a higher-ranked hit.
+	Dedupe bool `yaml:"dedupe"`
+	// Expand asks a chat model for extra keywords and a hypothetical answer before searching.
+	Expand LLM `yaml:"expand"`
+}
+
+// LLM names a chat model used for a side task (index summaries, query expansion).
+// Only ollama is supported. An empty provider turns the feature off.
+type LLM struct {
+	Provider  string `yaml:"provider"`
+	Endpoint  string `yaml:"endpoint"`
+	Model     string `yaml:"model"`
+	TimeoutMS int    `yaml:"timeout_ms"`
+}
+
+// Timeout is the bound for one call; zero lets the caller pick its default.
+func (l LLM) Timeout() time.Duration {
+	if l.TimeoutMS > 0 {
+		return time.Duration(l.TimeoutMS) * time.Millisecond
+	}
+	return 0
 }
 
 // Timeout is the bound for one rerank call. An LLM reranker is slower than a
@@ -86,6 +116,9 @@ type Indexer struct {
 	EmbedContext bool `yaml:"embed_context"`
 	// ParseTimeoutMS bounds one parser call; 0 uses the 5 s default.
 	ParseTimeoutMS int `yaml:"parse_timeout_ms"`
+	// Summaries has a chat model write a one-sentence description of each named
+	// chunk; it is embedded and searched with the code. Off when provider is empty.
+	Summaries LLM `yaml:"summaries"`
 }
 
 type ParserConfig struct {
@@ -356,6 +389,27 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Search.RecencyDays != 0 {
 		out.Search.RecencyDays = child.Search.RecencyDays
 	}
+	if child.Search.WordWeight != nil {
+		out.Search.WordWeight = child.Search.WordWeight
+	}
+	if child.Search.FieldWeight != nil {
+		out.Search.FieldWeight = child.Search.FieldWeight
+	}
+	if child.Search.RRFK != 0 {
+		out.Search.RRFK = child.Search.RRFK
+	}
+	if child.Search.GroupBy != "" {
+		out.Search.GroupBy = child.Search.GroupBy
+	}
+	if child.Search.Dedupe {
+		out.Search.Dedupe = true
+	}
+	if child.Search.Expand.Provider != "" {
+		out.Search.Expand = child.Search.Expand
+	}
+	if child.Indexer.Summaries.Provider != "" {
+		out.Indexer.Summaries = child.Indexer.Summaries
+	}
 	if child.Indexer.ParseTimeoutMS != 0 {
 		out.Indexer.ParseTimeoutMS = child.Indexer.ParseTimeoutMS
 	}
@@ -576,6 +630,23 @@ func (c Config) validate() error {
 	}
 	if w := c.Search; w.SemanticWeight < 0 || w.KeywordWeight < 0 || w.RecencyWeight < 0 || w.RecencyDays < 0 {
 		return fmt.Errorf("search weights and recency_days must be >= 0")
+	}
+	if w := c.Search; (w.WordWeight != nil && *w.WordWeight < 0) || (w.FieldWeight != nil && *w.FieldWeight < 0) || w.RRFK < 0 {
+		return fmt.Errorf("search.word_weight, search.field_weight and search.rrf_k must be >= 0")
+	}
+	if g := c.Search.GroupBy; g != "" && g != "file" && g != "chunk" {
+		return fmt.Errorf("search.group_by must be file or chunk, got %q", g)
+	}
+	for name, l := range map[string]LLM{"search.expand": c.Search.Expand, "indexer.summaries": c.Indexer.Summaries} {
+		if l.TimeoutMS < 0 {
+			return fmt.Errorf("%s.timeout_ms must be >= 0", name)
+		}
+		if l.Provider != "" && l.Provider != "ollama" {
+			return fmt.Errorf("%s.provider %q is not available (use ollama)", name, l.Provider)
+		}
+		if l.Provider != "" && l.Model == "" {
+			return fmt.Errorf("%s.model is required when a provider is set", name)
+		}
 	}
 	if c.Reranker.TimeoutMS < 0 {
 		return fmt.Errorf("reranker.timeout_ms must be >= 0")

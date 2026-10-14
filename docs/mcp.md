@@ -55,7 +55,7 @@ Tool failures are tool results with `isError` set. They are not protocol errors.
 
 ### `search`
 
-Finds code by what it does. Embeds `query` once, runs semantic search and keyword search, and fuses the two lists. Each side reads a candidate pool of `limit` raised to at least 20 and capped at 50. Rank in a list starts at 1. A repeated chunk keeps its first rank. The score is the sum of `1 / (60 + rank)`. Hits are sorted by score, then path, then text. The structured result is `{ "rules", "hits" }`. `hits` has `limit` entries. `rules` is omitted when nothing matches. An empty or whitespace `query` is a tool error and does not embed. A keyword error leaves the semantic hits in place.
+Finds code by what it does. Embeds `query` once and fuses semantic, keyword, per-word keyword and symbol-name lists. Each side reads a candidate pool of `limit` raised to at least 20 and capped at 50. Rank in a list starts at 1. A repeated chunk keeps its first rank. The score is the sum of `weight / (rrf_k + rank)` over the lists; weights and `rrf_k` are in [configuration.md](configuration.md#search-fusion). Hits are sorted by score, then path, then text. A hit carries `summary` when the chunk has a generated one. The structured result is `{ "rules", "hits" }`. `hits` has `limit` entries. `rules` is omitted when nothing matches. An empty or whitespace `query` is a tool error and does not embed. A keyword error leaves the semantic hits in place.
 
 | Argument | Required | Notes |
 | --- | --- | --- |
@@ -64,6 +64,7 @@ Finds code by what it does. Embeds `query` once, runs semantic search and keywor
 | `workspace` | no | Empty uses the config value. `*` searches every workspace. Any other value matches that workspace. |
 | `type` | no | Keep one chunk type, case-insensitive: `function`, `method`, `struct`, `section` (Markdown), and so on. Use `section` to search docs only, or any code type to leave docs out. |
 | `path` | no | Keep files matching a glob relative to the project root, such as `internal/**` or `docs/**`. An invalid glob is a tool error. |
+| `group_by` | no | `file` returns the best chunk of each file, `chunk` every chunk. Empty uses `search.group_by` (default `chunk`). |
 | `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. `type`, `path` and `changed_since` filter the top 50 candidates of each list, so a narrow filter can return fewer than `limit` hits. A ref starting with `-` is rejected. |
 
 If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights and the recency list come from `search` in [configuration.md](configuration.md#search-fusion).

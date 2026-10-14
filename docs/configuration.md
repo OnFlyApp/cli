@@ -33,11 +33,17 @@ reranker:                        # optional, off by default (empty provider)
   candidates: 30                 # fused hits sent to the reranker; default 30
   timeout_ms: 5000               # one rerank call; default 5000, 30000 for ollama; on timeout the fused order is used
 
-search:                          # optional; how the result lists are fused
-  semantic_weight: 1             # relative weights, 0 means 1
-  keyword_weight: 1
+search:                          # optional; how the result lists are fused (values shown are the defaults)
+  semantic_weight: 2             # relative list weights; 0 means the default
+  keyword_weight: 0.5
+  word_weight: 0.25              # per-word keyword list, relative to keyword_weight; 0 turns it off
+  field_weight: 0.5              # symbol-name, path and comment list, relative to keyword_weight; 0 turns it off
+  rrf_k: 20                      # reciprocal-rank constant; lower favours the top of each list
+  group_by: chunk                # file returns one chunk per file
+  dedupe: false                  # drop a chunk whose text repeats a higher hit
   recency_weight: 0              # >0 adds a list of files changed in the last recency_days (git), newest first
   recency_days: 30
+  # expand: {provider: ollama, model: qwen2.5-coder:7b, timeout_ms: 3000}   # query expansion, see below
 
 rules:
   - .onfly/rules/project.md
@@ -60,6 +66,7 @@ indexer:
   debounce_ms: 2000              # onfly watch; default 2000
   parse_timeout_ms: 5000         # per parser call; default 5000
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
+  # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]
@@ -142,11 +149,49 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 
 ## Search fusion
 
-`search` fuses three lists by reciprocal rank: semantic, keyword (the whole question as a substring), and a per-word keyword list (each content word of the question looked up on its own, chunks ranked by how many words they contain, at a quarter of the keyword weight). The last one is what lets "retry on 429 from the embedder" find the chunk containing all three words. A chunk scores `weight / (60 + rank)` from each list it appears in. `search.semantic_weight` and `search.keyword_weight` are relative; a zero value means 1. `search.recency_weight` above 0 adds another list of candidates whose files were committed within `search.recency_days` (default 30), most recent first, read from `git log` in the project root and cached for 30 seconds. Outside a git repository the signal is skipped with a warning. Measure a change with [`onfly eval`](evaluation.md) before keeping it.
+`search` ranks candidates in four steps.
+
+1. **Retrieve.** Semantic (nearest vectors), keyword (the whole question as a substring) and a per-word keyword list (each content word of the question looked up on its own, chunks ranked by how many words they contain). The per-word list is what lets "retry on 429 from the embedder" find the chunk containing all three words.
+2. **Name list.** The retrieved chunks are scored again by where the question's words appear: the symbol name (strongest), the file name, the directories, then the leading comment and the [summary](#chunk-summaries). A chunk *named* for the question outranks one that merely mentions it. Words match across plurals and endings (`retries`, `retry`; `index`, `indexing`). This list adds no store query.
+3. **Fuse.** Every list scores `weight / (rrf_k + rank)` and the scores add up. Defaults: `semantic_weight` 2, `keyword_weight` 0.5, `word_weight` 0.25 and `field_weight` 0.5 (both relative to `keyword_weight`), `rrf_k` 20. A zero value takes the default, except `word_weight` and `field_weight`, where 0 turns the list off.
+4. **Shape.** `dedupe: true` drops a chunk whose type, name and text repeat a higher hit. `group_by: file` keeps one chunk per file, ordered by its best chunk plus a small bonus for the file's second-best. It is also a per-request argument (`group_by` on the MCP tool, `--group-by` on the CLI).
+
+`search.recency_weight` above 0 adds another list of candidates whose files were committed within `search.recency_days` (default 30), most recent first, read from `git log` in the project root and cached for 30 seconds. Outside a git repository the signal is skipped with a warning.
+
+The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half of 573 cases and checked on the other half, where MRR rose from 0.605 to 0.678. Your code may prefer other numbers: run `onfly eval tune` on your own cases before changing them.
 
 If the embedder is unreachable, `search` logs a warning and answers from keyword results alone instead of failing. A cancelled request still fails. Query vectors are cached in memory (256 entries), so a repeated query does not call the embedder again.
 
 `indexer.embed_context: true` embeds `path: <file>` and `symbol: <Receiver.Name>` ahead of each chunk, so a query naming a file or function can match its vector. Stored content is unchanged. Chunks already in the index keep their old vectors until their file changes, so reindex from scratch (delete `.onfly/vector.db`) to apply it everywhere, and compare with `onfly eval --baseline`.
+
+### Chunk summaries
+
+`indexer.summaries` asks a chat model for one plain sentence per named chunk (functions, methods, types, doc sections of at least 60 characters). The sentence is stored as the chunk's `summary`, embedded together with the code, used by the name list, and returned in search results. It targets conceptual questions whose words never appear in the code ("wait before trying again" finding a backoff loop).
+
+```yaml
+indexer:
+  summaries:
+    provider: ollama             # only ollama is supported
+    model: qwen2.5-coder:7b
+    # endpoint: http://localhost:11434
+    # timeout_ms: 60000          # one summary; default 60000
+```
+
+Summaries are written during indexing, one model call per new or changed chunk. A chunk whose text did not change keeps its stored summary, so a reindex calls the model only for what changed. The first index of a project is slower: on this repository (about 730 chunks) it took 16 minutes with a 7B model on a laptop instead of under a minute; it raised MRR from 0.663 to 0.751 in the [measurement](evaluation.md#measured-effect). If the model is unreachable, indexing logs a warning, skips the rest of that file's summaries and still completes. Turning summaries on does not touch chunks that are already indexed until their file changes; delete the database and reindex to apply them everywhere.
+
+### Query expansion
+
+`search.expand` sends the question to a chat model before searching. The model answers with a few identifier-style keywords and a two-sentence hypothetical answer. The keywords run through the per-word keyword list and the answer is embedded as a second semantic query; both are fused at half weight. It helps when the question and the code share no words.
+
+```yaml
+search:
+  expand:
+    provider: ollama
+    model: qwen2.5-coder:7b
+    timeout_ms: 3000             # default 3000; on timeout or error the plain query is used
+```
+
+Expansion adds one model call to every new query (repeated queries come from a 256-entry cache), so it costs about 3 seconds per new query for a gain of about 0.016 MRR; see [measured effect](evaluation.md#measured-effect) before turning it on.
 
 ## Reranker
 

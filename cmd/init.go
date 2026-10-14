@@ -48,6 +48,9 @@ indexer:
     #   exclude: ["**/*_test.go"]
   # concurrency: 4                 # files indexed in parallel
   # embed_context: true            # embed "path: / symbol:" with each chunk; reindex after changing
+  # summaries:                     # one-sentence description per chunk, embedded with the code (slower index)
+  #   provider: ollama
+  #   model: qwen2.5-coder:7b
 
 rules:
   - .onfly/rules/project.md
@@ -55,9 +58,14 @@ rules:
 # workspace: backend               # label stored on each chunk, for monorepos with several configs
 
 # search:                          # how result lists are fused; measure changes with "onfly eval"
-#   keyword_weight: 1
-#   semantic_weight: 1
+#   semantic_weight: 2             # defaults shown; "onfly eval tune" finds numbers for your code
+#   keyword_weight: 0.5
+#   field_weight: 0.5              # symbol-name / path / comment list; 0 turns it off
+#   group_by: chunk                # file: one result per file
 #   recency_weight: 0              # >0 favours files changed in the last recency_days (git)
+#   expand:                        # ask a chat model for extra keywords before searching
+#     provider: ollama
+#     model: qwen2.5-coder:7b
 
 # reranker:                        # optional second pass over the top results
 #   provider: voyage              # voyage, cohere, jina, or ollama (a chat model)

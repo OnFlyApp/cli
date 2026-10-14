@@ -138,7 +138,7 @@ func TestRerankTimeoutKeepsFusedOrder(t *testing.T) {
 
 func TestSearchWeightsShiftTheRanking(t *testing.T) {
 	s := newSearcher(t)
-	s.KeywordWeight = 0.01 // semantic puts b.go first; keyword alone favours a.go
+	s.KeywordWeight = 0.001 // semantic puts b.go first; keyword alone favours a.go
 	got, err := s.Search(context.Background(), "getUserId", 5, "")
 	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" {
 		t.Fatalf("%+v %v", got, err)
@@ -224,12 +224,13 @@ func TestQueryWordsDropsStopWordsAndShortWords(t *testing.T) {
 
 func TestWordMatchesRanksByHowManyWordsMatch(t *testing.T) {
 	s := newSearcher(t)
-	got := s.wordMatches(context.Background(), "getUserId func", 10, "")
+	got := s.wordMatches(context.Background(), queryWords("getUserId func"), 10, "")
 	if len(got) != 2 || got[0].FilePath != "a.go" || got[1].FilePath != "b.go" {
 		t.Fatalf("the chunk with both words must come first, the one with only %q after it: %+v", "func", got)
 	}
-	if s.wordMatches(context.Background(), "single", 10, "") != nil {
-		t.Fatal("one word is left to the whole-query keyword search")
+	g, err := s.Gather(context.Background(), Request{Query: "single", Limit: 5})
+	if err != nil || g.Words != nil {
+		t.Fatalf("one word is left to the whole-query keyword search: %v %v", g, err)
 	}
 }
 

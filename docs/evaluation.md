@@ -24,8 +24,11 @@ A case hits at rank r when a returned chunk has a path ending in `expect.file` a
 ## Usage
 
 ```
-onfly eval [--cases .onfly/eval.yaml] [--k 10] [--min-recall 0] [--baseline FILE [--update-baseline]] [--json]
+onfly eval [--cases FILE[,FILE...]] [--k 10] [--split even|odd] [--file-level] [--min-recall 0] [--baseline FILE [--update-baseline]] [--json]
+onfly eval tune [--cases FILE[,FILE...]] [--k 10] [--file-level] [--top 5]
 ```
+
+`--cases` takes several files, repeated or comma-separated; they are scored as one list. `--split even` or `odd` scores every other case, the halves `tune` fits and checks on. `--file-level` counts a hit when the file matches, whatever the symbol, which is the fair measure when a file holds near-duplicate chunks.
 
 `--min-recall` makes the command exit non-zero when recall falls below the value, for CI.
 
@@ -42,3 +45,30 @@ onfly eval --json > after.json
 ```
 
 Compare `recall` and `mrr`, then look at the per-case `rank` for what moved.
+
+## Tuning
+
+`onfly eval tune` finds fusion weights for your code. It retrieves every case once, then tries a grid of `semantic_weight`, `keyword_weight`, `word_weight`, `field_weight` and `rrf_k` by re-fusing the saved lists, so the whole grid takes seconds after the retrieval. It picks the best setting by MRR on the even-numbered cases, scores that setting and your current one on the odd-numbered cases, and prints the YAML to adopt only when the odd half gains at least 0.01 MRR. Use at least a few hundred cases; with 20 the check half is noise.
+
+Large case lists can be generated: ask a local model for one question per sampled symbol, drop questions that contain the symbol name, and keep the symbol as the expectation. Such cases flatter retrieval, because the question was written from the code, so keep your hand-written cases as a separate file and look at both.
+
+## Measured effect
+
+Measured on this repository with `qwen3-embedding:0.6b`, 573 cases (45 hand-written, 528 generated), k=10, symbol-level hits:
+
+| Change | R@1 | R@5 | R@10 | MRR |
+| --- | --- | --- | --- | --- |
+| Before: semantic 1, keyword 1, rrf_k 60 | 0.45 | 0.83 | 0.93 | 0.608 |
+| Name list at weight 1 | 0.43 | 0.81 | 0.90 | 0.589 |
+| Tuned: semantic 2, keyword 0.5, field 0.5, rrf_k 20 | 0.51 | 0.86 | 0.94 | 0.663 |
+| Tuned + `dedupe` | 0.51 | 0.86 | 0.94 | 0.663 |
+| Tuned + `group_by: file` (symbol-level) | 0.50 | 0.79 | 0.82 | 0.622 |
+| Tuned + `search.expand` (qwen2.5-coder:7b) | 0.54 | 0.87 | 0.94 | 0.679 |
+| Tuned + `indexer.summaries` (qwen2.5-coder:7b) | 0.64 | 0.92 | 0.96 | 0.751 |
+| Tuned, file-level hits | 0.60 | 0.91 | 0.97 | 0.736 |
+| Tuned + `group_by: file`, file-level hits | 0.60 | 0.94 | 0.98 | 0.740 |
+| Tuned + summaries, file-level hits | 0.71 | 0.94 | 0.98 | 0.807 |
+
+`group_by: file` pays off only when the question is about a file; a question about a symbol loses its second candidate in the same file. It is off by default.
+
+Summaries are the largest single gain (MRR 0.663 to 0.751; on the 45 hand-written cases alone 0.522 to 0.639) and cost one model call per chunk at index time: 16 minutes for 733 chunks with a 7B model on a laptop, then only changed chunks. Query expansion gains about 0.016 MRR and adds roughly 3 seconds to every new query, so it stays opt-in.

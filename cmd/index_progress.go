@@ -15,8 +15,9 @@ const progressWidth = 20
 type indexProgress struct {
 	out io.Writer
 	tty bool
-	// perFile keeps the "parsing" line of every file on a pipe or log. Without
-	// it a file gets one line, for its outcome (embedding, unchanged, failed).
+	// perFile keeps the "parsing" and "summarising" lines of every file on a
+	// pipe or log. Without it a file gets one line, for its outcome (embedding,
+	// unchanged, failed).
 	perFile bool
 }
 
@@ -25,7 +26,7 @@ func newIndexProgress(out *os.File, perFile bool) *indexProgress {
 }
 
 func (p *indexProgress) Event(ev index.Event) {
-	if !p.tty && !p.perFile && ev.Action == "parsing" && ev.Total > 0 {
+	if !p.tty && !p.perFile && (ev.Action == "parsing" || ev.Action == "summarising") && ev.Total > 0 {
 		return
 	}
 	line := formatIndexProgress(ev, p.tty)

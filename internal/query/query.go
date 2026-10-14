@@ -18,7 +18,6 @@ import (
 	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
-	"github.com/bmatcuk/doublestar/v4"
 )
 
 const (
@@ -64,11 +63,28 @@ type Searcher struct {
 	Candidates int
 	// RerankTimeout bounds one rerank call; zero means 5s.
 	RerankTimeout time.Duration
-	// Fusion weights; zero semantic and keyword weights mean 1, zero recency means off.
+	// Fusion weights; a zero semantic or keyword weight takes the default, zero recency means off.
 	SemanticWeight, KeywordWeight, RecencyWeight float64
 	RecencyDays                                  int
+	// WordWeight and FieldWeight scale the per-word keyword list and the
+	// name/path/doc list against the keyword weight; nil takes the default, 0 turns the list off.
+	WordWeight, FieldWeight *float64
+	// RRFK is the reciprocal-rank constant; 0 means the default (20).
+	RRFK int
+	// GroupBy "file" returns one chunk per file; Dedupe drops chunks whose text repeats a higher hit.
+	GroupBy string
+	Dedupe  bool
+	// Expand, when set, asks a chat model for extra keywords and a hypothetical
+	// answer before searching; ExpandWeight scales those lists (0 means 0.5),
+	// ExpandTimeout bounds the call (0 means 3s).
+	Expand        embedder.Chat
+	ExpandWeight  float64
+	ExpandTimeout time.Duration
 	// Root is the project root, used for git-based recency and changed-since filters.
 	Root string
+
+	expandOnce  sync.Once
+	expandCache *expandCache
 
 	recentMu   sync.Mutex
 	recentAt   time.Time
@@ -85,6 +101,8 @@ type Request struct {
 	Type string
 	// Path keeps files matching a doublestar glob, relative to the project root.
 	Path string
+	// GroupBy overrides the searcher's grouping: "file" or "chunk"; empty keeps the default.
+	GroupBy string
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -98,92 +116,11 @@ func (s *Searcher) Search(ctx context.Context, q string, limit int, workspace st
 	return s.Run(ctx, Request{Query: q, Limit: limit, Workspace: workspace})
 }
 
-func orOne(w float64) float64 {
+func orDefault(w, def float64) float64 {
 	if w <= 0 {
-		return 1
+		return def
 	}
 	return w
-}
-
-// Run embeds the query, merges semantic and keyword results, and reranks.
-// When the embedder fails it answers from keyword results alone.
-func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
-	var only map[string]bool
-	pool := CandidatePool(r.Limit)
-	if r.Path != "" && !doublestar.ValidatePattern(r.Path) {
-		return nil, fmt.Errorf("invalid path pattern %q", r.Path)
-	}
-	if r.ChangedSince != "" {
-		if s.Root == "" {
-			return nil, fmt.Errorf("changed_since needs a project root")
-		}
-		files, err := gitx.ChangedSince(ctx, s.Root, r.ChangedSince)
-		if err != nil {
-			return nil, err
-		}
-		if len(files) == 0 {
-			return nil, nil
-		}
-		only = make(map[string]bool, len(files))
-		for _, f := range files {
-			only[f] = true
-		}
-	}
-	keep := func(c parser.Chunk) bool {
-		if only != nil && !only[c.FilePath] {
-			return false
-		}
-		if r.Type != "" && !strings.EqualFold(c.Type, r.Type) {
-			return false
-		}
-		if r.Path != "" {
-			if ok, _ := doublestar.PathMatch(r.Path, c.FilePath); !ok {
-				return false
-			}
-		}
-		return true
-	}
-	filtered := only != nil || r.Type != "" || r.Path != ""
-	if filtered {
-		pool = MaxLimit // filters run after retrieval, so look wide
-	}
-	var semantic []parser.Chunk
-	vec, embedErr := s.Emb.Embed(ctx, r.Query)
-	if embedErr == nil {
-		var err error
-		if semantic, err = s.Store.SearchSemantic(ctx, vec, pool, r.Workspace); err != nil {
-			return nil, err
-		}
-	} else if ctx.Err() != nil {
-		return nil, embedErr
-	}
-	keyword, err := s.Store.SearchKeyword(ctx, r.Query, pool, r.Workspace)
-	if err != nil {
-		if embedErr != nil {
-			return nil, embedErr
-		}
-		s.logger().Warn("search keyword", "err", err)
-		keyword = nil
-	}
-	if embedErr != nil {
-		s.logger().Warn("embedder unavailable, using keyword results only", "err", embedErr)
-	}
-	words := s.wordMatches(ctx, r.Query, pool, r.Workspace)
-	if filtered {
-		semantic, keyword, words = filterChunks(semantic, keep), filterChunks(keyword, keep), filterChunks(words, keep)
-	}
-	lists := [][]parser.Chunk{semantic, keyword, words}
-	weights := []float64{orOne(s.SemanticWeight), orOne(s.KeywordWeight), wordListWeight * orOne(s.KeywordWeight)}
-	if s.RecencyWeight > 0 {
-		if recent := s.recentCandidates(ctx, semantic, keyword); len(recent) > 0 {
-			lists, weights = append(lists, recent), append(weights, s.RecencyWeight)
-		}
-	}
-	fused := s.rerank(ctx, r.Query, FuseWeighted(weights, lists...))
-	if n := ClampLimit(r.Limit); len(fused) > n {
-		fused = fused[:n]
-	}
-	return fused, nil
 }
 
 var stopWords = map[string]bool{
@@ -214,19 +151,15 @@ func queryWords(q string) []string {
 
 const (
 	maxQueryWords = 6
-	// wordListWeight scales the per-word keyword list against the other lists.
+	// defaultWordWeight scales the per-word keyword list against the other lists.
 	// Measured on this repo's eval set: 0.25 beat 0.1, 0.5 and 0.75 (recall@5 0.9 vs 0.8).
-	wordListWeight = 0.25
+	defaultWordWeight = 0.25
 )
 
 // wordMatches runs a keyword lookup per query word and ranks chunks by how
 // many words they contain, so "retry 429 embedder" favours the chunk that has
 // all three. The whole-question keyword search rarely matches prose questions.
-func (s *Searcher) wordMatches(ctx context.Context, q string, pool int, workspace string) []parser.Chunk {
-	words := queryWords(q)
-	if len(words) < 2 {
-		return nil // a single word is already the whole-query keyword search
-	}
+func (s *Searcher) wordMatches(ctx context.Context, words []string, pool int, workspace string) []parser.Chunk {
 	type acc struct {
 		chunk parser.Chunk
 		score float64
@@ -331,10 +264,18 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, err
 	}
+	chat, err := embedder.NewChat(cfg.Search.Expand)
+	if err != nil {
+		store.Close()
+		return nil, nil, fmt.Errorf("search.expand: %w", err)
+	}
 	return &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
 		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
+		WordWeight: cfg.Search.WordWeight, FieldWeight: cfg.Search.FieldWeight, RRFK: cfg.Search.RRFK,
+		GroupBy: cfg.Search.GroupBy, Dedupe: cfg.Search.Dedupe,
+		Expand: chat, ExpandTimeout: cfg.Search.Expand.Timeout(),
 		Root:   cfg.ProjectRoot,
 		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
 }
@@ -347,12 +288,27 @@ func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 
 // FuseWeighted is Fuse with a weight per list; a missing weight is 1.
 func FuseWeighted(weights []float64, lists ...[]parser.Chunk) []parser.Chunk {
-	type acc struct {
-		chunk parser.Chunk
-		score float64
+	return chunksOf(fuseScored(rrfK, weights, lists...))
+}
+
+type scored struct {
+	chunk parser.Chunk
+	score float64
+}
+
+func chunksOf(in []scored) []parser.Chunk {
+	out := make([]parser.Chunk, len(in))
+	for i, x := range in {
+		out[i] = x.chunk
 	}
+	return out
+}
+
+// fuseScored merges ranked lists by weighted reciprocal rank, best first, with
+// rank constant k. Ties break by path, then content, so the order is stable.
+func fuseScored(k int, weights []float64, lists ...[]parser.Chunk) []scored {
 	var order []string
-	by := map[string]*acc{}
+	by := map[string]*scored{}
 	for li, list := range lists {
 		w := 1.0
 		if li < len(weights) {
@@ -369,28 +325,31 @@ func FuseWeighted(weights []float64, lists ...[]parser.Chunk) []parser.Chunk {
 			rank++
 			item := by[key]
 			if item == nil {
-				item = &acc{chunk: ch}
+				item = &scored{chunk: ch}
 				by[key] = item
 				order = append(order, key)
 			}
-			item.score += w / float64(rrfK+rank)
+			item.score += w / float64(k+rank)
 		}
 	}
-	out := make([]parser.Chunk, 0, len(order))
+	out := make([]scored, 0, len(order))
 	for _, key := range order {
-		out = append(out, by[key].chunk)
+		out = append(out, *by[key])
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		si, sj := by[ChunkKey(out[i])].score, by[ChunkKey(out[j])].score
-		if si != sj {
-			return si > sj
-		}
-		if out[i].FilePath != out[j].FilePath {
-			return out[i].FilePath < out[j].FilePath
-		}
-		return out[i].Content < out[j].Content
-	})
+	sortScored(out)
 	return out
+}
+
+func sortScored(out []scored) {
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].score != out[j].score {
+			return out[i].score > out[j].score
+		}
+		if out[i].chunk.FilePath != out[j].chunk.FilePath {
+			return out[i].chunk.FilePath < out[j].chunk.FilePath
+		}
+		return out[i].chunk.Content < out[j].chunk.Content
+	})
 }
 
 // ChunkKey identifies a chunk across result lists. Path, type, name, part,

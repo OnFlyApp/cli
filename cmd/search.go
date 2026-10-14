@@ -19,6 +19,7 @@ var (
 	searchChanged   string
 	searchType      string
 	searchPath      string
+	searchGroupBy   string
 )
 
 var searchCmd = &cobra.Command{
@@ -37,7 +38,7 @@ var searchCmd = &cobra.Command{
 		defer closeStore()
 		chunks, err := s.Run(cmd.Context(), query.Request{
 			Query: strings.Join(args, " "), Limit: searchLimit,
-			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged, Type: searchType, Path: searchPath,
+			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged, Type: searchType, Path: searchPath, GroupBy: searchGroupBy,
 		})
 		if err != nil {
 			return err
@@ -55,6 +56,7 @@ func init() {
 	searchCmd.Flags().StringVar(&searchChanged, "changed-since", "", "git ref; keep only files that differ from it")
 	searchCmd.Flags().StringVar(&searchType, "type", "", "keep one chunk type: function, method, struct, section (docs), ...")
 	searchCmd.Flags().StringVar(&searchPath, "path", "", "keep files matching a glob, for example 'internal/**'")
+	searchCmd.Flags().StringVar(&searchGroupBy, "group-by", "", "file: one result per file; chunk: every chunk (default: search.group_by)")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "print JSON with chunk content")
 }
 
@@ -64,6 +66,7 @@ type hitRow struct {
 	Receiver  string `json:"receiver,omitempty"`
 	StartLine int    `json:"start_line,omitempty"`
 	EndLine   int    `json:"end_line,omitempty"`
+	Summary   string `json:"summary,omitempty"`
 	Content   string `json:"content"`
 }
 
@@ -71,6 +74,7 @@ func rowOf(c parser.Chunk) hitRow {
 	row := hitRow{FilePath: c.FilePath, Content: c.Content}
 	row.Symbol = c.Metadata["name"]
 	row.Receiver = c.Metadata["receiver"]
+	row.Summary = c.Metadata["summary"]
 	row.StartLine, _ = strconv.Atoi(c.Metadata["start_line"])
 	row.EndLine, _ = strconv.Atoi(c.Metadata["end_line"])
 	return row
@@ -97,7 +101,11 @@ func printHits(w io.Writer, chunks []parser.Chunk, asJSON bool) error {
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
-		if snip := snippet(r.Content); snip != "" {
+		if r.Summary != "" {
+			if _, err := fmt.Fprintf(w, "    %s\n", snippet(r.Summary)); err != nil {
+				return err
+			}
+		} else if snip := snippet(r.Content); snip != "" {
 			if _, err := fmt.Fprintf(w, "    %s\n", snip); err != nil {
 				return err
 			}

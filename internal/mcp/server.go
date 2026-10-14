@@ -67,6 +67,7 @@ type hitDTO struct {
 	Receiver  string `json:"receiver,omitempty"`
 	StartLine int    `json:"start_line,omitempty"`
 	EndLine   int    `json:"end_line,omitempty"`
+	Summary   string `json:"summary,omitempty"`
 	Lines     string `json:"lines"`
 }
 
@@ -92,6 +93,7 @@ type semanticIn struct {
 	ChangedSince string `json:"changed_since,omitempty" jsonschema:"git ref; keep only files that differ from it, untracked files included"`
 	Type         string `json:"type,omitempty" jsonschema:"keep one chunk type, for example function, method, struct or section (docs)"`
 	Path         string `json:"path,omitempty" jsonschema:"keep files matching a glob relative to the project root, for example internal/** or docs/**"`
+	GroupBy      string `json:"group_by,omitempty" jsonschema:"file returns one chunk per file, chunk returns every chunk; default comes from the project config"`
 }
 
 type keywordIn struct {
@@ -318,7 +320,7 @@ func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in s
 }
 
 func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
-	fused, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: in.Limit, Workspace: workspace, ChangedSince: in.ChangedSince, Type: in.Type, Path: in.Path})
+	fused, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: in.Limit, Workspace: workspace, ChangedSince: in.ChangedSince, Type: in.Type, Path: in.Path, GroupBy: in.GroupBy})
 	if err != nil {
 		return nil, hitList{}, err
 	}
@@ -794,6 +796,7 @@ func toHit(chunk parser.Chunk) hitDTO {
 		return hit
 	}
 	hit.Symbol = chunk.Metadata["name"]
+	hit.Summary = chunk.Metadata["summary"]
 	if r := chunk.Metadata["receiver"]; r != "" {
 		hit.Receiver = r
 	}

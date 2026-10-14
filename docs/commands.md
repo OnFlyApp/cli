@@ -14,9 +14,10 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | `onfly serve` | Serve the MCP tools on stdio. |
 | `onfly serve --watch` | Serve and reindex changed files in the same process. Same as `server.watch: true`. |
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
-| `onfly search "question"` | Search from the terminal. `--limit N`, `--workspace NAME`, `--changed-since REF`, `--type function|method|section|...`, `--path 'internal/**'`, `--json`. |
+| `onfly search "question"` | Search from the terminal. `--limit N`, `--workspace NAME`, `--changed-since REF`, `--type function|method|section|...`, `--path 'internal/**'`, `--group-by file|chunk`, `--json`. |
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. Also prints the `stats` hints. |
-| `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). See [Evaluation](docs/evaluation.md). |
+| `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). `--cases A,B` combines files, `--split even|odd`, `--file-level`. See [Evaluation](evaluation.md). |
+| `onfly eval tune` | Grid-search the fusion weights on half the cases and check them on the other half. |
 | `onfly stats` | Print file and chunk counts, with breakdowns by chunk type, workspace, and extension. Prints `hint:` lines when data or generated files (`.json`, `.lock`, `.svg` and similar) take 15% or more of the indexed text. |
 | `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |

@@ -64,10 +64,10 @@ func TestLoadRejectsEmptyExpectation(t *testing.T) {
 }
 
 func TestMatchesIsNotAFuzzySuffix(t *testing.T) {
-	if matches(chunk("internal/reindex.go", "X"), Expect{File: "index.go"}) {
+	if matches(chunk("internal/reindex.go", "X"), Expect{File: "index.go"}, false) {
 		t.Fatal("reindex.go matched index.go")
 	}
-	if !matches(chunk("internal/index.go", "X"), Expect{File: "index.go"}) || !matches(chunk("index.go", "X"), Expect{File: "index.go"}) {
+	if !matches(chunk("internal/index.go", "X"), Expect{File: "index.go"}, false) || !matches(chunk("index.go", "X"), Expect{File: "index.go"}, false) {
 		t.Fatal("exact and path-suffix must match")
 	}
 }

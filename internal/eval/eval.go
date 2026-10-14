@@ -65,14 +65,87 @@ func Load(path string) ([]Case, error) {
 	return doc.Cases, nil
 }
 
-func matches(c parser.Chunk, want Expect) bool {
+func matches(c parser.Chunk, want Expect, fileLevel bool) bool {
 	if c.FilePath != want.File && !strings.HasSuffix(c.FilePath, "/"+want.File) {
 		return false
 	}
-	return want.Symbol == "" || c.Metadata["name"] == want.Symbol
+	return fileLevel || want.Symbol == "" || c.Metadata["name"] == want.Symbol
 }
 
+// Split keeps every other case: part "even" the cases at even positions
+// (0, 2, ...), "odd" the rest, "" all of them. Tuning fits on one half and is
+// checked on the other.
+func Split(cases []Case, part string) ([]Case, error) {
+	var keep int
+	switch part {
+	case "":
+		return cases, nil
+	case "even":
+		keep = 0
+	case "odd":
+		keep = 1
+	default:
+		return nil, fmt.Errorf("split must be even or odd, got %q", part)
+	}
+	var out []Case
+	for i, c := range cases {
+		if i%2 == keep {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// LoadAll loads and concatenates several case files, in order.
+func LoadAll(paths []string) ([]Case, error) {
+	var all []Case
+	for _, p := range paths {
+		cs, err := Load(p)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, cs...)
+	}
+	return all, nil
+}
+
+// Rank is the 1-based position of the first expected hit within the first k
+// results, or 0. With fileLevel, only the file must match, not the symbol.
+func Rank(c Case, got []parser.Chunk, k int, fileLevel bool) int {
+	for i, ch := range got {
+		if i >= k {
+			break
+		}
+		for _, want := range c.Expect {
+			if matches(ch, want, fileLevel) {
+				return i + 1
+			}
+		}
+	}
+	return 0
+}
+
+// Score summarises ranks (0 is a miss) into recall and MRR.
+func Score(ranks []int) (recall, mrr float64) {
+	if len(ranks) == 0 {
+		return 0, 0
+	}
+	for _, r := range ranks {
+		if r > 0 {
+			recall++
+			mrr += 1 / float64(r)
+		}
+	}
+	n := float64(len(ranks))
+	return recall / n, mrr / n
+}
+
+// Run scores symbol-level matches; RunLevel can relax them to the file.
 func Run(ctx context.Context, cases []Case, search SearchFunc, k int) (Report, error) {
+	return RunLevel(ctx, cases, search, k, false)
+}
+
+func RunLevel(ctx context.Context, cases []Case, search SearchFunc, k int, fileLevel bool) (Report, error) {
 	if k < 1 {
 		return Report{}, fmt.Errorf("k must be at least 1, got %d", k)
 	}
@@ -83,19 +156,7 @@ func Run(ctx context.Context, cases []Case, search SearchFunc, k int) (Report, e
 		if err != nil {
 			return rep, fmt.Errorf("query %q: %w", c.Query, err)
 		}
-		rank := 0
-	scan:
-		for i, ch := range got {
-			if i >= k {
-				break
-			}
-			for _, want := range c.Expect {
-				if matches(ch, want) {
-					rank = i + 1
-					break scan
-				}
-			}
-		}
+		rank := Rank(c, got, k, fileLevel)
 		if rank > 0 {
 			rep.Hits++
 			mrr += 1 / float64(rank)
