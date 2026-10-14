@@ -41,11 +41,13 @@ type Stats struct {
 	Failed  int
 	Pruned  int
 	Tokens  int
+	Reused  int
 }
 
 type FileResult struct {
 	Skipped bool
 	Chunks  int
+	Reused  int
 	Tokens  int
 	Omit    bool
 	Err     error
@@ -209,6 +211,7 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 		}
 		stats.Files++
 		stats.Chunks += result.Chunks
+		stats.Reused += result.Reused
 		stats.Tokens += result.Tokens
 	}
 	if runErr != nil {
@@ -513,9 +516,15 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		return FileResult{Chunks: len(chunks), Tokens: n}, nil
 	}
 	var embedded []vectorstore.EmbeddedChunk
+	reused := 0
 	if len(chunks) > 0 {
 		s.report("embedding", rel)
-		embedded, err = embedChunks(ctx, s.emb, chunks, batchSize(s.opt))
+		prev, perr := s.store.VectorsByFile(ctx, rel)
+		if perr != nil {
+			s.logger.Warn("vectors by file", "path", rel, "err", perr)
+			prev = nil
+		}
+		embedded, reused, err = s.embedWithReuse(ctx, chunks, prev)
 		if err != nil {
 			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
 		}
@@ -526,7 +535,39 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	if err := s.store.CommitFile(ctx, rel, hash, embedded); err != nil {
 		return FileResult{}, fmt.Errorf("save %s: %w", rel, err)
 	}
-	return FileResult{Chunks: len(chunks)}, nil
+	return FileResult{Chunks: len(chunks), Reused: reused}, nil
+}
+
+// embedWithReuse fills in a stored vector for every chunk whose content the
+// file already had, and embeds the rest. The result keeps chunk order.
+func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, prev map[string][]float32) ([]vectorstore.EmbeddedChunk, int, error) {
+	dims := s.cfg.Embedder.Dimensions
+	out := make([]vectorstore.EmbeddedChunk, len(chunks))
+	var todo []int
+	reused := 0
+	for i, ch := range chunks {
+		if v, ok := prev[ch.Content]; ok && len(v) == dims {
+			out[i] = vectorstore.EmbeddedChunk{Chunk: ch, Vector: v}
+			reused++
+			continue
+		}
+		todo = append(todo, i)
+	}
+	if len(todo) == 0 {
+		return out, reused, nil
+	}
+	fresh := make([]parser.Chunk, len(todo))
+	for j, i := range todo {
+		fresh[j] = chunks[i]
+	}
+	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt))
+	if err != nil {
+		return nil, 0, err
+	}
+	for j, i := range todo {
+		out[i] = got[j]
+	}
+	return out, reused, nil
 }
 
 // fillChunkLines sets start_line and end_line when the parser left both empty.

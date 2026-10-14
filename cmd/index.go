@@ -30,7 +30,7 @@ var indexCmd = &cobra.Command{
 			fmt.Printf("files: %d\nchunks: %d\ntokens: %d\n", stats.Files, stats.Chunks, stats.Tokens)
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Skipped, stats.Pruned, stats.Failed)
+		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, reused %d, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Reused, stats.Skipped, stats.Pruned, stats.Failed)
 		return err
 	},
 }

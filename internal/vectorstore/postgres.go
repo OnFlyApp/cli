@@ -546,6 +546,27 @@ func (p *Postgres) FileHash(ctx context.Context, path string) (string, bool, err
 	return hash, err == nil, err
 }
 
+func (p *Postgres) VectorsByFile(ctx context.Context, path string) (map[string][]float32, error) {
+	rows, err := p.pool.Query(ctx, `SELECT content, embedding::text FROM chunks WHERE file_path = $1`, slashPath(path))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]float32{}
+	for rows.Next() {
+		var content, lit string
+		if err := rows.Scan(&content, &lit); err != nil {
+			return nil, err
+		}
+		v, err := parseVecLiteral(lit)
+		if err != nil {
+			return nil, err
+		}
+		out[content] = v
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) FileHashes(ctx context.Context) (map[string]string, error) {
 	rows, err := p.pool.Query(ctx, `SELECT file_path, content_hash FROM index_state`)
 	if err != nil {

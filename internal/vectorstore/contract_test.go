@@ -65,6 +65,20 @@ func runStoreContract(t *testing.T, st Store) {
 	if err != nil || names == nil || len(names) != 0 {
 		t.Fatalf("missing workspaces = %v %v", names, err)
 	}
+	farChunk := parser.Chunk{FilePath: "far.go", Type: "function", Content: "func getUserId() {}", Metadata: map[string]string{"name": "getUserId"}}
+	if err := st.CommitFile(ctx, "far.go", "h", []EmbeddedChunk{{Chunk: farChunk, Vector: []float32{0, 0.5, 0, 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	vecs, err := st.VectorsByFile(ctx, "far.go")
+	if err != nil || len(vecs["func getUserId() {}"]) != 4 || vecs["func getUserId() {}"][1] != 0.5 {
+		t.Fatalf("vectors = %v %v", vecs, err)
+	}
+	if got, _ := st.VectorsByFile(ctx, "absent.go"); len(got) != 0 {
+		t.Fatalf("absent file: %v", got)
+	}
+	if err := st.DeleteFiles(ctx, []string{"far.go"}); err != nil {
+		t.Fatal(err)
+	}
 	win := user
 	win.FilePath = `src\main.go`
 	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: win, Vector: near, Workspace: ""}}); err != nil {

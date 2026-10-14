@@ -34,8 +34,10 @@ Stderr names the current step. On a terminal it stays on one line:
 The steps are `loading tokenizer`, `opening database`, `loading parsers`, `walking`, then `N/Total` with `parsing`, `embedding`, `unchanged`, or `failed`, then `pruning` and `linking references`. A pipe or a log file gets one line per step and no bar. Per-file warnings are logged there too. The run ends with:
 
 ```text
-indexed 12 files, 40 chunks, skipped 3, pruned 2, failed 1
+indexed 12 files, 40 chunks, reused 25, skipped 3, pruned 2, failed 1
 ```
+
+`reused` counts chunks whose stored vector was kept because the chunk text is unchanged in a file that was edited; only the other chunks are embedded. A vector is reused when the text is identical and the dimension matches, so switching to a different model with the same dimension keeps old vectors for unchanged text. Run `onfly index` against a new database after changing the model.
 
 A normal index leaves stdout empty.
 

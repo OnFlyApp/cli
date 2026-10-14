@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/axitdev/onfly/internal/config"
@@ -647,5 +648,65 @@ func TestConcurrentIndexMatchesSequential(t *testing.T) {
 	again, err := Run(context.Background(), cfg, nil, Options{})
 	if err != nil || again.Skipped != 12 {
 		t.Fatalf("second run %+v %v", again, err)
+	}
+}
+
+func TestReindexEmbedsOnlyChangedChunks(t *testing.T) {
+	var texts atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Input []string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		texts.Add(int64(len(req.Input)))
+		vecs := make([][]float32, len(req.Input))
+		for i, text := range req.Input {
+			vecs[i] = []float32{1, 0, 0, float32(len(text)%50) + 1}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": vecs})
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	chunks := filepath.Join(dir, "chunks.json")
+	script := filepath.Join(dir, "chunk.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncat >/dev/null\ncat "+shellQuote(chunks)+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, dir, srv.URL, script)
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, "src", "user.go")
+	write := func(second string) {
+		body := "package p\nfunc alpha() {}\n" + second + "\n"
+		if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		js := `[{"type":"function","content":"func alpha() {}","metadata":{"name":"alpha"}},{"type":"function","content":"` + second + `","metadata":{"name":"beta"}}]`
+		if err := os.WriteFile(chunks, []byte(js), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("func beta() {}")
+	cfg := mustLoad(t, dir)
+	if _, err := Run(context.Background(), cfg, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if texts.Load() != 2 {
+		t.Fatalf("run 1 embedded %d", texts.Load())
+	}
+	write("func beta2() {}")
+	stats, err := Run(context.Background(), cfg, nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if texts.Load() != 3 || stats.Reused != 1 {
+		t.Fatalf("run 2 embedded total %d, reused %d", texts.Load(), stats.Reused)
+	}
+	store := openStore(t, cfg)
+	defer store.Close()
+	got, err := store.SearchKeyword(context.Background(), "alpha", 10, "")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("keyword = %+v %v", got, err)
 	}
 }

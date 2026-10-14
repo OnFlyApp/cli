@@ -41,6 +41,8 @@ type Store interface {
 	WorkspacesForName(ctx context.Context, name string) ([]string, error)
 	FileHash(ctx context.Context, path string) (string, bool, error)
 	FileHashes(ctx context.Context) (map[string]string, error)
+	// VectorsByFile maps chunk content to its stored vector for one file.
+	VectorsByFile(ctx context.Context, path string) (map[string][]float32, error)
 	Generation(ctx context.Context) (int64, error)
 	Optimize(ctx context.Context) error
 	Close() error

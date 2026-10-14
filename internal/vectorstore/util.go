@@ -25,6 +25,28 @@ func vecLiteral(v []float32) string {
 	return b.String()
 }
 
+// parseVecLiteral is the inverse of vecLiteral: "[1,2.5,-3]".
+func parseVecLiteral(s string) ([]float32, error) {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
+		return nil, fmt.Errorf("vectorstore: bad vector literal")
+	}
+	body := strings.TrimSpace(s[1 : len(s)-1])
+	if body == "" {
+		return []float32{}, nil
+	}
+	parts := strings.Split(body, ",")
+	out := make([]float32, len(parts))
+	for i, p := range parts {
+		f, err := strconv.ParseFloat(strings.TrimSpace(p), 32)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = float32(f)
+	}
+	return out, nil
+}
+
 func metaJSON(m map[string]string) string {
 	if m == nil {
 		return "{}"

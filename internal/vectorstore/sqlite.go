@@ -692,6 +692,30 @@ func (s *SQLite) FileHashes(ctx context.Context) (map[string]string, error) {
 	return out, rows.Err()
 }
 
+func (s *SQLite) VectorsByFile(ctx context.Context, path string) (map[string][]float32, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.content, vec_to_json(v.embedding)
+		FROM chunk_meta AS m JOIN chunk_vecs AS v ON v.rowid = m.rowid
+		WHERE m.file_path = ?`, slashPath(path))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]float32{}
+	for rows.Next() {
+		var content, lit string
+		if err := rows.Scan(&content, &lit); err != nil {
+			return nil, err
+		}
+		v, err := parseVecLiteral(lit)
+		if err != nil {
+			return nil, err
+		}
+		out[content] = v
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLite) Generation(ctx context.Context) (int64, error) {
 	var raw string
 	err := s.db.QueryRowContext(ctx, `SELECT value FROM schema_meta WHERE key = 'index_generation'`).Scan(&raw)
