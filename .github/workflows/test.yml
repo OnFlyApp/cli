@@ -4,10 +4,49 @@ on:
   pull_request:
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    services: {}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+      - run: go vet ./...
+      - run: go test ./... -count=1 -timeout 300s
+        env:
+          CGO_ENABLED: "0"
+  race-and-tidy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.1"
-      - run: CGO_ENABLED=0 go test ./... -count=1 -timeout 300s
+      - run: go mod tidy -diff
+      - run: go test -race ./... -count=1 -timeout 600s
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      pg:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: onfly
+          POSTGRES_DB: onfly
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+      - run: go test ./internal/vectorstore/... -count=1
+        env:
+          CGO_ENABLED: "0"
+          ONFLY_TEST_POSTGRES_DSN: postgres://postgres:onfly@localhost:5432/onfly?sslmode=disable

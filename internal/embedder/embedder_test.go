@@ -3,6 +3,7 @@ package embedder
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -345,4 +346,15 @@ func indexOf(s, sub string) int {
 		}
 	}
 	return -1
+}
+
+func TestRetryable(t *testing.T) {
+	for status, want := range map[int]bool{429: true, 502: true, 503: true, 504: true, 500: false, 400: false, 401: false} {
+		if got := retryable(&statusError{Status: status}); got != want {
+			t.Fatalf("%d: %v", status, got)
+		}
+	}
+	if retryable(errors.New("boom")) {
+		t.Fatal("plain error retried")
+	}
 }

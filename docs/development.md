@@ -25,7 +25,7 @@ internal/parser/        chunk type, extension router, WASI host, stdio host
 internal/tokens/        cl100k token counter
 internal/split/         recursive chunk splitter
 internal/embedder/      Ollama, OpenAI, and Voyage clients, 429 and 503 retry
-internal/index/         hash skip, embed, save, prune, dry-run cost
+internal/index/         hash skip, embed, save, prune, dry-run token count
 internal/watch/         fsnotify debounce
 internal/vectorstore/   sqlite and postgres, schema version 2
 internal/mcp/           MCP tools, token budget, trace, index resource

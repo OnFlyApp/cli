@@ -78,7 +78,7 @@ func runStoreContract(t *testing.T, st Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetFileHash(ctx, "src/main.go", "abc"); err != nil {
+	if err := st.CommitFile(ctx, "src/main.go", "abc", nil); err != nil {
 		t.Fatal(err)
 	}
 	hashes, err := st.FileHashes(ctx)
@@ -147,6 +147,44 @@ func runStoreContract(t *testing.T, st Store) {
 	}
 	if len(files) != 0 {
 		t.Fatalf("files = %v", files)
+	}
+	runWorkspaceKNN(t, st)
+}
+
+// runWorkspaceKNN checks that a workspace filter still returns `limit` rows when
+// another workspace owns the nearest vectors.
+func runWorkspaceKNN(t *testing.T, st Store) {
+	t.Helper()
+	ctx := context.Background()
+	var chunks []EmbeddedChunk
+	for i := 0; i < 8; i++ {
+		chunks = append(chunks, EmbeddedChunk{
+			Chunk:     parser.Chunk{FilePath: "knn/foreign" + string(rune('a'+i)) + ".go", Type: "function", Content: "foreign", Metadata: map[string]string{"name": "F"}},
+			Vector:    []float32{1, 0.01 * float32(i), 0, 0},
+			Workspace: "foreign",
+		})
+	}
+	for i := 0; i < 3; i++ {
+		chunks = append(chunks, EmbeddedChunk{
+			Chunk:     parser.Chunk{FilePath: "knn/mine" + string(rune('a'+i)) + ".go", Type: "function", Content: "mine", Metadata: map[string]string{"name": "M"}},
+			Vector:    []float32{0, 1, 0.01 * float32(i), 0},
+			Workspace: "mine",
+		})
+	}
+	if err := st.SaveChunks(ctx, chunks); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SearchSemantic(ctx, []float32{1, 0, 0, 0}, 3, "mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("workspace-filtered KNN returned %d rows, want 3", len(got))
+	}
+	for _, c := range got {
+		if c.Content != "mine" {
+			t.Fatalf("foreign row leaked: %+v", c)
+		}
 	}
 }
 

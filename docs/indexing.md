@@ -45,18 +45,15 @@ A normal index leaves stdout empty.
 files: 12
 chunks: 40
 tokens: 18000
-estimated_cost_usd: 0.000360
 ```
-
-Rates per million tokens are 0.02 for `text-embedding-3-small`, 0.13 for `text-embedding-3-large`, and 0.10 for `text-embedding-ada-002`. Voyage rates are 0.18 for `voyage-code-3` and `voyage-3-large`, 0.12 for `voyage-code-4` and `voyage-4-large`, 0.06 for `voyage-4` and `voyage-3.5`, and 0.02 for `voyage-4-lite` and `voyage-3.5-lite`. Any other model, including `qwen3-embedding:0.6b`, prints `0.000000`.
 
 ## Watch
 
-`onfly watch` watches the project, except `.git` and `.onfly`, and waits `indexer.debounce_ms` (default 2000) before reindexing one path. Writes inside `.onfly` do not call the parser. Children of a removed directory stay in the index until the next `onfly index`.
+`onfly watch` watches the project, except `.git` and `.onfly`, and waits `indexer.debounce_ms` (default 2000) before reindexing one path. Writes inside `.onfly` do not call the parser. A removed file or directory is dropped after the same delay. Editing a `.gitignore` reloads the ignore rules, drops files that became ignored, and reindexes files that became allowed. Reference links are recomputed only for the changed file unless the set of defined names changed.
 
 ## What gets stored
 
-SQLite keeps text, metadata, `outbound`, and `workspace` in `chunk_meta`, the content hash in `index_state`, vectors in a `vec0` table, and an FTS5 index maintained by insert and delete triggers. Semantic search uses sqlite-vec `MATCH` with `distance_metric=cosine`. `Init` rewrites an existing L2 `vec0` table in place and leaves the schema version at `2`. After the parser returns, the indexer fills `metadata.start_line` and `metadata.end_line` when the parser left them empty, using the first match of the chunk text in the file. Keyword search is a case-insensitive substring match, then an FTS5 phrase query. A bad FTS query still returns the substring hits.
+SQLite keeps text, metadata, `outbound`, and `workspace` in `chunk_meta`, the content hash in `index_state`, vectors in a `vec0` table, and an FTS5 index maintained by insert and delete triggers. Semantic search uses sqlite-vec `MATCH` with `distance_metric=cosine`. `Init` rewrites an existing L2 `vec0` table in place and leaves the schema version at `2`. After the parser returns, the indexer fills `metadata.start_line` and `metadata.end_line` when the parser left them empty, using the first match of the chunk text in the file, searching forward from the previous chunk so repeated snippets get successive lines. Keyword search is a case-insensitive substring match, then an FTS5 phrase query. A bad FTS query still returns the substring hits.
 
 Postgres keeps one `chunks` row with a `vector(N)` column and a stored `tsvector`. Semantic search orders by cosine distance (`<=>`). An HNSW index is created when `N` is at most 2000. Wider vectors are scanned exactly. Keyword search is `ILIKE` or `plainto_tsquery('simple', ...)`.
 

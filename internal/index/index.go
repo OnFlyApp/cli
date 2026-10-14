@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
@@ -47,10 +49,12 @@ type FileResult struct {
 	Skipped bool
 	Chunks  int
 	Tokens  int
-	Failed  bool
 	Omit    bool
 	Err     error
 }
+
+// Failed reports a per-file failure that must not abort the run.
+func (r FileResult) Failed() bool { return r.Err != nil }
 
 type Session struct {
 	cfg      config.Config
@@ -62,8 +66,9 @@ type Session struct {
 	ign      *ignore.Set
 	count    func(string) int
 	progress func(Event)
-	n        int
+	n        atomic.Int64
 	total    int
+	names    map[string]struct{}
 }
 
 func ContentHash(b []byte) string {
@@ -142,6 +147,16 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 	}, nil
 }
 
+// ReloadIgnore re-reads every .gitignore under the project root.
+func (s *Session) ReloadIgnore() error {
+	ign, err := ignore.Load(s.cfg.ProjectRoot)
+	if err != nil {
+		return err
+	}
+	s.ign = ign
+	return nil
+}
+
 func (s *Session) Close() error {
 	var err error
 	if s.router != nil {
@@ -172,19 +187,16 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 	var first error
 	protected := map[string]struct{}{}
 	s.total = len(files)
+	results, done, runErr := s.indexAll(ctx, files, hashes)
 	for i, rel := range files {
-		if err := ctx.Err(); err != nil {
-			return stats, err
+		if !done[i] {
+			continue
 		}
-		s.n = i + 1
-		result, err := s.indexFile(ctx, rel, hashes[rel])
-		if err != nil {
-			return stats, err
-		}
+		result := results[i]
 		if result.Omit {
 			continue
 		}
-		if result.Failed {
+		if result.Failed() {
 			stats.Failed++
 			protected[rel] = struct{}{}
 			if first == nil {
@@ -201,6 +213,9 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 		stats.Chunks += result.Chunks
 		stats.Tokens += result.Tokens
 	}
+	if runErr != nil {
+		return stats, runErr
+	}
 	if s.opt.DryRun {
 		if stats.Failed > 0 {
 			if first == nil {
@@ -215,7 +230,7 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 		return stats, err
 	}
 	s.report("linking references", "")
-	if err := s.linkRefs(ctx); err != nil {
+	if err := s.linkRefs(ctx, nil); err != nil {
 		return stats, err
 	}
 	if stats.Failed > 0 {
@@ -227,9 +242,63 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
+// indexAll runs indexFile for every path, with indexer.concurrency workers.
+// done[i] is true when results[i] is valid. The first hard error stops the run.
+func (s *Session) indexAll(ctx context.Context, files []string, hashes map[string]string) ([]FileResult, []bool, error) {
+	results := make([]FileResult, len(files))
+	done := make([]bool, len(files))
+	workers := max(1, s.cfg.Indexer.Concurrency)
+	if workers == 1 {
+		for i, rel := range files {
+			if err := ctx.Err(); err != nil {
+				return results, done, err
+			}
+			s.n.Store(int64(i + 1))
+			r, err := s.indexFile(ctx, rel, hashes[rel])
+			if err != nil {
+				return results, done, err
+			}
+			results[i], done[i] = r, true
+		}
+		return results, done, nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		wg   sync.WaitGroup
+		once sync.Once
+		fail error
+	)
+	jobs := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				s.n.Store(int64(i + 1))
+				r, err := s.indexFile(ctx, files[i], hashes[files[i]])
+				if err != nil {
+					once.Do(func() { fail = err; cancel() })
+					continue
+				}
+				results[i], done[i] = r, true
+			}
+		}()
+	}
+	for i := range files {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results, done, fail
+}
+
 func (s *Session) Sync(ctx context.Context, rel string) (FileResult, error) {
 	rel = slash(rel)
-	if !s.eligible(rel) {
+	if !s.inScope(rel) {
 		return FileResult{}, s.Drop(ctx, rel)
 	}
 	full := filepath.Join(s.cfg.ProjectRoot, filepath.FromSlash(rel))
@@ -237,17 +306,18 @@ func (s *Session) Sync(ctx context.Context, rel string) (FileResult, error) {
 		if os.IsNotExist(err) {
 			return FileResult{}, s.Drop(ctx, rel)
 		}
-		return FileResult{Failed: true}, nil
+		s.logger.Warn("stat", "path", rel, "err", err)
+		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
-	hashes, err := s.store.FileHashes(ctx)
+	oldHash, _, err := s.store.FileHash(ctx, rel)
 	if err != nil {
 		return FileResult{}, err
 	}
-	result, err := s.indexFile(ctx, rel, hashes[rel])
-	if err != nil || result.Failed || result.Skipped {
+	result, err := s.indexFile(ctx, rel, oldHash)
+	if err != nil || result.Failed() || result.Skipped {
 		return result, err
 	}
-	if err := s.linkRefs(ctx); err != nil {
+	if err := s.linkRefs(ctx, []string{rel}); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -264,20 +334,18 @@ func (s *Session) Drop(ctx context.Context, rel string) error {
 	if err := s.deletePaths(ctx, []string{slash(rel)}); err != nil {
 		return err
 	}
-	return s.linkRefs(ctx)
+	return s.linkRefs(ctx, []string{})
 }
 
-func (s *Session) DropAbsent(ctx context.Context) error {
-	if s.store == nil {
-		return nil
-	}
+// knownPaths is every path the store holds chunks or a hash for.
+func (s *Session) knownPaths(ctx context.Context) (map[string]struct{}, error) {
 	hashes, err := s.store.FileHashes(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	listed, err := s.store.ListFiles(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	set := map[string]struct{}{}
 	for path := range hashes {
@@ -285,6 +353,17 @@ func (s *Session) DropAbsent(ctx context.Context) error {
 	}
 	for _, path := range listed {
 		set[slash(path)] = struct{}{}
+	}
+	return set, nil
+}
+
+func (s *Session) DropAbsent(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	set, err := s.knownPaths(ctx)
+	if err != nil {
+		return err
 	}
 	var drop []string
 	for path := range set {
@@ -295,18 +374,14 @@ func (s *Session) DropAbsent(ctx context.Context) error {
 			}
 			continue
 		}
-		if !s.eligible(path) {
+		if !s.inScope(path) {
 			drop = append(drop, path)
 		}
 	}
 	if err := s.deletePaths(ctx, drop); err != nil {
 		return err
 	}
-	return s.linkRefs(ctx)
-}
-
-func (s *Session) eligible(rel string) bool {
-	return s.inScope(rel)
+	return s.linkRefs(ctx, []string{})
 }
 
 func (s *Session) inScope(rel string) bool {
@@ -335,20 +410,9 @@ func (s *Session) DropTree(ctx context.Context, rel string) error {
 		return nil
 	}
 	rel = slash(rel)
-	hashes, err := s.store.FileHashes(ctx)
+	set, err := s.knownPaths(ctx)
 	if err != nil {
 		return err
-	}
-	listed, err := s.store.ListFiles(ctx)
-	if err != nil {
-		return err
-	}
-	set := map[string]struct{}{}
-	for path := range hashes {
-		set[slash(path)] = struct{}{}
-	}
-	for _, path := range listed {
-		set[slash(path)] = struct{}{}
 	}
 	prefix := rel + "/"
 	var drop []string
@@ -360,7 +424,17 @@ func (s *Session) DropTree(ctx context.Context, rel string) error {
 	if err := s.deletePaths(ctx, drop); err != nil {
 		return err
 	}
-	return s.linkRefs(ctx)
+	return s.linkRefs(ctx, []string{})
+}
+
+// omit drops rel from the store (unless dry run) and tells the caller to ignore it.
+func (s *Session) omit(ctx context.Context, rel string) (FileResult, error) {
+	if !s.opt.DryRun {
+		if err := s.deletePaths(ctx, []string{rel}); err != nil {
+			return FileResult{}, err
+		}
+	}
+	return FileResult{Omit: true}, nil
 }
 
 func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResult, error) {
@@ -369,56 +443,36 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	lst, lerr := os.Lstat(full)
 	if lerr != nil {
 		if os.IsNotExist(lerr) {
-			if !s.opt.DryRun {
-				if err := s.deletePaths(ctx, []string{rel}); err != nil {
-					return FileResult{}, err
-				}
-			}
-			return FileResult{Omit: true}, nil
+			return s.omit(ctx, rel)
 		}
 		s.logger.Warn("stat", "path", rel, "err", lerr)
 		s.report("failed", rel)
-		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, lerr)}, nil
+		return FileResult{Err: fmt.Errorf("%s: %w", rel, lerr)}, nil
 	}
 	if lst.Mode()&os.ModeSymlink != 0 {
 		target, err := filepath.EvalSymlinks(full)
 		if err != nil || !withinRoot(s.cfg.ProjectRoot, target) || !linkTargetOK(s.cfg.ProjectRoot, target, s.ign, s.cfg.Indexer.Exclude) {
-			if !s.opt.DryRun {
-				if err := s.deletePaths(ctx, []string{rel}); err != nil {
-					return FileResult{}, err
-				}
-			}
-			return FileResult{Omit: true}, nil
+			return s.omit(ctx, rel)
 		}
 	}
 	info, err := os.Stat(full)
 	if err != nil {
 		s.logger.Warn("stat", "path", rel, "err", err)
 		s.report("failed", rel)
-		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, err)}, nil
+		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	if !info.Mode().IsRegular() {
-		if !s.opt.DryRun {
-			if err := s.deletePaths(ctx, []string{rel}); err != nil {
-				return FileResult{}, err
-			}
-		}
-		return FileResult{Omit: true}, nil
+		return s.omit(ctx, rel)
 	}
 	if info.Size() > maxFileBytes {
 		s.logger.Warn("skip large file", "path", rel, "size", info.Size())
-		if !s.opt.DryRun {
-			if err := s.deletePaths(ctx, []string{rel}); err != nil {
-				return FileResult{}, err
-			}
-		}
-		return FileResult{Omit: true}, nil
+		return s.omit(ctx, rel)
 	}
 	body, err := os.ReadFile(full)
 	if err != nil {
 		s.logger.Warn("read", "path", rel, "err", err)
 		s.report("failed", rel)
-		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, err)}, nil
+		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	hash := ContentHash(body)
 	if oldHash != "" && oldHash == hash {
@@ -426,11 +480,11 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		return FileResult{Skipped: true}, nil
 	}
 	s.report("parsing", rel)
-	chunks, err := s.router.Parse(full, body)
+	chunks, err := s.router.Parse(ctx, full, body)
 	if err != nil {
 		s.logger.Warn("parse", "path", rel, "err", err)
 		s.report("failed", rel)
-		return FileResult{Failed: true, Err: fmt.Errorf("%s: %w", rel, err)}, nil
+		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	overlap := s.cfg.Embedder.MaxInputTokens * 12 / 100
 	chunks = split.Split(chunks, s.cfg.Embedder.MaxInputTokens, overlap, s.count)
@@ -472,8 +526,11 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 // fillChunkLines sets start_line and end_line when the parser left both empty.
 // The line is 1 plus the newlines before the first match of the chunk text.
 // The end line adds the newlines inside that text. A missing match leaves both unset.
+// Chunks arrive in file order, so each search starts after the previous match;
+// repeated snippets then resolve to successive occurrences, not the first one.
 func fillChunkLines(file []byte, chunks []parser.Chunk) {
 	text := string(file)
+	from := 0
 	for i := range chunks {
 		meta := chunks[i].Metadata
 		if meta == nil {
@@ -487,10 +544,13 @@ func fillChunkLines(file []byte, chunks []parser.Chunk) {
 		if content == "" {
 			continue
 		}
-		idx := strings.Index(text, content)
-		if idx < 0 {
+		idx := strings.Index(text[from:], content)
+		if idx >= 0 {
+			idx += from
+		} else if idx = strings.Index(text, content); idx < 0 {
 			continue
 		}
+		from = idx + 1
 		start := 1 + strings.Count(text[:idx], "\n")
 		meta["start_line"] = strconv.Itoa(start)
 		meta["end_line"] = strconv.Itoa(start + strings.Count(content, "\n"))
@@ -498,30 +558,15 @@ func fillChunkLines(file []byte, chunks []parser.Chunk) {
 }
 
 func (s *Session) prune(ctx context.Context, protected map[string]struct{}, stats *Stats) error {
-	hashes, err := s.store.FileHashes(ctx)
+	known, err := s.knownPaths(ctx)
 	if err != nil {
 		return err
-	}
-	listed, err := s.store.ListFiles(ctx)
-	if err != nil {
-		return err
-	}
-	dropSet := map[string]struct{}{}
-	consider := func(path string) {
-		path = slash(path)
-		if _, ok := protected[path]; ok || !s.inScope(path) {
-			return
-		}
-		dropSet[path] = struct{}{}
-	}
-	for path := range hashes {
-		consider(path)
-	}
-	for _, path := range listed {
-		consider(path)
 	}
 	var drop []string
-	for path := range dropSet {
+	for path := range known {
+		if _, ok := protected[path]; ok || !s.inScope(path) {
+			continue
+		}
 		drop = append(drop, path)
 	}
 	sort.Strings(drop)

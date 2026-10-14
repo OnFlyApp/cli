@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -16,7 +17,7 @@ type Chunk struct {
 }
 
 type Parser interface {
-	Parse(filePath string, content []byte) ([]Chunk, error)
+	Parse(ctx context.Context, filePath string, content []byte) ([]Chunk, error)
 	Close() error
 }
 

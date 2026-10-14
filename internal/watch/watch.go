@@ -56,7 +56,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		full := filepath.Join(cfg.ProjectRoot, filepath.FromSlash(rel))
 		if _, err := os.Stat(full); err != nil {
 			if os.IsNotExist(err) {
-				if err := session.Drop(ctx, rel); err != nil {
+				// DropTree also covers a removed directory.
+				if err := session.DropTree(ctx, rel); err != nil {
 					logger.Error("watch drop", "path", rel, "err", err)
 				}
 				return
@@ -105,16 +106,25 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			if skip {
 				continue
 			}
-			if ev.Has(fsnotify.Remove) || ev.Has(fsnotify.Rename) {
-				opMu.Lock()
-				err := session.DropTree(ctx, rel)
-				opMu.Unlock()
-				if err != nil {
-					logger.Error("watch drop", "path", rel, "err", err)
+			if filepath.Base(rel) == ".gitignore" && !ev.Has(fsnotify.Remove) {
+				// Scope changed: reload matchers, drop newly ignored files, index newly allowed ones.
+				if next, err := ignore.Load(cfg.ProjectRoot); err == nil {
+					ign = next
+					opMu.Lock()
+					if err := session.ReloadIgnore(); err != nil {
+						logger.Error("watch ignore", "err", err)
+					} else if err := session.DropAbsent(ctx); err != nil {
+						logger.Error("watch ignore", "err", err)
+					}
+					opMu.Unlock()
+					rescan(w, cfg.ProjectRoot, ign, coal.push)
 				}
-				if ev.Has(fsnotify.Remove) {
-					continue
-				}
+				continue
+			}
+			if ev.Has(fsnotify.Remove) {
+				// Removal is handled by the debounced callback so the loop never blocks on opMu.
+				coal.push(rel)
+				continue
 			}
 			if ev.Has(fsnotify.Create) {
 				info, err := os.Stat(ev.Name)

@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
 var (
@@ -71,26 +73,39 @@ func sameRefs(a, b []string) bool {
 	return true
 }
 
-func (s *Session) linkRefs(ctx context.Context) error {
+// linkRefs recomputes outbound references. changed == nil forces a full pass.
+// Otherwise only chunks of the changed files are relinked, because a chunk's
+// references depend only on its own content and the set of defined names. A
+// changed name set (or an unknown previous one) falls back to the full pass.
+func (s *Session) linkRefs(ctx context.Context, changed []string) error {
 	if s == nil || s.store == nil || s.opt.DryRun {
 		return nil
 	}
-	rows, err := s.store.ListChunks(ctx)
+	list, err := s.store.Names(ctx)
 	if err != nil {
 		return err
 	}
-	names := map[string]struct{}{}
-	for _, row := range rows {
-		if n := row.Chunk.Metadata["name"]; n != "" {
-			names[n] = struct{}{}
-		}
+	names := make(map[string]struct{}, len(list))
+	for _, n := range list {
+		names[n] = struct{}{}
+	}
+	full := changed == nil || !sameSet(s.names, names)
+	s.names = names
+	var rows []vectorstore.StoredChunk
+	switch {
+	case full:
+		rows, err = s.store.ListChunks(ctx)
+	case len(changed) == 0:
+		return nil
+	default:
+		rows, err = s.store.ChunksByFiles(ctx, changed)
+	}
+	if err != nil {
+		return err
 	}
 	updates := map[int64][]string{}
 	for _, row := range rows {
-		self := ""
-		if row.Chunk.Metadata != nil {
-			self = row.Chunk.Metadata["name"]
-		}
+		self := row.Chunk.Metadata["name"]
 		next := keepQualified(row.Chunk.Content, row.Chunk.Outbound, mentioned(row.Chunk.Content, self, names))
 		if sameRefs(next, row.Chunk.Outbound) {
 			continue
@@ -98,4 +113,16 @@ func (s *Session) linkRefs(ctx context.Context) error {
 		updates[row.ID] = next
 	}
 	return s.store.UpdateOutbound(ctx, updates)
+}
+
+func sameSet(a, b map[string]struct{}) bool {
+	if a == nil || len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
 }

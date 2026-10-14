@@ -112,7 +112,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly init --force` | Overwrite that config and those rule files. |
 | `onfly init --ci` | Also write `.github/workflows/onfly-index.yml`. An existing config is left in place. `--force` overwrites the workflow. |
 | `onfly index` | Parse matching files, embed the chunks, and update the database. |
-| `onfly index --dry-run` | Parse and print a token and cost estimate. Does not open the database or call the embedder. |
+| `onfly index --dry-run` | Parse and print file, chunk, and token counts. Does not open the database or call the embedder. |
 | `onfly index --ci` | Embed 128 chunks per request. The default batch is 32. |
 | `onfly watch` | Reindex changed files after `indexer.debounce_ms`. |
 | `onfly serve` | Serve the MCP tools on stdio. |

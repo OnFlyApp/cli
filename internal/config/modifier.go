@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -148,7 +149,7 @@ func findConflicts(parsers *yaml.Node, rel string, want []string) []string {
 			continue
 		}
 		for _, ext := range entryExts(item) {
-			if containsStr(want, ext) && !seen[ext] {
+			if slices.Contains(want, ext) && !seen[ext] {
 				seen[ext] = true
 				out = append(out, ext)
 			}
@@ -232,7 +233,7 @@ func entryExts(item *yaml.Node) []string {
 	}
 	var out []string
 	for _, c := range n.Content {
-		if ext := normalizeExt(c.Value); ext != "" && ext != "." {
+		if ext := NormalizeExt(c.Value); ext != "" && ext != "." {
 			out = append(out, ext)
 		}
 	}
@@ -250,7 +251,7 @@ func normalizeList(in []string) ([]string, error) {
 	var out []string
 	seen := map[string]bool{}
 	for _, ext := range in {
-		n := normalizeExt(ext)
+		n := NormalizeExt(ext)
 		if n == "" || n == "." {
 			return nil, fmt.Errorf("config: extension is invalid")
 		}
@@ -265,7 +266,8 @@ func normalizeList(in []string) ([]string, error) {
 	return out, nil
 }
 
-func normalizeExt(ext string) string {
+// NormalizeExt lower-cases ext and adds the leading dot. An empty input stays empty.
+func NormalizeExt(ext string) string {
 	ext = strings.ToLower(strings.TrimSpace(ext))
 	if ext == "" {
 		return ""
@@ -276,19 +278,10 @@ func normalizeExt(ext string) string {
 	return ext
 }
 
-func containsStr(list []string, v string) bool {
-	for _, item := range list {
-		if item == v {
-			return true
-		}
-	}
-	return false
-}
-
 func subtract(have, drop []string) []string {
 	var out []string
 	for _, ext := range have {
-		if !containsStr(drop, ext) {
+		if !slices.Contains(drop, ext) {
 			out = append(out, ext)
 		}
 	}

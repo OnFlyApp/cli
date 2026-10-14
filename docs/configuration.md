@@ -4,7 +4,7 @@ Onfly reads `.onfly/config.yaml`. Starting from the working directory, it walks 
 
 The project root is the parent of the `.onfly` directory that holds the file. Relative SQLite DSNs, rule paths, the log file, and WASM plugin paths are resolved from that root. A DSN of `:memory:`, an absolute path, or a string that contains `://` is left alone. Stdio `command` strings are expanded, then left relative to the process working directory.
 
-`$VAR` and `${VAR}` are expanded in the DSN, embedder endpoint, model, API key, log file, rule paths, and parser path or command.
+`$VAR` and `${VAR}` are expanded (write `$$` for a literal `$`) in the DSN, embedder endpoint, model, API key, log file, rule paths, and parser path or command.
 
 ## File
 
@@ -46,6 +46,7 @@ indexer:
   include: ["**/*.go", "src/**/*", "cmd/**/*", "internal/**/*", "pkg/**/*", "assets/**/*", "docs/**/*.md"]
   exclude: ["vendor", "node_modules", "var", "public"]
   debounce_ms: 2000              # onfly watch; default 2000
+  concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]
       type: wasm
@@ -62,7 +63,7 @@ server:
   log_level: debug               # debug, info, warn, error
   log_file: .onfly/server.log    # required; serve writes logs here
   max_tokens: 8192               # search result budget; serve --max-tokens overrides when > 0
-  trace_file: .onfly/mcp_trace.jsonl
+  # trace_file: .onfly/mcp_trace.jsonl   # off by default; appends one JSON line per tool call
 ```
 
 If a `.git` directory or file sits at or above the start directory, Onfly loads every `.onfly/config.yaml` from the git root down to that directory and merges them. A set child scalar replaces the parent. Child `include` patterns are prefixed with the child path relative to the git root. The project root becomes the git root, and `workspace` is stored on each chunk. `--config` loads one file and does not merge. With no git root, only the nearest config is used.

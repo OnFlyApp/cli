@@ -27,7 +27,7 @@ func TestWasmParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { p.Close() })
-	chunks, err := p.Parse("src/A.php", []byte("<?php class A {}"))
+	chunks, err := p.Parse(context.Background(), "src/A.php", []byte("<?php class A {}"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestWasmStdoutCapIsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { p.Close() })
-	if _, err := p.Parse("a.go", []byte("BIG")); err == nil || !strings.Contains(err.Error(), "stdout exceeds") {
+	if _, err := p.Parse(context.Background(), "a.go", []byte("BIG")); err == nil || !strings.Contains(err.Error(), "stdout exceeds") {
 		t.Fatalf("%v", err)
 	}
 }
@@ -56,7 +56,7 @@ func TestWasmFailAndMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { p.Close() })
-	if _, err := p.Parse("a.go", []byte("FAIL")); err == nil {
+	if _, err := p.Parse(context.Background(), "a.go", []byte("FAIL")); err == nil {
 		t.Fatal("expected error")
 	}
 	if _, err := newWasmParser(context.Background(), filepath.Join(t.TempDir(), "missing.wasm")); err == nil {
@@ -78,10 +78,10 @@ func TestWasmTimeoutThenRecover(t *testing.T) {
 	}
 	t.Cleanup(func() { p.Close() })
 	start := time.Now()
-	if _, err := p.Parse("a.go", []byte("LOOP")); err == nil || time.Since(start) > 8*time.Second {
+	if _, err := p.Parse(context.Background(), "a.go", []byte("LOOP")); err == nil || time.Since(start) > 8*time.Second {
 		t.Fatalf("err=%v elapsed=%s", err, time.Since(start))
 	}
-	chunks, err := p.Parse("a.go", []byte("ok"))
+	chunks, err := p.Parse(context.Background(), "a.go", []byte("ok"))
 	if err != nil {
 		t.Fatal(err)
 	}

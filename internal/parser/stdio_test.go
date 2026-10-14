@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,7 @@ cat >/dev/null
 printf '%s\n' '[{"file_path":"","type":"class","content":"class A {}","metadata":{"name":"User"}}]'
 `)
 	p := newStdioParser(script)
-	got, err := p.Parse("app/User.php", []byte("<?php"))
+	got, err := p.Parse(context.Background(), "app/User.php", []byte("<?php"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,7 @@ printf '%s\n' '[{"file_path":"","type":"class","content":"class A {}","metadata"
 func TestStdioExitError(t *testing.T) {
 	script := writeScript(t, "#!/bin/sh\necho boom >&2\nexit 1\n")
 	p := newStdioParser(script)
-	_, err := p.Parse("a.php", []byte("x"))
+	_, err := p.Parse(context.Background(), "a.php", []byte("x"))
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("err = %v", err)
 	}
@@ -45,12 +46,12 @@ func TestStdioTimeout(t *testing.T) {
 	script := writeScript(t, "#!/bin/sh\nsleep 30\n")
 	p := newStdioParser(script)
 	start := time.Now()
-	if _, err := p.Parse("a.php", []byte("x")); err == nil || time.Since(start) > 8*time.Second {
+	if _, err := p.Parse(context.Background(), "a.php", []byte("x")); err == nil || time.Since(start) > 8*time.Second {
 		t.Fatalf("err=%v elapsed=%s", err, time.Since(start))
 	}
 	ok := writeScript(t, "#!/bin/sh\nprintf '[]'\n")
 	p2 := newStdioParser(ok)
-	got, err := p2.Parse("a.php", nil)
+	got, err := p2.Parse(context.Background(), "a.php", nil)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("%v %v", got, err)
 	}
@@ -59,7 +60,7 @@ func TestStdioTimeout(t *testing.T) {
 func TestStdioBadJSON(t *testing.T) {
 	script := writeScript(t, "#!/bin/sh\necho not-json\n")
 	p := newStdioParser(script)
-	_, err := p.Parse("a.php", []byte("x"))
+	_, err := p.Parse(context.Background(), "a.php", []byte("x"))
 	if err == nil || !strings.Contains(err.Error(), "json") {
 		t.Fatalf("err = %v", err)
 	}

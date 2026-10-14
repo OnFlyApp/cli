@@ -13,7 +13,7 @@ func (s *Session) report(action, path string) {
 	if s == nil || s.progress == nil {
 		return
 	}
-	s.progress(Event{Action: action, Path: path, N: s.n, Total: s.total})
+	s.progress(Event{Action: action, Path: path, N: int(s.n.Load()), Total: s.total})
 }
 
 func reportOpt(opt Options, action string) {

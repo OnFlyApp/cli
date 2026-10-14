@@ -17,3 +17,18 @@ func New(ctx context.Context, cfg config.Database) (Store, error) {
 		return nil, fmt.Errorf("database driver %q is not available", cfg.Driver)
 	}
 }
+
+// Checker is the read-only surface `doctor` needs; it never creates a schema.
+type Checker interface {
+	CheckMeta(ctx context.Context, dimensions int) error
+	Ping(ctx context.Context) error
+	Close() error
+}
+
+func OpenChecker(ctx context.Context, cfg config.Database) (Checker, error) {
+	st, err := New(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return st.(Checker), nil
+}

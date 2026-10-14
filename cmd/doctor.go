@@ -12,6 +12,7 @@ import (
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
+	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	"github.com/spf13/cobra"
@@ -62,42 +63,17 @@ func checkDatabase(ctx context.Context, cfg config.Config, out io.Writer) error 
 			return err
 		}
 	}
-	var ping func(context.Context) error
-	var closeFn func() error
-	switch cfg.Database.Driver {
-	case "sqlite":
-		st, err := vectorstore.OpenSQLite(cfg.Database.DSN)
-		if err != nil {
-			fmt.Fprintf(out, "database: %s\n", err)
-			return err
-		}
-		if err := st.CheckMeta(ctx, cfg.Embedder.Dimensions); err != nil {
-			st.Close()
-			fmt.Fprintf(out, "database: %s\n", err)
-			return err
-		}
-		ping = st.Ping
-		closeFn = st.Close
-	case "postgres":
-		st, err := vectorstore.OpenPostgres(ctx, cfg.Database.DSN)
-		if err != nil {
-			fmt.Fprintf(out, "database: %s\n", err)
-			return err
-		}
-		if err := st.CheckMeta(ctx, cfg.Embedder.Dimensions); err != nil {
-			st.Close()
-			fmt.Fprintf(out, "database: %s\n", err)
-			return err
-		}
-		ping = st.Ping
-		closeFn = st.Close
-	default:
-		err := fmt.Errorf("database driver %q is not available", cfg.Database.Driver)
+	st, err := vectorstore.OpenChecker(ctx, cfg.Database)
+	if err != nil {
 		fmt.Fprintf(out, "database: %s\n", err)
 		return err
 	}
-	defer closeFn()
-	if err := ping(ctx); err != nil {
+	defer st.Close()
+	if err := st.CheckMeta(ctx, cfg.Embedder.Dimensions); err != nil {
+		fmt.Fprintf(out, "database: %s\n", err)
+		return err
+	}
+	if err := st.Ping(ctx); err != nil {
 		fmt.Fprintf(out, "database: %s\n", err)
 		return err
 	}
@@ -148,6 +124,9 @@ func checkPlugins(cfg config.Config, out io.Writer) error {
 			sum := sha256.Sum256(body)
 			parts = append(parts, fmt.Sprintf("%s=%x", filepath.Base(p.Path), sum))
 		case "stdio":
+			if os.Getenv(parser.AllowStdioEnv) != "1" {
+				problems = append(problems, fmt.Sprintf("stdio parser %q needs %s=1", p.Command, parser.AllowStdioEnv))
+			}
 			fields := strings.Fields(p.Command)
 			if len(fields) == 0 {
 				problems = append(problems, "stdio parser command is empty")
@@ -193,7 +172,7 @@ func checkRules(cfg config.Config, out io.Writer) error {
 	}
 	maxTokens := cfg.Server.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 8192
+		maxTokens = config.DefaultMaxTokens
 	}
 	rep := eng.Report(maxTokens)
 	if len(rep.Syntax) > 0 {

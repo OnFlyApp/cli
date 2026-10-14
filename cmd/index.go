@@ -27,11 +27,7 @@ var indexCmd = &cobra.Command{
 		})
 		progress.Finish()
 		if indexDryRun {
-			usd, known := index.EstimateUSD(cfg.Embedder.Model, stats.Tokens)
-			if !known {
-				usd = 0
-			}
-			fmt.Printf("files: %d\nchunks: %d\ntokens: %d\nestimated_cost_usd: %.6f\n", stats.Files, stats.Chunks, stats.Tokens, usd)
+			fmt.Printf("files: %d\nchunks: %d\ntokens: %d\n", stats.Files, stats.Chunks, stats.Tokens)
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Skipped, stats.Pruned, stats.Failed)
@@ -41,5 +37,5 @@ var indexCmd = &cobra.Command{
 
 func init() {
 	indexCmd.Flags().BoolVar(&indexCI, "ci", false, "embed 128 chunks per request")
-	indexCmd.Flags().BoolVar(&indexDryRun, "dry-run", false, "parse and estimate cost without writing the index")
+	indexCmd.Flags().BoolVar(&indexDryRun, "dry-run", false, "parse and count tokens without writing the index")
 }

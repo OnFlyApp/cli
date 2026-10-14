@@ -3,11 +3,16 @@ package parser
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/axitdev/onfly/internal/config"
 )
+
+// AllowStdioEnv must be "1" for stdio parsers to run. A project config can
+// name any shell command, so it is opt-in per machine.
+const AllowStdioEnv = "ONFLY_ALLOW_STDIO"
 
 type Router struct {
 	byExt   map[string]Parser
@@ -33,7 +38,7 @@ func newRouter(index config.Indexer, projectRoot string, open opener) (*Router, 
 		}
 		r.parsers = append(r.parsers, p)
 		for _, ext := range cfg.Extensions {
-			ext = normalizeExt(ext)
+			ext = config.NormalizeExt(ext)
 			if ext == "." || ext == "" {
 				_ = r.Close()
 				return nil, fmt.Errorf("parser extension %q is invalid", ext)
@@ -59,21 +64,13 @@ func openParser(cfg config.ParserConfig) (Parser, error) {
 		if cfg.Command == "" {
 			return nil, fmt.Errorf("stdio parser command is required")
 		}
+		if os.Getenv(AllowStdioEnv) != "1" {
+			return nil, fmt.Errorf("stdio parser %q runs a shell command from the project config; set %s=1 to allow it", cfg.Command, AllowStdioEnv)
+		}
 		return newStdioParser(cfg.Command), nil
 	default:
 		return nil, fmt.Errorf("parser type %q is not available", cfg.Type)
 	}
-}
-
-func normalizeExt(ext string) string {
-	ext = strings.ToLower(strings.TrimSpace(ext))
-	if ext == "" {
-		return ""
-	}
-	if !strings.HasPrefix(ext, ".") {
-		ext = "." + ext
-	}
-	return ext
 }
 
 func (r *Router) match(path string) Parser {
@@ -93,12 +90,12 @@ func (r *Router) HasParser(path string) bool {
 	return r.match(path) != nil
 }
 
-func (r *Router) Parse(path string, content []byte) ([]Chunk, error) {
+func (r *Router) Parse(ctx context.Context, path string, content []byte) ([]Chunk, error) {
 	p := r.match(path)
 	if p == nil {
 		return nil, fmt.Errorf("no parser for %s", path)
 	}
-	return p.Parse(path, content)
+	return p.Parse(ctx, path, content)
 }
 
 func (r *Router) Close() error {

@@ -16,7 +16,7 @@ func TestGoParserWASM(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = p.Close() })
 	src := []byte("package demo\n\ntype Service struct{}\n\nfunc (s *Service) Execute() {}\n")
-	chunks, err := p.Parse("src/svc.go", src)
+	chunks, err := p.Parse(context.Background(), "src/svc.go", src)
 	if err != nil {
 		t.Fatal(err)
 	}

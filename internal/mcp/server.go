@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,9 @@ import (
 	"github.com/axitdev/onfly/internal/vectorstore"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// Version is set at build time with -ldflags -X.
+var Version = "dev"
 
 const (
 	maxRawBytes     = 1 << 20
@@ -112,6 +116,8 @@ type tools struct {
 	workspace string
 	maxTokens int
 	engine    *rules.Engine
+	ign       *ignore.Set
+	exclude   []string
 	logger    *slog.Logger
 	trace     io.Writer
 	traceMu   sync.Mutex
@@ -123,13 +129,19 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	}
 	maxTokens := cfg.Server.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 8192
+		maxTokens = config.DefaultMaxTokens
 	}
 	h := &tools{
 		root: cfg.ProjectRoot, store: store, emb: emb,
 		workspace: cfg.Workspace, maxTokens: maxTokens, logger: logger,
 		engine: rules.Load(cfg),
 	}
+	if ign, err := ignore.Load(cfg.ProjectRoot); err != nil {
+		logger.Warn("gitignore", "err", err)
+	} else {
+		h.ign = ign
+	}
+	h.exclude = cfg.Indexer.Exclude
 	if err := h.engine.ReadError(); err != nil {
 		logger.Warn("rules", "err", err)
 	}
@@ -138,7 +150,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	}
 	closer := func() {}
 	if cfg.Server.TraceFile != "" {
-		f, err := os.OpenFile(cfg.Server.TraceFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		f, err := os.OpenFile(cfg.Server.TraceFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -149,7 +161,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	if text := h.engine.Inject(rules.Query{}, maxTokens); text != "" {
 		instructions = text + "\n\n" + instructions
 	}
-	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "onfly", Version: "0.4.0"}, &sdkmcp.ServerOptions{
+	srv := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "onfly", Version: Version}, &sdkmcp.ServerOptions{
 		Logger:             logger,
 		Instructions:       instructions,
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
@@ -175,7 +187,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 }
 
 func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) error {
-	lf, err := os.OpenFile(cfg.Server.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	lf, err := os.OpenFile(cfg.Server.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
@@ -229,7 +241,7 @@ func (h *tools) search(ctx context.Context, req *sdkmcp.CallToolRequest, in sema
 				h.record("search", in, start, nil, 0)
 				return nil, hitList{}, err
 			}
-			if !containsString(names, ws) {
+			if !slices.Contains(names, ws) {
 				h.record("search", in, start, nil, 0)
 				return nil, hitList{}, fmt.Errorf("workspace %q is not in the index", ws)
 			}
@@ -315,15 +327,6 @@ func workspaceChoice(req *sdkmcp.CallToolRequest) (string, bool, error) {
 	return ws, true, nil
 }
 
-func containsString(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
-}
-
 func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in keywordIn) (*sdkmcp.CallToolResult, hitList, error) {
 	start := time.Now()
 	chunks, err := h.store.SearchKeyword(ctx, in.Keyword, keywordLimit, h.scope(in.Workspace))
@@ -388,17 +391,26 @@ func (h *tools) readFile(_ context.Context, _ *sdkmcp.CallToolRequest, in pathIn
 	return contentWithRules(text, out), out, nil
 }
 
-func rejectSensitive(root, full string) error {
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+// rejectSensitive refuses secrets, .gitignore matches and indexer.exclude names.
+func (h *tools) rejectSensitive(full string, isDir bool) error {
+	resolvedRoot, err := filepath.EvalSymlinks(h.root)
 	if err != nil {
-		resolvedRoot = root
+		resolvedRoot = h.root
 	}
 	rel, err := filepath.Rel(resolvedRoot, full)
 	if err != nil {
 		return err
 	}
-	if ignore.Sensitive(filepath.ToSlash(rel)) {
+	rel = filepath.ToSlash(rel)
+	if ignore.Sensitive(rel) || (h.ign != nil && h.ign.Ignored(rel, isDir)) {
 		return fmt.Errorf("path is not readable")
+	}
+	for _, part := range strings.Split(rel, "/") {
+		for _, name := range h.exclude {
+			if name != "" && part == name {
+				return fmt.Errorf("path is not readable")
+			}
+		}
 	}
 	return nil
 }
@@ -408,7 +420,7 @@ func (h *tools) readFileBody(in pathIn) (fileOut, error) {
 	if err != nil {
 		return fileOut{}, err
 	}
-	if err := rejectSensitive(h.root, full); err != nil {
+	if err := h.rejectSensitive(full, false); err != nil {
 		return fileOut{}, err
 	}
 	info, err := os.Lstat(full)
@@ -469,7 +481,7 @@ func (h *tools) listDirBody(in pathIn) ([]dirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := rejectSensitive(h.root, full); err != nil {
+	if err := h.rejectSensitive(full, true); err != nil {
 		return nil, err
 	}
 	entries, err := os.ReadDir(full)
@@ -483,7 +495,7 @@ func (h *tools) listDirBody(in pathIn) ([]dirEntry, error) {
 		if entry.IsDir() {
 			kind = "dir"
 		}
-		if ignore.Sensitive(entry.Name()) {
+		if h.rejectSensitive(filepath.Join(full, entry.Name()), entry.IsDir()) != nil {
 			continue
 		}
 		out = append(out, dirEntry{Name: entry.Name(), Kind: kind})
@@ -580,33 +592,44 @@ func diagnosticHit(omitted int) hitDTO {
 	return hitDTO{Lines: truncationText(omitted)}
 }
 
-func fit(chunks []parser.Chunk, maxTokens int) ([]chunkDTO, error) {
-	var kept []parser.Chunk
-	for _, ch := range chunks {
-		trial := append(append([]parser.Chunk{}, kept...), ch)
-		omitted := len(chunks) - len(trial)
-		payload := trial
-		if omitted > 0 {
-			payload = append(payload, truncation(omitted))
-		}
-		n, err := tokens.Count(mustJSON(toDTO(payload)))
+// fitPrefix returns the largest k in [0, n] whose payload fits maxTokens.
+// size(k) is the token cost of the first k items plus the truncation notice.
+func fitPrefix(n, maxTokens int, size func(k int) (int, error)) (int, error) {
+	lo, hi := 0, n
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		sz, err := size(mid)
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
-		if n > maxTokens {
-			break
+		if sz <= maxTokens {
+			lo = mid
+		} else {
+			hi = mid - 1
 		}
-		kept = trial
 	}
-	omitted := len(chunks) - len(kept)
-	if omitted == 0 {
-		return toDTO(kept), nil
+	return lo, nil
+}
+
+func fit(chunks []parser.Chunk, maxTokens int) ([]chunkDTO, error) {
+	n := len(chunks)
+	k, err := fitPrefix(n, maxTokens, func(k int) (int, error) {
+		payload := toDTO(chunks[:k])
+		if k < n {
+			payload = append(payload, toDTO([]parser.Chunk{truncation(n - k)})...)
+		}
+		return tokens.Count(mustJSON(payload))
+	})
+	if err != nil {
+		return nil, err
 	}
-	only := toDTO([]parser.Chunk{truncation(len(chunks))})
-	if len(kept) == 0 {
-		return only, nil
+	switch {
+	case k == n:
+		return toDTO(chunks), nil
+	case k == 0:
+		return toDTO([]parser.Chunk{truncation(n)}), nil
 	}
-	return toDTO(append(kept, truncation(omitted))), nil
+	return append(toDTO(chunks[:k]), toDTO([]parser.Chunk{truncation(n - k)})...), nil
 }
 
 func (h *tools) record(tool string, args any, start time.Time, result any, chunks int) {
@@ -711,32 +734,24 @@ func candidatePool(limit int) int {
 }
 
 func fitHits(chunks []parser.Chunk, maxTokens int) ([]hitDTO, error) {
-	var kept []parser.Chunk
-	for _, ch := range chunks {
-		trial := append(append([]parser.Chunk{}, kept...), ch)
-		omitted := len(chunks) - len(trial)
-		payload := toHits(trial)
-		if omitted > 0 {
-			payload = append(payload, diagnosticHit(omitted))
+	n := len(chunks)
+	k, err := fitPrefix(n, maxTokens, func(k int) (int, error) {
+		payload := toHits(chunks[:k])
+		if k < n {
+			payload = append(payload, diagnosticHit(n-k))
 		}
-		n, err := tokens.Count(mustJSON(payload))
-		if err != nil {
-			return nil, err
-		}
-		if n > maxTokens {
-			break
-		}
-		kept = trial
+		return tokens.Count(mustJSON(payload))
+	})
+	if err != nil {
+		return nil, err
 	}
-	omitted := len(chunks) - len(kept)
-	if omitted == 0 {
-		return toHits(kept), nil
+	switch {
+	case k == n:
+		return toHits(chunks), nil
+	case k == 0:
+		return []hitDTO{diagnosticHit(n)}, nil
 	}
-	only := []hitDTO{diagnosticHit(len(chunks))}
-	if len(kept) == 0 {
-		return only, nil
-	}
-	return append(toHits(kept), diagnosticHit(omitted)), nil
+	return append(toHits(chunks[:k]), diagnosticHit(n-k)), nil
 }
 
 func toHits(chunks []parser.Chunk) []hitDTO {

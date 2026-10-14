@@ -45,7 +45,7 @@ func TestLinkRefsFillsCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := &Session{store: st}
-	if err := session.linkRefs(ctx); err != nil {
+	if err := session.linkRefs(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	refs, err := st.GetReferences(ctx, "Execute")
@@ -59,11 +59,56 @@ func TestLinkRefsFillsCalls(t *testing.T) {
 	if len(self.Outbound) != 1 || self.Outbound[0] != `App\Models\User` {
 		t.Fatalf("outbound %+v", self.Outbound)
 	}
-	if err := session.linkRefs(ctx); err != nil {
+	if err := session.linkRefs(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	self, err = st.GetComponentAST(ctx, "Execute")
 	if err != nil || len(self.Outbound) != 1 {
 		t.Fatalf("second %+v %v", self.Outbound, err)
+	}
+}
+
+func TestLinkRefsIncrementalOnlyTouchesChangedFiles(t *testing.T) {
+	st, err := vectorstore.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ctx := context.Background()
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	vec := []float32{1, 0, 0, 0}
+	commit := func(path, name, content string) {
+		t.Helper()
+		ch := parser.Chunk{FilePath: path, Type: "function", Content: content, Metadata: map[string]string{"name": name}}
+		if err := st.CommitFile(ctx, path, content, []vectorstore.EmbeddedChunk{{Chunk: ch, Vector: vec}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commit("a.go", "A", "func A() { B() }")
+	commit("b.go", "B", "func B() {}")
+	session := &Session{store: st}
+	if err := session.linkRefs(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Edit a.go to call itself too; names are unchanged, so only a.go is relinked.
+	commit("a.go", "A", "func A() { B(); A() }")
+	if err := session.linkRefs(ctx, []string{"a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	a, err := st.GetComponentAST(ctx, "A")
+	if err != nil || len(a.Outbound) != 1 || a.Outbound[0] != "B" {
+		t.Fatalf("a outbound %+v %v", a, err)
+	}
+	// A new name forces a full pass so older chunks pick it up.
+	commit("c.go", "C", "func C() {}")
+	commit("b.go", "B", "func B() { C() }")
+	if err := session.linkRefs(ctx, []string{"c.go"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.GetComponentAST(ctx, "B")
+	if err != nil || len(b.Outbound) != 1 || b.Outbound[0] != "C" {
+		t.Fatalf("b outbound %+v %v", b, err)
 	}
 }

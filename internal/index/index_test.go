@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -603,5 +604,48 @@ func TestCIBatch(t *testing.T) {
 	}
 	if posts := run(true); posts != 1 {
 		t.Fatalf("ci posts = %d", posts)
+	}
+}
+
+func TestFillChunkLinesRepeatedSnippets(t *testing.T) {
+	file := []byte("a\nx()\nb\nx()\n")
+	chunks := []parser.Chunk{{Content: "x()"}, {Content: "x()"}}
+	fillChunkLines(file, chunks)
+	if chunks[0].Metadata["start_line"] != "2" || chunks[1].Metadata["start_line"] != "4" {
+		t.Fatalf("%v %v", chunks[0].Metadata, chunks[1].Metadata)
+	}
+}
+
+func TestConcurrentIndexMatchesSequential(t *testing.T) {
+	srv := fakeOllama(t)
+	defer srv.Close()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "chunk.sh")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '[{\"type\":\"function\",\"content\":\"func f\",\"metadata\":{\"name\":\"F\"}}]'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, dir, srv.URL, script)
+	for i := 0; i < 12; i++ {
+		name := filepath.Join(dir, "src", "f"+strconv.Itoa(i)+".go")
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte("package f"+strconv.Itoa(i)+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := mustLoad(t, dir)
+	cfg.Indexer.Concurrency = 4
+	stats, err := Run(context.Background(), cfg, nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Files != 12 || stats.Chunks != 12 || stats.Failed != 0 {
+		t.Fatalf("stats %+v", stats)
+	}
+	again, err := Run(context.Background(), cfg, nil, Options{})
+	if err != nil || again.Skipped != 12 {
+		t.Fatalf("second run %+v %v", again, err)
 	}
 }

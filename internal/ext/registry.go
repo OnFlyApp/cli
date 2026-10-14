@@ -18,6 +18,8 @@ const maxRedirects = 5
 
 var maxPluginBytes int64 = 64 << 20
 
+const maxManifestBytes = 1 << 20
+
 type Release struct {
 	URL        string   `json:"url"`
 	SHA256     string   `json:"sha256"`
@@ -33,6 +35,7 @@ type Manifest map[string]Plugin
 
 func RegistryURL() string {
 	if u := strings.TrimSpace(os.Getenv("ONFLY_REGISTRY_URL")); u != "" {
+		fmt.Fprintf(os.Stderr, "warning: using registry from ONFLY_REGISTRY_URL: %s\n", u)
 		return u
 	}
 	return DefaultRegistryURL
@@ -127,12 +130,12 @@ func getBytes(ctx context.Context, client *http.Client, raw string) ([]byte, err
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ext: download %s: %s", raw, res.Status)
 	}
-	buf, err := io.ReadAll(io.LimitReader(res.Body, maxPluginBytes+1))
+	buf, err := io.ReadAll(io.LimitReader(res.Body, maxManifestBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("ext: download %s: %w", raw, err)
 	}
-	if int64(len(buf)) > maxPluginBytes {
-		return nil, fmt.Errorf("ext: plugin exceeds 64MiB")
+	if len(buf) > maxManifestBytes {
+		return nil, fmt.Errorf("registry: manifest exceeds 1MiB")
 	}
 	return buf, nil
 }

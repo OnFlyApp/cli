@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +15,7 @@ type fakeParser struct {
 	closed int
 }
 
-func (f *fakeParser) Parse(string, []byte) ([]Chunk, error) {
+func (f *fakeParser) Parse(context.Context, string, []byte) ([]Chunk, error) {
 	return f.chunks, f.err
 }
 
@@ -41,7 +42,7 @@ func TestRouterLongestExtension(t *testing.T) {
 	if !r.HasParser("app/layout.blade.php") {
 		t.Fatal("expected blade parser")
 	}
-	got, err := r.Parse("app/layout.blade.php", []byte("x"))
+	got, err := r.Parse(context.Background(), "app/layout.blade.php", []byte("x"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +52,7 @@ func TestRouterLongestExtension(t *testing.T) {
 	if r.HasParser("readme.txt") {
 		t.Fatal("readme.txt should have no parser")
 	}
-	if _, err := r.Parse("readme.txt", nil); err == nil || !contains(err.Error(), "no parser") {
+	if _, err := r.Parse(context.Background(), "readme.txt", nil); err == nil || !contains(err.Error(), "no parser") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -105,7 +106,7 @@ func TestBladeScriptBeatsPHP(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { r.Close() })
-	got, err := r.Parse("view.blade.php", []byte("<x>"))
+	got, err := r.Parse(context.Background(), "view.blade.php", []byte("<x>"))
 	if err != nil {
 		t.Fatal(err)
 	}

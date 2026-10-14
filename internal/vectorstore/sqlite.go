@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -257,16 +258,8 @@ func (s *SQLite) SaveChunks(ctx context.Context, chunks []EmbeddedChunk) error {
 	if err := s.deletePaths(ctx, tx, distinctPaths(chunks)); err != nil {
 		return err
 	}
-	for _, c := range chunks {
-		var id int64
-		err := tx.QueryRowContext(ctx, `INSERT INTO chunk_meta(file_path, type, content, metadata, outbound, workspace) VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid`,
-			slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace).Scan(&id)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO chunk_vecs(rowid, embedding) VALUES (?, ?)`, id, vecLiteral(c.Vector)); err != nil {
-			return err
-		}
+	if err := insertSQLiteChunks(ctx, tx, chunks); err != nil {
+		return err
 	}
 	if err := bumpSQLite(ctx, tx); err != nil {
 		return err
@@ -288,16 +281,8 @@ func (s *SQLite) CommitFile(ctx context.Context, path, hash string, chunks []Emb
 	if err := s.deleteChunkRows(ctx, tx, []string{path}); err != nil {
 		return err
 	}
-	for _, c := range chunks {
-		var id int64
-		err := tx.QueryRowContext(ctx, `INSERT INTO chunk_meta(file_path, type, content, metadata, outbound, workspace) VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid`,
-			slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace).Scan(&id)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO chunk_vecs(rowid, embedding) VALUES (?, ?)`, id, vecLiteral(c.Vector)); err != nil {
-			return err
-		}
+	if err := insertSQLiteChunks(ctx, tx, chunks); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO index_state(file_path, content_hash) VALUES (?, ?)
 		ON CONFLICT(file_path) DO UPDATE SET content_hash = excluded.content_hash`, slashPath(path), hash); err != nil {
@@ -307,6 +292,33 @@ func (s *SQLite) CommitFile(ctx context.Context, path, hash string, chunks []Emb
 		return err
 	}
 	return tx.Commit()
+}
+
+func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	meta, err := tx.PrepareContext(ctx, `INSERT INTO chunk_meta(file_path, type, content, metadata, outbound, workspace) VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid`)
+	if err != nil {
+		return err
+	}
+	defer meta.Close()
+	vec, err := tx.PrepareContext(ctx, `INSERT INTO chunk_vecs(rowid, embedding) VALUES (?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer vec.Close()
+	for _, c := range chunks {
+		var id int64
+		if err := meta.QueryRowContext(ctx, slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content,
+			metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := vec.ExecContext(ctx, id, vecLiteral(c.Vector)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SQLite) DeleteFiles(ctx context.Context, filePaths []string) error {
@@ -333,7 +345,7 @@ func (s *SQLite) deletePaths(ctx context.Context, tx *sql.Tx, paths []string) er
 	if len(paths) == 0 {
 		return nil
 	}
-	for _, batch := range stringBatches(paths, sqliteBindBatch) {
+	for batch := range slices.Chunk(paths, sqliteBindBatch) {
 		args := make([]any, len(batch))
 		for i, p := range batch {
 			args[i] = slashPath(p)
@@ -346,7 +358,7 @@ func (s *SQLite) deletePaths(ctx context.Context, tx *sql.Tx, paths []string) er
 }
 
 func (s *SQLite) deleteChunkRows(ctx context.Context, tx *sql.Tx, paths []string) error {
-	for _, batch := range stringBatches(paths, sqliteBindBatch) {
+	for batch := range slices.Chunk(paths, sqliteBindBatch) {
 		if err := s.deleteChunkBatch(ctx, tx, batch); err != nil {
 			return err
 		}
@@ -380,51 +392,13 @@ func (s *SQLite) deleteChunkBatch(ctx context.Context, tx *sql.Tx, paths []strin
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, batch := range anyBatches(ids, sqliteBindBatch) {
+	for batch := range slices.Chunk(ids, sqliteBindBatch) {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_vecs WHERE rowid IN (`+placeholders(len(batch))+`)`, batch...); err != nil {
 			return err
 		}
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM chunk_meta WHERE file_path IN (`+in+`)`, args...)
 	return err
-}
-
-func stringBatches(in []string, n int) [][]string {
-	if len(in) == 0 {
-		return nil
-	}
-	if n < 1 {
-		n = 1
-	}
-	var out [][]string
-	for len(in) > 0 {
-		end := n
-		if end > len(in) {
-			end = len(in)
-		}
-		out = append(out, in[:end])
-		in = in[end:]
-	}
-	return out
-}
-
-func anyBatches(in []any, n int) [][]any {
-	if len(in) == 0 {
-		return nil
-	}
-	if n < 1 {
-		n = 1
-	}
-	var out [][]any
-	for len(in) > 0 {
-		end := n
-		if end > len(in) {
-			end = len(in)
-		}
-		out = append(out, in[:end])
-		in = in[end:]
-	}
-	return out
 }
 
 func (s *SQLite) ListFiles(ctx context.Context) ([]string, error) {
@@ -581,6 +555,61 @@ func (s *SQLite) ListChunks(ctx context.Context) ([]StoredChunk, error) {
 	return out, rows.Err()
 }
 
+func (s *SQLite) ChunksByFiles(ctx context.Context, paths []string) ([]StoredChunk, error) {
+	var out []StoredChunk
+	for batch := range slices.Chunk(paths, sqliteBindBatch) {
+		args := make([]any, len(batch))
+		for i, p := range batch {
+			args[i] = slashPath(p)
+		}
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT rowid, file_path, type, content, metadata, outbound FROM chunk_meta
+			WHERE file_path IN (`+placeholders(len(batch))+`) ORDER BY rowid`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var filePath, typ, content, meta, outbound string
+			if err := rows.Scan(&id, &filePath, &typ, &content, &meta, &outbound); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
+			out = append(out, StoredChunk{ID: id, Chunk: ch})
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *SQLite) Names(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT json_extract(metadata, '$.name') FROM chunk_meta
+		WHERE coalesce(json_extract(metadata, '$.name'), '') <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLite) UpdateOutbound(ctx context.Context, outbound map[int64][]string) error {
 	if len(outbound) == 0 {
 		return nil
@@ -634,20 +663,13 @@ func (s *SQLite) WorkspacesForName(ctx context.Context, name string) ([]string, 
 	return out, rows.Err()
 }
 
-func (s *SQLite) SetFileHash(ctx context.Context, path, hash string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+func (s *SQLite) FileHash(ctx context.Context, path string) (string, bool, error) {
+	var hash string
+	err := s.db.QueryRowContext(ctx, `SELECT content_hash FROM index_state WHERE file_path = ?`, slashPath(path)).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO index_state(file_path, content_hash) VALUES (?, ?)
-		ON CONFLICT(file_path) DO UPDATE SET content_hash = excluded.content_hash`, slashPath(path), hash); err != nil {
-		return err
-	}
-	if err := bumpSQLite(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return hash, err == nil, err
 }
 
 func (s *SQLite) FileHashes(ctx context.Context) (map[string]string, error) {

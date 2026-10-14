@@ -1,11 +1,13 @@
 package embedder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,12 +71,27 @@ func postJSON(ctx context.Context, client *http.Client, url, key string, body []
 			return buf, nil
 		}
 		last = err
-		var se *statusError
-		if !errors.As(err, &se) || (se.Status != http.StatusTooManyRequests && se.Status != http.StatusServiceUnavailable) {
+		if ctx.Err() != nil || !retryable(err) {
 			return nil, err
 		}
 	}
 	return nil, last
+}
+
+// retryable covers rate limits, gateway errors and network errors. A plain 500
+// is not retried: Ollama returns it for permanent errors such as a missing model.
+func retryable(err error) bool {
+	var se *statusError
+	if errors.As(err, &se) {
+		switch se.Status {
+		case http.StatusTooManyRequests, http.StatusBadGateway,
+			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return true
+		}
+		return false
+	}
+	var ne net.Error
+	return errors.As(err, &ne)
 }
 
 func backoff(retry int) time.Duration {
@@ -96,7 +113,7 @@ func backoff(retry int) time.Duration {
 }
 
 func postOnce(ctx context.Context, client *http.Client, url, key string, body []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +155,10 @@ func checkDims(vectors [][]float32, texts int, dimensions int) error {
 	if len(vectors) != texts {
 		return fmt.Errorf("embedder: got %d vectors, want %d", len(vectors), texts)
 	}
-	for i, v := range vectors {
+	for _, v := range vectors {
 		if len(v) != dimensions {
 			return fmt.Errorf("embedder: dimensions got %d, want %d", len(v), dimensions)
 		}
-		_ = i
 	}
 	return nil
 }

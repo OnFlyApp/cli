@@ -79,7 +79,7 @@ That copies the file into `.onfly/plugins/` and appends the wasm parser entry. `
 
 ## Stdio
 
-`type: stdio` runs the configured command. On Unix the host executes:
+`type: stdio` runs the configured command through the shell, so a cloned project could name any command. It is refused unless the environment variable `ONFLY_ALLOW_STDIO=1` is set. WASM parsers are sandboxed and need no opt-in. On Unix the host executes:
 
 ```sh
 sh -c '<command> "$@"' sh <file path>

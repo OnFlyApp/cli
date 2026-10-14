@@ -379,3 +379,11 @@ rules_engine:
 		t.Fatal("expected percent error")
 	}
 }
+
+func TestExpandOneEscapesDollar(t *testing.T) {
+	t.Setenv("ONFLY_T_PW", "x")
+	got, err := expandOne("pg://u:pa$$word@h/${ONFLY_T_PW}")
+	if err != nil || got != "pg://u:pa$word@h/x" {
+		t.Fatalf("%q %v", got, err)
+	}
+}

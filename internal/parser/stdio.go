@@ -30,10 +30,10 @@ func quoteCmd(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
-func (p *StdioParser) Parse(filePath string, content []byte) ([]Chunk, error) {
+func (p *StdioParser) Parse(ctx context.Context, filePath string, content []byte) ([]Chunk, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), parseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, parseTimeout)
 	defer cancel()
 	cmd := shellCommand(ctx, p.command, filePath)
 	prepareCmd(cmd)

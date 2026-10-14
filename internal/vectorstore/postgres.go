@@ -230,13 +230,8 @@ func (p *Postgres) SaveChunks(ctx context.Context, chunks []EmbeddedChunk) error
 	if err := p.deletePaths(ctx, tx, distinctPaths(chunks)); err != nil {
 		return err
 	}
-	for _, c := range chunks {
-		_, err := tx.Exec(ctx, `INSERT INTO chunks(file_path, type, content, metadata, outbound, workspace, embedding)
-			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::vector)`,
-			slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, vecLiteral(c.Vector))
-		if err != nil {
-			return err
-		}
+	if err := insertPGChunks(ctx, tx, chunks); err != nil {
+		return err
 	}
 	if err := bumpPostgres(ctx, tx); err != nil {
 		return err
@@ -259,13 +254,8 @@ func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []E
 	if _, err := tx.Exec(ctx, `DELETE FROM chunks WHERE file_path = $1`, path); err != nil {
 		return err
 	}
-	for _, c := range chunks {
-		_, err := tx.Exec(ctx, `INSERT INTO chunks(file_path, type, content, metadata, outbound, workspace, embedding)
-			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::vector)`,
-			slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, vecLiteral(c.Vector))
-		if err != nil {
-			return err
-		}
+	if err := insertPGChunks(ctx, tx, chunks); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO index_state(file_path, content_hash) VALUES ($1, $2)
 		ON CONFLICT(file_path) DO UPDATE SET content_hash = EXCLUDED.content_hash`, path, hash); err != nil {
@@ -275,6 +265,27 @@ func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []E
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// insertPGChunks sends all rows in one round trip.
+func insertPGChunks(ctx context.Context, tx pgx.Tx, chunks []EmbeddedChunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	for _, c := range chunks {
+		batch.Queue(`INSERT INTO chunks(file_path, type, content, metadata, outbound, workspace, embedding)
+			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::vector)`,
+			slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, vecLiteral(c.Vector))
+	}
+	res := tx.SendBatch(ctx, batch)
+	for range chunks {
+		if _, err := res.Exec(); err != nil {
+			_ = res.Close()
+			return err
+		}
+	}
+	return res.Close()
 }
 
 func (p *Postgres) DeleteFiles(ctx context.Context, filePaths []string) error {
@@ -293,6 +304,7 @@ func (p *Postgres) DeleteFiles(ctx context.Context, filePaths []string) error {
 }
 
 func (p *Postgres) deletePaths(ctx context.Context, tx pgx.Tx, paths []string) error {
+	paths = append([]string(nil), paths...)
 	for i, path := range paths {
 		paths[i] = slashPath(path)
 	}
@@ -432,6 +444,54 @@ func (p *Postgres) ListChunks(ctx context.Context) ([]StoredChunk, error) {
 	return out, rows.Err()
 }
 
+func (p *Postgres) ChunksByFiles(ctx context.Context, paths []string) ([]StoredChunk, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	norm := make([]string, len(paths))
+	for i, path := range paths {
+		norm[i] = slashPath(path)
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT id, file_path, type, content, metadata::text, outbound::text
+		FROM chunks WHERE file_path = ANY($1) ORDER BY id`, norm)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StoredChunk
+	for rows.Next() {
+		var id int64
+		var filePath, typ, content, meta, outbound string
+		if err := rows.Scan(&id, &filePath, &typ, &content, &meta, &outbound); err != nil {
+			return nil, err
+		}
+		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, StoredChunk{ID: id, Chunk: ch})
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) Names(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT DISTINCT metadata->>'name' FROM chunks WHERE coalesce(metadata->>'name', '') <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) UpdateOutbound(ctx context.Context, outbound map[int64][]string) error {
 	if len(outbound) == 0 {
 		return nil
@@ -485,20 +545,13 @@ func (p *Postgres) WorkspacesForName(ctx context.Context, name string) ([]string
 	return out, rows.Err()
 }
 
-func (p *Postgres) SetFileHash(ctx context.Context, path, hash string) error {
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return err
+func (p *Postgres) FileHash(ctx context.Context, path string) (string, bool, error) {
+	var hash string
+	err := p.pool.QueryRow(ctx, `SELECT content_hash FROM index_state WHERE file_path = $1`, slashPath(path)).Scan(&hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `INSERT INTO index_state(file_path, content_hash) VALUES ($1, $2)
-		ON CONFLICT(file_path) DO UPDATE SET content_hash = EXCLUDED.content_hash`, slashPath(path), hash); err != nil {
-		return err
-	}
-	if err := bumpPostgres(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return hash, err == nil, err
 }
 
 func (p *Postgres) FileHashes(ctx context.Context) (map[string]string, error) {

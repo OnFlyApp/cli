@@ -9,6 +9,9 @@ import (
 	"github.com/spf13/viper"
 )
 
+// DefaultMaxTokens is the search result budget when server.max_tokens is unset.
+const DefaultMaxTokens = 8192
+
 type Config struct {
 	Project     string      `mapstructure:"project"`
 	Workspace   string      `mapstructure:"workspace"`
@@ -40,6 +43,8 @@ type Indexer struct {
 	Exclude    []string       `mapstructure:"exclude"`
 	Parsers    []ParserConfig `mapstructure:"parsers"`
 	DebounceMS int            `mapstructure:"debounce_ms"`
+	// Concurrency is the number of files indexed in parallel (0 or 1: sequential).
+	Concurrency int `mapstructure:"concurrency"`
 }
 
 type ParserConfig struct {
@@ -142,10 +147,7 @@ func ApplyDefaults(cfg *Config) {
 		cfg.Indexer.DebounceMS = 2000
 	}
 	if cfg.Server.MaxTokens == 0 {
-		cfg.Server.MaxTokens = 8192
-	}
-	if cfg.Server.TraceFile == "" {
-		cfg.Server.TraceFile = ".onfly/mcp_trace.jsonl"
+		cfg.Server.MaxTokens = DefaultMaxTokens
 	}
 	if cfg.RulesEngine.MaxTokenBudgetPercent == 0 {
 		cfg.RulesEngine.MaxTokenBudgetPercent = 15
@@ -267,6 +269,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	out.Indexer.Exclude = unionStrings(parent.Indexer.Exclude, child.Indexer.Exclude)
 	out.Indexer.Parsers = mergeParsers(parent.Indexer.Parsers, child.Indexer.Parsers)
+	if child.Indexer.Concurrency != 0 {
+		out.Indexer.Concurrency = child.Indexer.Concurrency
+	}
 	if child.Indexer.DebounceMS != 0 {
 		out.Indexer.DebounceMS = child.Indexer.DebounceMS
 	}
@@ -311,7 +316,7 @@ func mergeParsers(parent, child []ParserConfig) []ParserConfig {
 	add := func(list []ParserConfig) {
 		for _, item := range list {
 			for _, ext := range item.Extensions {
-				key := normalizeExt(ext)
+				key := NormalizeExt(ext)
 				if key == "" || key == "." {
 					key = ext
 				}
@@ -398,6 +403,9 @@ func expand(cfg *Config) error {
 func expandOne(s string) (string, error) {
 	missing := ""
 	out := os.Expand(s, func(key string) string {
+		if key == "$" { // "$$" is a literal dollar sign
+			return "$"
+		}
 		v, ok := os.LookupEnv(key)
 		if !ok && missing == "" {
 			missing = key
@@ -448,6 +456,9 @@ func (c Config) validate() error {
 	if c.Indexer.DebounceMS < 0 {
 		return fmt.Errorf("indexer.debounce_ms must be >= 0")
 	}
+	if c.Indexer.Concurrency < 0 || c.Indexer.Concurrency > 32 {
+		return fmt.Errorf("indexer.concurrency must be from 0 to 32")
+	}
 	if c.Server.MaxTokens < 0 {
 		return fmt.Errorf("server.max_tokens must be >= 0")
 	}
@@ -488,10 +499,7 @@ func (c Config) validate() error {
 			return fmt.Errorf("parser extensions are required")
 		}
 		for _, ext := range p.Extensions {
-			ext = strings.ToLower(strings.TrimSpace(ext))
-			if ext != "" && !strings.HasPrefix(ext, ".") {
-				ext = "." + ext
-			}
+			ext = NormalizeExt(ext)
 			if ext == "" || ext == "." {
 				return fmt.Errorf("parser extension %q is invalid", ext)
 			}

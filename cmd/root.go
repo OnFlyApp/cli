@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/axitdev/onfly/internal/config"
+	"github.com/axitdev/onfly/internal/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -15,6 +16,7 @@ var rootCmd = &cobra.Command{
 	Long:          "Onfly indexes a project and serves search tools to an IDE.\n\nRun onfly index to build the vector index.\nRun onfly serve to speak MCP JSON-RPC on stdout.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	Version:       mcp.Version,
 }
 
 func Execute() error {

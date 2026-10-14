@@ -46,7 +46,7 @@ func newWasmParser(ctx context.Context, path string) (*WasmParser, error) {
 	return &WasmParser{rt: rt, compiled: compiled}, nil
 }
 
-func (p *WasmParser) Parse(filePath string, content []byte) ([]Chunk, error) {
+func (p *WasmParser) Parse(ctx context.Context, filePath string, content []byte) ([]Chunk, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
@@ -60,7 +60,7 @@ func (p *WasmParser) Parse(filePath string, content []byte) ([]Chunk, error) {
 		WithStdin(bytes.NewReader(content)).
 		WithStdout(stdout).
 		WithStderr(stderr)
-	ctx, cancel := context.WithTimeout(context.Background(), parseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, parseTimeout)
 	defer cancel()
 	mod, err := p.rt.InstantiateModule(ctx, p.compiled, cfg)
 	if mod != nil {

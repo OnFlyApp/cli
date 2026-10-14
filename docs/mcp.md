@@ -1,6 +1,6 @@
 # MCP server
 
-`onfly serve` is an MCP server on stdio. It identifies itself as `onfly` `0.4.0`. Stdout is JSON-RPC only. Application logs, including the standard library logger, go to `server.log_file`.
+`onfly serve` is an MCP server on stdio. It identifies itself as `onfly` with the build version (`onfly --version`). Stdout is JSON-RPC only. Application logs, including the standard library logger, go to `server.log_file`.
 
 The process loads the config, opens the database, and checks `embedder.dimensions` against the stored size. A mismatch stops the server before it accepts a session.
 
@@ -45,7 +45,7 @@ Global rules are in the server instructions, so the model sees them before it ca
 // [Truncated: N matches omitted due to context limits.]
 ```
 
-Each tool call appends one JSON object to `server.trace_file` (default `.onfly/mcp_trace.jsonl`): `ts`, `tool`, `args`, `duration_ms`, `tokens`, `chunks`. The line stores arguments, not file bodies.
+When `server.trace_file` is set, each tool call appends one JSON object to it (off by default): `ts`, `tool`, `args`, `duration_ms`, `tokens`, `chunks`. The line stores arguments, not file bodies.
 
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
@@ -92,7 +92,7 @@ Returns `{ "rules", "chunks" }`. `chunks` are the rows whose `outbound` list con
 
 ### `read_file_raw`
 
-Reads a file inside the project root. The path may be relative or absolute. `..` and a symlink that resolves outside the root are rejected. Secret names are refused with case ignored, so `.ENV` is refused. Files larger than 1 MiB are rejected.
+Reads a file inside the project root. The path may be relative or absolute. `..` and a symlink that resolves outside the root are rejected. Secret names (`.env*`, `id_rsa*`, `id_ed25519`, `*.pem`, `*.key`, `*.p12`, `.npmrc`, `.netrc`, `.aws`, `.ssh`, `credentials.json`) are refused with case ignored, so `.ENV` is refused. Paths matched by a `.gitignore` or named in `indexer.exclude` are refused too, and `list_directory` omits them. `.gitignore` files are read when the server starts. Files larger than 1 MiB are rejected.
 
 | Argument | Required |
 | --- | --- |

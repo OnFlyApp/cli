@@ -14,6 +14,7 @@ import (
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
+	"github.com/axitdev/onfly/internal/ignore"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
@@ -583,7 +584,7 @@ func TestSemanticElicitsCollidingName(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	info := session.InitializeResult().ServerInfo
-	if info == nil || info.Name != "onfly" || info.Version != "0.4.0" {
+	if info == nil || info.Name != "onfly" || info.Version != Version {
 		t.Fatalf("%+v", info)
 	}
 }
@@ -887,4 +888,46 @@ func contentText(t *testing.T, res *sdkmcp.CallToolResult) string {
 		b.WriteString(text.Text)
 	}
 	return b.String()
+}
+
+func TestReadAndListHonourGitignoreAndExclude(t *testing.T) {
+	root := t.TempDir()
+	for path, body := range map[string]string{
+		".gitignore":  "secret.txt\n",
+		"secret.txt":  "hidden",
+		"keep.txt":    "ok",
+		"gen/out.txt": "generated",
+		"id_ed25519":  "key",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := &tools{root: root, exclude: []string{"gen"}}
+	ign, err := ignore.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.ign = ign
+	for _, bad := range []string{"secret.txt", "gen/out.txt", "id_ed25519"} {
+		if _, err := h.readFileBody(pathIn{Path: bad}); err == nil {
+			t.Fatalf("%s was readable", bad)
+		}
+	}
+	if out, err := h.readFileBody(pathIn{Path: "keep.txt"}); err != nil || out.Content != "ok" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	entries, err := h.listDirBody(pathIn{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name == "secret.txt" || e.Name == "gen" || e.Name == "id_ed25519" {
+			t.Fatalf("listed %s", e.Name)
+		}
+	}
 }

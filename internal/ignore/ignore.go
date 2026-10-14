@@ -28,6 +28,12 @@ func Load(root string) (*Set, error) {
 			if path != root && (base == ".git" || base == ".onfly") {
 				return filepath.SkipDir
 			}
+			if path != root {
+				// Never descend into ignored or blocked trees (node_modules, build output).
+				if rel, rerr := filepath.Rel(root, path); rerr == nil && set.Ignored(filepath.ToSlash(rel), true) {
+					return filepath.SkipDir
+				}
+			}
 			gi, err := readIgnore(filepath.Join(path, ".gitignore"))
 			if err != nil {
 				return err
@@ -131,11 +137,17 @@ func blocked(rel string) bool {
 			continue
 		}
 		low := strings.ToLower(part)
-		if strings.HasPrefix(low, ".env") || strings.HasSuffix(low, ".pem") || low == "id_rsa" {
+		if strings.HasPrefix(low, ".env") || strings.HasPrefix(low, "id_rsa") {
 			return true
 		}
+		for _, suffix := range []string{".pem", ".key", ".p12", ".pfx", ".keystore"} {
+			if strings.HasSuffix(low, suffix) {
+				return true
+			}
+		}
 		switch low {
-		case "vendor", "node_modules", ".git", ".onfly":
+		case "vendor", "node_modules", ".git", ".onfly", ".aws", ".ssh",
+			"id_ed25519", "id_ecdsa", "id_dsa", ".npmrc", ".netrc", "credentials.json":
 			return true
 		}
 	}
