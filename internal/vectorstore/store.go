@@ -43,3 +43,12 @@ type Store interface {
 	Optimize(ctx context.Context) error
 	Close() error
 }
+
+// IndexStats summarizes what an index holds.
+type IndexStats struct {
+	Files      int
+	Chunks     int
+	Unnamed    int
+	ByType     map[string]int
+	Workspaces map[string]int
+}

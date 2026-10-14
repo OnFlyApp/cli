@@ -617,3 +617,42 @@ func (p *Postgres) UnnamedChunks(ctx context.Context) (int, error) {
 		WHERE coalesce(metadata->>'name', '') = ''`).Scan(&n)
 	return n, err
 }
+
+// countBy groups chunks by a fixed column name (never user input).
+func (p *Postgres) countBy(ctx context.Context, col string) (map[string]int, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+col+`, count(*) FROM chunks GROUP BY `+col)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	m := map[string]int{}
+	for rows.Next() {
+		var key string
+		var n int
+		if err := rows.Scan(&key, &n); err != nil {
+			return nil, err
+		}
+		m[key] = n
+	}
+	return m, rows.Err()
+}
+
+// Stats reports file, chunk, type and workspace counts.
+func (p *Postgres) Stats(ctx context.Context) (IndexStats, error) {
+	var out IndexStats
+	if err := p.pool.QueryRow(ctx, `SELECT count(DISTINCT file_path) FROM chunks`).Scan(&out.Files); err != nil {
+		return out, err
+	}
+	var err error
+	if out.ByType, err = p.countBy(ctx, "type"); err != nil {
+		return out, err
+	}
+	if out.Workspaces, err = p.countBy(ctx, "workspace"); err != nil {
+		return out, err
+	}
+	for _, n := range out.ByType {
+		out.Chunks += n
+	}
+	out.Unnamed, err = p.UnnamedChunks(ctx)
+	return out, err
+}

@@ -1,0 +1,72 @@
+package cmd
+
+import (
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/axitdev/onfly/internal/vectorstore"
+	"github.com/spf13/cobra"
+)
+
+var statsCmd = &cobra.Command{
+	Use:   "stats",
+	Short: "Print index size and chunk breakdown",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		st, err := vectorstore.OpenChecker(cmd.Context(), cfg.Database)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		if err := st.CheckMeta(cmd.Context(), cfg.Embedder.Dimensions); err != nil {
+			return err
+		}
+		s, err := st.Stats(cmd.Context())
+		if err != nil {
+			return err
+		}
+		formatStats(cmd.OutOrStdout(), s)
+		return nil
+	},
+}
+
+func formatStats(w io.Writer, s vectorstore.IndexStats) {
+	fmt.Fprintf(w, "files: %d\n", s.Files)
+	if s.Unnamed > 0 {
+		fmt.Fprintf(w, "chunks: %d (%d without metadata.name)\n", s.Chunks, s.Unnamed)
+	} else {
+		fmt.Fprintf(w, "chunks: %d\n", s.Chunks)
+	}
+	fmt.Fprintf(w, "types: %s\n", joinCounts(s.ByType))
+	if named := withoutEmpty(s.Workspaces); len(named) > 0 {
+		fmt.Fprintf(w, "workspaces: %s\n", joinCounts(named))
+	}
+}
+
+func withoutEmpty(m map[string]int) map[string]int {
+	out := map[string]int{}
+	for k, v := range m {
+		if k != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func joinCounts(m map[string]int) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%d", k, m[k])
+	}
+	return strings.Join(parts, " ")
+}

@@ -827,3 +827,44 @@ func (s *SQLite) UnnamedChunks(ctx context.Context) (int, error) {
 		WHERE coalesce(json_extract(metadata, '$.name'), '') = ''`).Scan(&n)
 	return n, err
 }
+
+// Stats reports file, chunk, type and workspace counts.
+func (s *SQLite) Stats(ctx context.Context) (IndexStats, error) {
+	out := IndexStats{ByType: map[string]int{}, Workspaces: map[string]int{}}
+	if err := s.db.QueryRowContext(ctx, `SELECT count(DISTINCT file_path) FROM chunk_meta`).Scan(&out.Files); err != nil {
+		return out, err
+	}
+	groups := []struct {
+		query string
+		into  map[string]int
+	}{
+		{`SELECT type, count(*) FROM chunk_meta GROUP BY type`, out.ByType},
+		{`SELECT workspace, count(*) FROM chunk_meta GROUP BY workspace`, out.Workspaces},
+	}
+	for _, g := range groups {
+		rows, err := s.db.QueryContext(ctx, g.query)
+		if err != nil {
+			return out, err
+		}
+		for rows.Next() {
+			var key string
+			var n int
+			if err := rows.Scan(&key, &n); err != nil {
+				rows.Close()
+				return out, err
+			}
+			g.into[key] = n
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return out, err
+		}
+		rows.Close()
+	}
+	for _, n := range out.ByType {
+		out.Chunks += n
+	}
+	var err error
+	out.Unnamed, err = s.UnnamedChunks(ctx)
+	return out, err
+}

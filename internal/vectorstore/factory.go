@@ -23,6 +23,7 @@ type Checker interface {
 	CheckMeta(ctx context.Context, dimensions int) error
 	Ping(ctx context.Context) error
 	UnnamedChunks(ctx context.Context) (int, error)
+	Stats(ctx context.Context) (IndexStats, error)
 	Close() error
 }
 

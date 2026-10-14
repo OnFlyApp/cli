@@ -125,6 +125,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly serve` | Serve the MCP tools on stdio. |
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. |
+| `onfly stats` | Print file and chunk counts, with breakdowns by chunk type and workspace. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |
 | `onfly ext install go` | Download the published Go parser, check SHA-256, and add it to the config. |
 | `onfly ext install go@1.0.0` | Install that published version. |
