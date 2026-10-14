@@ -79,6 +79,35 @@ func scanOutbound(raw string) ([]string, error) {
 	return v, nil
 }
 
+// assembleComponents groups rows by file and receiver and assembles each group.
+func assembleComponents(chunks []parser.Chunk) ([]parser.Chunk, error) {
+	if len(chunks) == 0 {
+		return nil, ErrNotFound
+	}
+	type key struct{ file, receiver string }
+	var order []key
+	groups := map[key][]parser.Chunk{}
+	for _, c := range chunks {
+		k := key{c.FilePath, ""}
+		if c.Metadata != nil {
+			k.receiver = c.Metadata["receiver"]
+		}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], c)
+	}
+	out := make([]parser.Chunk, 0, len(order))
+	for _, k := range order {
+		c, err := assembleComponent(groups[k])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *c)
+	}
+	return out, nil
+}
+
 // assembleComponent returns the earliest chunk with a name. Later split parts
 // of that same file are joined in part order. The overlap shared by two
 // adjacent parts is written once.

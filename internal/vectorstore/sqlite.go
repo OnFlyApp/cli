@@ -519,6 +519,21 @@ func (s *SQLite) GetComponentAST(ctx context.Context, name string) (*parser.Chun
 	return assembleComponent(chunks)
 }
 
+func (s *SQLite) GetComponents(ctx context.Context, name string) ([]parser.Chunk, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT file_path, type, content, metadata, outbound FROM chunk_meta
+		WHERE json_extract(metadata, '$.name') = ?
+		ORDER BY rowid`, name)
+	if err != nil {
+		return nil, err
+	}
+	chunks, err := scanChunks(rows)
+	if err != nil {
+		return nil, err
+	}
+	return assembleComponents(chunks)
+}
+
 func (s *SQLite) ListChunks(ctx context.Context) ([]StoredChunk, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT rowid, file_path, type, content, metadata, outbound FROM chunk_meta

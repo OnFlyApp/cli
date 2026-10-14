@@ -102,6 +102,24 @@ func runStoreContract(t *testing.T, st Store) {
 	if _, err := st.GetComponentAST(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing = %v", err)
 	}
+	saveA := parser.Chunk{FilePath: "u.go", Type: "method", Content: "func (u User) Save() {}", Metadata: map[string]string{"name": "Save", "receiver": "User"}}
+	saveB := parser.Chunk{FilePath: "o.go", Type: "method", Content: "func (o Order) Save() {}", Metadata: map[string]string{"name": "Save", "receiver": "Order"}}
+	if err := st.CommitFile(ctx, "u.go", "h-u", []EmbeddedChunk{{Chunk: saveA, Vector: near}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitFile(ctx, "o.go", "h-o", []EmbeddedChunk{{Chunk: saveB, Vector: near}}); err != nil {
+		t.Fatal(err)
+	}
+	comps, err := st.GetComponents(ctx, "Save")
+	if err != nil || len(comps) != 2 || comps[0].Metadata["receiver"] != "User" || comps[1].Metadata["receiver"] != "Order" {
+		t.Fatalf("components = %+v %v", comps, err)
+	}
+	if _, err := st.GetComponents(ctx, "NoSuchName"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing name: %v", err)
+	}
+	if err := st.DeleteFiles(ctx, []string{"u.go", "o.go"}); err != nil {
+		t.Fatal(err)
+	}
 	replaced := user
 	replaced.Content = "function getUserId() { return 1 }"
 	if err := saveChunks(ctx, st, []EmbeddedChunk{

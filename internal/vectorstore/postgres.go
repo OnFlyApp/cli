@@ -395,6 +395,22 @@ func (p *Postgres) GetComponentAST(ctx context.Context, name string) (*parser.Ch
 	return assembleComponent(chunks)
 }
 
+func (p *Postgres) GetComponents(ctx context.Context, name string) ([]parser.Chunk, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT file_path, type, content, metadata::text, outbound::text
+		FROM chunks
+		WHERE metadata->>'name' = $1
+		ORDER BY id`, name)
+	if err != nil {
+		return nil, err
+	}
+	chunks, err := collect(rows)
+	if err != nil {
+		return nil, err
+	}
+	return assembleComponents(chunks)
+}
+
 func (p *Postgres) ListChunks(ctx context.Context) ([]StoredChunk, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT id, file_path, type, content, metadata::text, outbound::text

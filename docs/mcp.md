@@ -76,11 +76,12 @@ Finds chunks whose text contains an identifier the caller already knows. For a d
 
 ### `get_component_ast`
 
-Returns the chunk whose `metadata.name` equals `name`, as a JSON object with an optional `rules` field. Split parts of that symbol in the same file are joined. An unknown name is a tool error.
+Returns the chunk whose `metadata.name` equals `name`, as a JSON object with an optional `rules` field. Split parts of that symbol in the same file are joined. An unknown name is a tool error. When several definitions share the name (for example `Save` on two types), the earliest chunk is returned and the others are listed under `alternatives` as `{file_path, receiver, start_line}`. Pass `receiver` to pick one; an unknown receiver is a tool error.
 
 | Argument | Required |
 | --- | --- |
 | `name` | yes |
+| `receiver` | no |
 
 ### `get_references`
 

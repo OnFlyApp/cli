@@ -46,6 +46,14 @@ type chunkDTO struct {
 	Content  string            `json:"content"`
 	Metadata map[string]string `json:"metadata,omitempty"`
 	Outbound []string          `json:"outbound,omitempty"`
+	// Alternatives lists other definitions of the requested component name.
+	Alternatives []altDTO `json:"alternatives,omitempty"`
+}
+
+type altDTO struct {
+	FilePath  string `json:"file_path"`
+	Receiver  string `json:"receiver,omitempty"`
+	StartLine int    `json:"start_line,omitempty"`
 }
 
 type hitDTO struct {
@@ -84,7 +92,8 @@ type keywordIn struct {
 }
 
 type nameIn struct {
-	Name string `json:"name" jsonschema:"component name from chunk metadata"`
+	Name     string `json:"name" jsonschema:"component name from chunk metadata"`
+	Receiver string `json:"receiver,omitempty" jsonschema:"optional receiver or class to pick one of several same-name definitions (get_component_ast)"`
 }
 
 type pathIn struct {
@@ -341,7 +350,7 @@ func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 
 func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in nameIn) (*sdkmcp.CallToolResult, chunkDTO, error) {
 	start := time.Now()
-	chunk, err := h.store.GetComponentAST(ctx, in.Name)
+	comps, err := h.store.GetComponents(ctx, in.Name)
 	if errors.Is(err, vectorstore.ErrNotFound) {
 		err = fmt.Errorf("component %q not found", in.Name)
 	}
@@ -349,8 +358,32 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in nam
 		h.record("get_component_ast", in, start, nil, 0)
 		return nil, chunkDTO{}, err
 	}
-	dto := toDTO([]parser.Chunk{*chunk})[0]
-	text := h.rulesText(chunkQuery([]parser.Chunk{*chunk}))
+	pick := 0
+	if in.Receiver != "" {
+		pick = -1
+		for i, c := range comps {
+			if c.Metadata["receiver"] == in.Receiver {
+				pick = i
+				break
+			}
+		}
+		if pick < 0 {
+			h.record("get_component_ast", in, start, nil, 0)
+			return nil, chunkDTO{}, fmt.Errorf("component %q has no receiver %q", in.Name, in.Receiver)
+		}
+	}
+	chunk := comps[pick]
+	dto := toDTO([]parser.Chunk{chunk})[0]
+	for i, c := range comps {
+		// With an explicit receiver, only same-receiver definitions in other files are ambiguous.
+		if i == pick || in.Receiver != "" && c.Metadata["receiver"] != in.Receiver {
+			continue
+		}
+		dto.Alternatives = append(dto.Alternatives, altDTO{
+			FilePath: c.FilePath, Receiver: c.Metadata["receiver"], StartLine: lineNum(c.Metadata["start_line"]),
+		})
+	}
+	text := h.rulesText(chunkQuery([]parser.Chunk{chunk}))
 	h.record("get_component_ast", in, start, dto, 1)
 	dto.Rules = text
 	return contentWithRules(text, dto), dto, nil

@@ -35,6 +35,8 @@ type Store interface {
 	SearchSemantic(ctx context.Context, queryVector []float32, limit int, workspace string) ([]parser.Chunk, error)
 	SearchKeyword(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error)
 	GetComponentAST(ctx context.Context, name string) (*parser.Chunk, error)
+	// GetComponents returns one assembled chunk per (file, receiver) group.
+	GetComponents(ctx context.Context, name string) ([]parser.Chunk, error)
 	GetReferences(ctx context.Context, name string) ([]parser.Chunk, error)
 	WorkspacesForName(ctx context.Context, name string) ([]string, error)
 	FileHash(ctx context.Context, path string) (string, bool, error)

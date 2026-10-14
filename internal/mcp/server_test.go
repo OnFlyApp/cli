@@ -932,3 +932,43 @@ func TestReadAndListHonourGitignoreAndExclude(t *testing.T) {
 		}
 	}
 }
+
+func TestComponentReceiverDisambiguation(t *testing.T) {
+	store, err := vectorstore.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if err := store.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	err = storetest.Save(ctx, store, []vectorstore.EmbeddedChunk{
+		{Chunk: parser.Chunk{FilePath: "u.go", Type: "method", Content: "func (u User) Save() {}", Metadata: map[string]string{"name": "Save", "receiver": "User", "start_line": "3"}}, Vector: []float32{1, 0, 0, 0}},
+		{Chunk: parser.Chunk{FilePath: "o.go", Type: "method", Content: "func (o Order) Save() {}", Metadata: map[string]string{"name": "Save", "receiver": "Order", "start_line": "7"}}, Vector: []float32{1, 0, 0, 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := openServer(t, config.Config{}, store, fakeEmbedder{})
+	call := func(args map[string]any) chunkDTO {
+		t.Helper()
+		res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_component_ast", Arguments: args})
+		if err != nil || res.IsError {
+			t.Fatalf("%v %+v", err, res)
+		}
+		var dto chunkDTO
+		if err := json.Unmarshal([]byte(mustJSON(res.StructuredContent)), &dto); err != nil {
+			t.Fatal(err)
+		}
+		return dto
+	}
+	dto := call(map[string]any{"name": "Save"})
+	if len(dto.Alternatives) != 1 || dto.Alternatives[0].Receiver != "Order" || dto.Alternatives[0].StartLine != 7 {
+		t.Fatalf("%+v", dto)
+	}
+	dto = call(map[string]any{"name": "Save", "receiver": "Order"})
+	if dto.Metadata["receiver"] != "Order" || len(dto.Alternatives) != 0 {
+		t.Fatalf("%+v", dto)
+	}
+}
