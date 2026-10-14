@@ -2,7 +2,7 @@
 
 Onfly indexes a codebase and serves that index to an IDE over the Model Context Protocol (MCP) on stdin and stdout.
 
-Parsers are separate programs. A WASM module or a shell command reads one source file and returns JSON chunks. Onfly embeds those chunks and stores them in SQLite (`sqlite-vec` and FTS5) or Postgres (`pgvector`). `onfly serve` answers search and file tools, and attaches project rules from `.onfly/rules/` to those results. It does not write logs to stdout.
+Parsers are separate programs. A WASM module (sandboxed) or a shell command (`type: stdio`, which must be enabled with `ONFLY_ALLOW_STDIO=1`) reads one source file and returns JSON chunks. Onfly embeds those chunks and stores them in SQLite (`sqlite-vec` and FTS5) or Postgres (`pgvector`). `onfly serve` answers search and file tools, and attaches project rules from `.onfly/rules/` to those results. It does not write logs to stdout.
 
 Operator guides are under [docs/](docs/).
 
@@ -18,7 +18,7 @@ Operator guides are under [docs/](docs/).
 make build
 ```
 
-The binary is `bin/onfly`. The build sets `CGO_ENABLED=0`.
+The binary is `bin/onfly`. The build sets `CGO_ENABLED=0` and stamps the version from `git describe`; `onfly --version` prints it.
 
 ## Index a Go project
 
@@ -114,7 +114,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly index` | Parse matching files, embed the chunks, and update the database. |
 | `onfly index --dry-run` | Parse and print file, chunk, and token counts. Does not open the database or call the embedder. |
 | `onfly index --ci` | Embed 128 chunks per request. The default batch is 32. |
-| `onfly watch` | Reindex changed files after `indexer.debounce_ms`. |
+| `onfly watch` | Reindex changed files after `indexer.debounce_ms`. Reloads ignore rules when a `.gitignore` changes. |
 | `onfly serve` | Serve the MCP tools on stdio. |
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. |
@@ -127,8 +127,9 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly ext remove go` | Remove the wasm file and its config entry. |
 | `onfly ext list` | Show name, version, and `active`, `outdated`, or `corrupted`. |
 | `--config path` | Use this config file instead of walking parent directories. |
+| `--version` | Print the build version. |
 
-`onfly ext` reads `https://raw.githubusercontent.com/OnFlyApp/registry/main/registry.json`, or the URL in `ONFLY_REGISTRY_URL`. A downloaded file is kept only when its SHA-256 matches the registry. A mismatch deletes the temp file and leaves the project unchanged. Installed plugins are recorded in `.onfly/plugins/installed.json`. `onfly ext list` waits at most three seconds for the registry, then prints the table. A failed fetch adds a `registry:` line.
+`onfly ext` reads `https://raw.githubusercontent.com/OnFlyApp/registry/main/registry.json`, or the URL in `ONFLY_REGISTRY_URL`. The registry manifest is limited to 1 MiB, and a warning is printed when `ONFLY_REGISTRY_URL` overrides the default. A downloaded file is kept only when its SHA-256 matches the registry. A mismatch deletes the temp file and leaves the project unchanged. Installed plugins are recorded in `.onfly/plugins/installed.json`. `onfly ext list` waits at most three seconds for the registry, then prints the table. A failed fetch adds a `registry:` line.
 
 ## Rules
 

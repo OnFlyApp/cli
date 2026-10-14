@@ -13,7 +13,7 @@ Directory symlinks are not followed. A file symlink is read only when its target
 
 Each selected file is hashed with xxHash64. A stored hash that matches is skipped: the parser and the embedder are not called. Otherwise the file is parsed, split when a chunk is over `embedder.max_input_tokens`, embedded, and stored in one transaction. The split overlap is 12% of that limit. The stored `file_path` uses forward slashes and is relative to the project root.
 
-The default embed batch is 32. `onfly index --ci` uses 128. A WASM or stdio parse that runs longer than 5 seconds is cancelled. Each WASM runtime is limited to 256 MiB.
+The default embed batch is 32. `onfly index --ci` uses 128. A WASM or stdio parse that runs longer than `indexer.parse_timeout_ms` (default 5 seconds) is cancelled. With `indexer.concurrency` above 1, that many files are parsed, embedded and committed in parallel; each file is still committed in its own transaction. Each WASM runtime is limited to 256 MiB.
 
 ## Reindex
 

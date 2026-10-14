@@ -56,7 +56,7 @@ indexer:
       type: wasm
       path: .onfly/plugins/go-parser.wasm
     - extensions: [".md", ".blade.php"]
-      type: stdio
+      type: stdio                # needs ONFLY_ALLOW_STDIO=1 in the environment
       command: php .onfly/plugins/custom_chunker.php
 
 server:
@@ -111,7 +111,7 @@ OpenAI: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.op
 
 Voyage: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.voyageai.com`. The body sends `input_type` `query` for one search string and `document` for an index batch, and `output_dimension` from `dimensions`. The API key is `embedder.api_key` if set, otherwise `VOYAGE_API_KEY`.
 
-The HTTP timeout is 60 seconds. Batches are 32 texts, or 128 with `onfly index --ci`. HTTP 429 and 503 are retried up to five times. `Retry-After` of 1–30 seconds replaces the backoff. Other status codes fail immediately.
+The HTTP timeout is 60 seconds. Batches are 32 texts, or 128 with `onfly index --ci`. HTTP 429, 502, 503 and 504, and network errors, are retried up to five times. `Retry-After` of 1–30 seconds replaces the backoff. Other status codes, including a plain 500, fail immediately.
 
 `dimensions` is stored in the database on first init. A later run with a different value fails and does not alter the schema. Point `dsn` at a new file or database if you change the model size.
 
