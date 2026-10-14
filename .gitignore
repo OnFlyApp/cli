@@ -14,3 +14,4 @@ vendor/
 /onfly
 .onfly/vector.db-*
 .onfly/plugins/install.lock
+.onfly/
