@@ -163,6 +163,18 @@ func assembleComponent(chunks []parser.Chunk) (*parser.Chunk, error) {
 	for _, part := range group[1:] {
 		content = joinOverlap(content, part.Content)
 	}
+	seen := map[string]bool{}
+	var outbound []string
+	for _, part := range group {
+		for _, ref := range part.Outbound {
+			if !seen[ref] {
+				seen[ref] = true
+				outbound = append(outbound, ref)
+			}
+		}
+	}
+	sort.Strings(outbound)
+	out.Outbound = outbound
 	if end := group[len(group)-1].Metadata["end_line"]; end != "" {
 		meta["end_line"] = end
 	}
