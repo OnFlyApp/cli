@@ -62,6 +62,9 @@ Finds code by what it does. Embeds `query` once, runs semantic search and keywor
 | `query` | yes | Sent to the configured embedder and to keyword search. |
 | `limit` | no | Default 10. Values below 1 become 10. Values above 50 become 50. |
 | `workspace` | no | Empty uses the config value. `*` searches every workspace. Any other value matches that workspace. |
+| `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. The filter runs on the top 50 candidates of each list. A ref starting with `-` is rejected. |
+
+If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights and the recency list come from `search` in [configuration.md](configuration.md#search-fusion).
 
 If `workspace` is omitted, `query` is a single identifier, and that exact metadata name is stored in two or more workspaces, the tool returns an elicitation instead of searching. For the query `User` the message is `Which workspace should be searched for "User"?`. Decline does not embed. `*` and an explicit workspace do not ask.
 

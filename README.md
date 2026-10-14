@@ -102,7 +102,7 @@ onfly serve
 
 `onfly index` prints the current step on stderr, then a one-line summary. On a terminal that step stays on one line (`parsing`, `embedding`, `unchanged`, then `pruning` and `linking references`). It exits 1 if any file failed to parse. An unchanged file is not parsed again. `onfly serve` speaks JSON-RPC on stdout. Logs go to `.onfly/server.log`.
 
-Query the index from the terminal with `onfly search` (`--limit`, `--workspace`, `--json`):
+Query the index from the terminal with `onfly search` (`--limit`, `--workspace`, `--changed-since REF`, `--json`):
 
 ```sh
 onfly search "where is the file hash computed"

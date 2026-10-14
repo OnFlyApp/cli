@@ -86,9 +86,10 @@ type dirList struct {
 }
 
 type semanticIn struct {
-	Query     string `json:"query" jsonschema:"natural language query"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"maximum results, from 1 to 50"`
-	Workspace string `json:"workspace,omitempty" jsonschema:"workspace name, or * for every workspace"`
+	Query        string `json:"query" jsonschema:"natural language query"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"maximum results, from 1 to 50"`
+	Workspace    string `json:"workspace,omitempty" jsonschema:"workspace name, or * for every workspace"`
+	ChangedSince string `json:"changed_since,omitempty" jsonschema:"git ref; keep only files that differ from it, untracked files included"`
 }
 
 type keywordIn struct {
@@ -158,8 +159,12 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		logger.Warn("reranker disabled", "err", err)
 		rr = nil
 	}
-	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger, Rerank: rr, Candidates: cfg.Reranker.Candidates,
-		RerankTimeout: time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond}
+	h.searcher = &query.Searcher{Store: store, Emb: embedder.Cached(emb, query.EmbedCacheSize), Logger: logger, Rerank: rr,
+		Candidates:     cfg.Reranker.Candidates,
+		RerankTimeout:  time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond,
+		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
+		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
+		Root: cfg.ProjectRoot}
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
 	} else {
@@ -308,7 +313,7 @@ func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in s
 }
 
 func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
-	fused, err := h.searcher.Search(ctx, in.Query, in.Limit, workspace)
+	fused, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: in.Limit, Workspace: workspace, ChangedSince: in.ChangedSince})
 	if err != nil {
 		return nil, hitList{}, err
 	}

@@ -18,6 +18,7 @@ type Config struct {
 	Database    Database    `yaml:"database"`
 	Embedder    Embedder    `yaml:"embedder"`
 	Reranker    Reranker    `yaml:"reranker"`
+	Search      Search      `yaml:"search"`
 	Rules       []string    `yaml:"rules"`
 	RulesEngine RulesEngine `yaml:"rules_engine"`
 	Indexer     Indexer     `yaml:"indexer"`
@@ -49,6 +50,17 @@ type Reranker struct {
 	TimeoutMS int `yaml:"timeout_ms"`
 }
 
+// Search tunes how semantic, keyword, and recency lists are fused. A zero
+// weight means 1 for the semantic and keyword lists and 0 (off) for recency.
+type Search struct {
+	SemanticWeight float64 `yaml:"semantic_weight"`
+	KeywordWeight  float64 `yaml:"keyword_weight"`
+	// RecencyWeight adds a list of candidates from files changed in the last
+	// RecencyDays days (git), most recent first. 0 turns it off.
+	RecencyWeight float64 `yaml:"recency_weight"`
+	RecencyDays   int     `yaml:"recency_days"`
+}
+
 type Indexer struct {
 	Include    []string       `yaml:"include"`
 	Exclude    []string       `yaml:"exclude"`
@@ -56,6 +68,9 @@ type Indexer struct {
 	DebounceMS int            `yaml:"debounce_ms"`
 	// Concurrency is the number of files indexed in parallel (0 or 1: sequential).
 	Concurrency int `yaml:"concurrency"`
+	// EmbedContext prefixes each chunk's embedded text with its path and symbol.
+	// Changing it only affects chunks embedded afterwards; reindex to apply it everywhere.
+	EmbedContext bool `yaml:"embed_context"`
 	// ParseTimeoutMS bounds one parser call; 0 uses the 5 s default.
 	ParseTimeoutMS int `yaml:"parse_timeout_ms"`
 }
@@ -302,6 +317,21 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	out.Indexer.Exclude = unionStrings(parent.Indexer.Exclude, child.Indexer.Exclude)
 	out.Indexer.Parsers = mergeParsers(parent.Indexer.Parsers, child.Indexer.Parsers)
+	if child.Indexer.EmbedContext {
+		out.Indexer.EmbedContext = true
+	}
+	if child.Search.SemanticWeight != 0 {
+		out.Search.SemanticWeight = child.Search.SemanticWeight
+	}
+	if child.Search.KeywordWeight != 0 {
+		out.Search.KeywordWeight = child.Search.KeywordWeight
+	}
+	if child.Search.RecencyWeight != 0 {
+		out.Search.RecencyWeight = child.Search.RecencyWeight
+	}
+	if child.Search.RecencyDays != 0 {
+		out.Search.RecencyDays = child.Search.RecencyDays
+	}
 	if child.Indexer.ParseTimeoutMS != 0 {
 		out.Indexer.ParseTimeoutMS = child.Indexer.ParseTimeoutMS
 	}
@@ -514,6 +544,9 @@ func (c Config) validate() error {
 	}
 	if c.Indexer.ParseTimeoutMS < 0 {
 		return fmt.Errorf("indexer.parse_timeout_ms must be >= 0")
+	}
+	if w := c.Search; w.SemanticWeight < 0 || w.KeywordWeight < 0 || w.RecencyWeight < 0 || w.RecencyDays < 0 {
+		return fmt.Errorf("search weights and recency_days must be >= 0")
 	}
 	if c.Reranker.TimeoutMS < 0 {
 		return fmt.Errorf("reranker.timeout_ms must be >= 0")

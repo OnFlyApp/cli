@@ -560,7 +560,7 @@ func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, pre
 	for j, i := range todo {
 		fresh[j] = chunks[i]
 	}
-	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt))
+	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt), s.cfg.Indexer.EmbedContext)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -631,7 +631,7 @@ func batchSize(opt Options) int {
 	return embedBatch
 }
 
-func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chunk, batch int) ([]vectorstore.EmbeddedChunk, error) {
+func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chunk, batch int, withContext bool) ([]vectorstore.EmbeddedChunk, error) {
 	if batch < 1 {
 		batch = embedBatch
 	}
@@ -644,7 +644,7 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 		part := chunks[start:end]
 		texts := make([]string, len(part))
 		for i, chunk := range part {
-			texts[i] = chunk.Content
+			texts[i] = embedText(chunk, withContext)
 		}
 		vecs, err := emb.EmbedBatch(ctx, texts)
 		if err != nil {
@@ -655,4 +655,24 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 		}
 	}
 	return out, nil
+}
+
+// embedText is the text sent to the embedder. With context it leads with the
+// path and symbol, so a query naming a file or function can match the vector.
+func embedText(c parser.Chunk, withContext bool) string {
+	if !withContext {
+		return c.Content
+	}
+	var b strings.Builder
+	b.WriteString("path: " + c.FilePath + "\n")
+	if name := c.Metadata["name"]; name != "" {
+		sym := name
+		if r := c.Metadata["receiver"]; r != "" {
+			sym = r + "." + name
+		}
+		b.WriteString("symbol: " + sym + "\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(c.Content)
+	return b.String()
 }

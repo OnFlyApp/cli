@@ -16,6 +16,7 @@ var (
 	searchLimit     int
 	searchWorkspace string
 	searchJSON      bool
+	searchChanged   string
 )
 
 var searchCmd = &cobra.Command{
@@ -32,7 +33,10 @@ var searchCmd = &cobra.Command{
 			return err
 		}
 		defer closeStore()
-		chunks, err := s.Search(cmd.Context(), strings.Join(args, " "), searchLimit, query.Scope(cfg.Workspace, searchWorkspace))
+		chunks, err := s.Run(cmd.Context(), query.Request{
+			Query: strings.Join(args, " "), Limit: searchLimit,
+			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged,
+		})
 		if err != nil {
 			return err
 		}
@@ -43,6 +47,7 @@ var searchCmd = &cobra.Command{
 func init() {
 	searchCmd.Flags().IntVar(&searchLimit, "limit", query.DefaultLimit, "maximum results, from 1 to 50")
 	searchCmd.Flags().StringVar(&searchWorkspace, "workspace", "", "workspace name, or * for every workspace")
+	searchCmd.Flags().StringVar(&searchChanged, "changed-since", "", "git ref; keep only files that differ from it")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "print JSON with chunk content")
 }
 

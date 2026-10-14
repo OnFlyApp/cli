@@ -3,6 +3,8 @@ package query
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -131,5 +133,75 @@ func TestRerankTimeoutKeepsFusedOrder(t *testing.T) {
 	got, err := s.Search(context.Background(), "getUserId", 5, "")
 	if err != nil || len(got) != 2 || got[0].FilePath != "a.go" || time.Since(start) > 2*time.Second {
 		t.Fatalf("%+v %v %v", got, err, time.Since(start))
+	}
+}
+
+func TestSearchWeightsShiftTheRanking(t *testing.T) {
+	s := newSearcher(t)
+	s.KeywordWeight = 0.01 // semantic puts b.go first; keyword alone favours a.go
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+type failEmb struct{}
+
+func (failEmb) Embed(context.Context, string) ([]float32, error) { return nil, errors.New("down") }
+func (failEmb) EmbedBatch(context.Context, []string) ([][]float32, error) {
+	return nil, errors.New("down")
+}
+
+func TestSearchDegradesToKeywordWhenEmbedderFails(t *testing.T) {
+	s := newSearcher(t)
+	s.Emb = failEmb{}
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 1 || got[0].FilePath != "a.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.Search(ctx, "getUserId", 5, ""); err == nil {
+		t.Fatal("a cancelled context must still fail")
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@t"}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestChangedSinceKeepsOnlyChangedFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q")
+	for _, f := range []string{"a.go", "b.go"} {
+		if err := os.WriteFile(filepath.Join(root, f), []byte("package p\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, root, "add", ".")
+	gitIn(t, root, "commit", "-qm", "init")
+	if err := os.WriteFile(filepath.Join(root, "b.go"), []byte("package p // changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newSearcher(t)
+	s.Root = root
+	got, err := s.Run(context.Background(), Request{Query: "getUserId", Limit: 5, ChangedSince: "HEAD"})
+	if err != nil || len(got) != 1 || got[0].FilePath != "b.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := s.Run(context.Background(), Request{Query: "x", ChangedSince: "--output=/tmp/x"}); err == nil {
+		t.Fatal("a ref starting with - must be rejected")
+	}
+	// Recency: only b.go was committed recently by ref order, both were; both stay, none lost.
+	s.RecencyWeight = 1
+	if got, err := s.Search(context.Background(), "getUserId", 5, ""); err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

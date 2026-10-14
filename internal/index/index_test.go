@@ -738,3 +738,18 @@ func TestEmbedWithReuseRejectsWrongDims(t *testing.T) {
 		t.Fatalf("reused=%d embedded=%d out=%+v err=%v", reused, emb.n, out, err)
 	}
 }
+
+func TestEmbedText(t *testing.T) {
+	c := parser.Chunk{FilePath: "a/b.go", Content: "func (u *User) Save() {}", Metadata: map[string]string{"name": "Save", "receiver": "User"}}
+	if got := embedText(c, false); got != c.Content {
+		t.Fatalf("plain = %q", got)
+	}
+	want := "path: a/b.go\nsymbol: User.Save\n\nfunc (u *User) Save() {}"
+	if got := embedText(c, true); got != want {
+		t.Fatalf("context = %q", got)
+	}
+	c.Metadata = nil
+	if got := embedText(c, true); got != "path: a/b.go\n\nfunc (u *User) Save() {}" {
+		t.Fatalf("unnamed = %q", got)
+	}
+}

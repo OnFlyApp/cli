@@ -32,6 +32,12 @@ reranker:                        # optional, off by default (empty provider)
   candidates: 30                 # fused hits sent to the reranker; default 30
   timeout_ms: 5000               # one rerank call; on timeout the fused order is used
 
+search:                          # optional; how the result lists are fused
+  semantic_weight: 1             # relative weights, 0 means 1
+  keyword_weight: 1
+  recency_weight: 0              # >0 adds a list of files changed in the last recency_days (git), newest first
+  recency_days: 30
+
 rules:
   - .onfly/rules/backend_style.md
   - .onfly/rules/frontend_style.md
@@ -54,6 +60,7 @@ indexer:
   exclude: ["vendor", "node_modules", "var", "public"]
   debounce_ms: 2000              # onfly watch; default 2000
   parse_timeout_ms: 5000         # per parser call; default 5000
+  embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]
@@ -110,6 +117,14 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 `auto_discovery.enabled` defaults to true. When `.onfly/rules/` and `rules` are both empty, Onfly reads the first existing file in `fallback_order` and stops. Set `enabled` to false to ignore those files. Fallback paths stay inside the project root.
 
 `onfly doctor` reads the same files. `rules: ok N tokens` means the rendered rules fit in the budget. A frontmatter or template error fails the check. When the rendered rules exceed the budget, doctor prints `rules: [WARNING]` and exits 0 if every other check passed. That warning names the files whose scopes overlap.
+
+## Search fusion
+
+`search` fuses the semantic and keyword lists by reciprocal rank, `weight / (60 + rank)` per list. `search.semantic_weight` and `search.keyword_weight` are relative; a zero value means 1. `search.recency_weight` above 0 adds a third list of candidates whose files were committed within `search.recency_days` (default 30), most recent first, read from `git log` in the project root and cached for 30 seconds. Outside a git repository the signal is skipped with a warning. Measure a change with [`onfly eval`](evaluation.md) before keeping it.
+
+If the embedder is unreachable, `search` logs a warning and answers from keyword results alone instead of failing. A cancelled request still fails. Query vectors are cached in memory (256 entries), so a repeated query does not call the embedder again.
+
+`indexer.embed_context: true` embeds `path: <file>` and `symbol: <Receiver.Name>` ahead of each chunk, so a query naming a file or function can match its vector. Stored content is unchanged. Chunks already in the index keep their old vectors until their file changes, so reindex from scratch (delete `.onfly/vector.db`) to apply it everywhere, and compare with `onfly eval --baseline`.
 
 ## Reranker
 

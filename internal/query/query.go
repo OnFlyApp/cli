@@ -3,14 +3,17 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
+	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
@@ -20,6 +23,8 @@ const (
 	MaxLimit     = 50
 	keywordPool  = 20
 	rrfK         = 60
+	// EmbedCacheSize is how many query vectors a Searcher remembers.
+	EmbedCacheSize = 256
 )
 
 func ClampLimit(n int) int {
@@ -56,6 +61,23 @@ type Searcher struct {
 	Candidates int
 	// RerankTimeout bounds one rerank call; zero means 5s.
 	RerankTimeout time.Duration
+	// Fusion weights; zero semantic and keyword weights mean 1, zero recency means off.
+	SemanticWeight, KeywordWeight, RecencyWeight float64
+	RecencyDays                                  int
+	// Root is the project root, used for git-based recency and changed-since filters.
+	Root string
+
+	recentMu   sync.Mutex
+	recentAt   time.Time
+	recentList []string
+}
+
+// Request is one search. ChangedSince, a git ref, keeps only files that differ from it.
+type Request struct {
+	Query        string
+	Limit        int
+	Workspace    string
+	ChangedSince string
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -66,25 +88,119 @@ func (s *Searcher) logger() *slog.Logger {
 }
 
 func (s *Searcher) Search(ctx context.Context, q string, limit int, workspace string) ([]parser.Chunk, error) {
-	vec, err := s.Emb.Embed(ctx, q)
-	if err != nil {
-		return nil, err
+	return s.Run(ctx, Request{Query: q, Limit: limit, Workspace: workspace})
+}
+
+func orOne(w float64) float64 {
+	if w <= 0 {
+		return 1
 	}
-	pool := CandidatePool(limit)
-	semantic, err := s.Store.SearchSemantic(ctx, vec, pool, workspace)
-	if err != nil {
-		return nil, err
+	return w
+}
+
+// Run embeds the query, merges semantic and keyword results, and reranks.
+// When the embedder fails it answers from keyword results alone.
+func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
+	var only map[string]bool
+	pool := CandidatePool(r.Limit)
+	if r.ChangedSince != "" {
+		if s.Root == "" {
+			return nil, fmt.Errorf("changed_since needs a project root")
+		}
+		files, err := gitx.ChangedSince(ctx, s.Root, r.ChangedSince)
+		if err != nil {
+			return nil, err
+		}
+		if len(files) == 0 {
+			return nil, nil
+		}
+		only = make(map[string]bool, len(files))
+		for _, f := range files {
+			only[f] = true
+		}
+		pool = MaxLimit // the filter runs after retrieval, so look wide
 	}
-	keyword, err := s.Store.SearchKeyword(ctx, q, pool, workspace)
+	var semantic []parser.Chunk
+	vec, embedErr := s.Emb.Embed(ctx, r.Query)
+	if embedErr == nil {
+		var err error
+		if semantic, err = s.Store.SearchSemantic(ctx, vec, pool, r.Workspace); err != nil {
+			return nil, err
+		}
+	} else if ctx.Err() != nil {
+		return nil, embedErr
+	}
+	keyword, err := s.Store.SearchKeyword(ctx, r.Query, pool, r.Workspace)
 	if err != nil {
+		if embedErr != nil {
+			return nil, embedErr
+		}
 		s.logger().Warn("search keyword", "err", err)
 		keyword = nil
 	}
-	fused := s.rerank(ctx, q, Fuse(semantic, keyword))
-	if n := ClampLimit(limit); len(fused) > n {
+	if embedErr != nil {
+		s.logger().Warn("embedder unavailable, using keyword results only", "err", embedErr)
+	}
+	if only != nil {
+		semantic, keyword = keepFiles(semantic, only), keepFiles(keyword, only)
+	}
+	lists := [][]parser.Chunk{semantic, keyword}
+	weights := []float64{orOne(s.SemanticWeight), orOne(s.KeywordWeight)}
+	if s.RecencyWeight > 0 {
+		if recent := s.recentCandidates(ctx, semantic, keyword); len(recent) > 0 {
+			lists, weights = append(lists, recent), append(weights, s.RecencyWeight)
+		}
+	}
+	fused := s.rerank(ctx, r.Query, FuseWeighted(weights, lists...))
+	if n := ClampLimit(r.Limit); len(fused) > n {
 		fused = fused[:n]
 	}
 	return fused, nil
+}
+
+func keepFiles(in []parser.Chunk, only map[string]bool) []parser.Chunk {
+	var out []parser.Chunk
+	for _, c := range in {
+		if only[c.FilePath] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// recentCandidates orders the candidates from recently committed files by how
+// recently their file changed. Git failures only turn the signal off.
+func (s *Searcher) recentCandidates(ctx context.Context, cands ...[]parser.Chunk) []parser.Chunk {
+	if s.Root == "" {
+		return nil
+	}
+	s.recentMu.Lock()
+	if time.Since(s.recentAt) > 30*time.Second {
+		files, err := gitx.Recent(ctx, s.Root, s.RecencyDays)
+		if err != nil {
+			s.logger().Warn("recency", "err", err)
+			files = nil
+		}
+		s.recentList, s.recentAt = files, time.Now()
+	}
+	files := s.recentList
+	s.recentMu.Unlock()
+	rank := make(map[string]int, len(files))
+	for i, f := range files {
+		rank[f] = i
+	}
+	var out []parser.Chunk
+	seen := map[string]bool{}
+	for _, list := range cands {
+		for _, c := range list {
+			if _, ok := rank[c.FilePath]; ok && !seen[ChunkKey(c)] {
+				seen[ChunkKey(c)] = true
+				out = append(out, c)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return rank[out[i].FilePath] < rank[out[j].FilePath] })
+	return out
 }
 
 // Open builds a Searcher for command-line use. Close the store with the returned func.
@@ -107,21 +223,33 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, err
 	}
-	return &Searcher{Store: store, Emb: emb, Rerank: rr, Candidates: cfg.Reranker.Candidates,
-		RerankTimeout: time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond,
-		Logger:        slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
+	return &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
+		RerankTimeout:  time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond,
+		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
+		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
+		Root:   cfg.ProjectRoot,
+		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
 }
 
 // Fuse merges ranked lists by reciprocal rank. A chunk in several lists
 // appears once and outranks a chunk that is first in only one list.
 func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
+	return FuseWeighted(nil, lists...)
+}
+
+// FuseWeighted is Fuse with a weight per list; a missing weight is 1.
+func FuseWeighted(weights []float64, lists ...[]parser.Chunk) []parser.Chunk {
 	type acc struct {
 		chunk parser.Chunk
 		score float64
 	}
 	var order []string
 	by := map[string]*acc{}
-	for _, list := range lists {
+	for li, list := range lists {
+		w := 1.0
+		if li < len(weights) {
+			w = weights[li]
+		}
 		seen := map[string]bool{}
 		rank := 0
 		for _, ch := range list {
@@ -137,7 +265,7 @@ func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 				by[key] = item
 				order = append(order, key)
 			}
-			item.score += 1 / float64(rrfK+rank)
+			item.score += w / float64(rrfK+rank)
 		}
 	}
 	out := make([]parser.Chunk, 0, len(order))
