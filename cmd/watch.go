@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -16,7 +17,8 @@ var watchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		logger := slog.New(newPlainHandler(os.Stderr, slog.LevelInfo, false))
+		fmt.Fprintf(os.Stderr, "watching %s for changes. Ctrl-C to stop.\n", cfg.ProjectRoot)
 		return watch.Run(cmd.Context(), cfg, logger)
 	},
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/axitdev/onfly/internal/mcp"
@@ -25,6 +26,10 @@ var serveCmd = &cobra.Command{
 		}
 		if serveWatch {
 			cfg.Server.Watch = true
+		}
+		if isTerminal(os.Stdin) {
+			fmt.Fprintln(os.Stderr, "onfly serve speaks MCP on stdin/stdout and is meant to be started by an IDE.")
+			fmt.Fprintln(os.Stderr, "Run `onfly mcp-config claude-code` (or cursor, vscode) to get the entry to add. Waiting for a client; Ctrl-C to stop.")
 		}
 		return mcp.Serve(cmd.Context(), cfg, os.Stdin, os.Stdout)
 	},

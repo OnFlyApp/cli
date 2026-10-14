@@ -40,6 +40,9 @@ var searchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if len(chunks) == 0 && !searchJSON {
+			fmt.Fprintln(cmd.ErrOrStderr(), "no results. Is the index built? Run: onfly index")
+		}
 		return printHits(cmd.OutOrStdout(), chunks, searchJSON)
 	},
 }
@@ -90,6 +93,24 @@ func printHits(w io.Writer, chunks []parser.Chunk, asJSON bool) error {
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
+		if snip := snippet(r.Content); snip != "" {
+			if _, err := fmt.Fprintf(w, "    %s\n", snip); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// snippet is the first non-blank line of a chunk, shortened to fit a terminal.
+func snippet(content string) string {
+	for _, l := range strings.Split(content, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			if r := []rune(l); len(r) > 100 {
+				return string(r[:99]) + "…"
+			}
+			return l
+		}
+	}
+	return ""
 }

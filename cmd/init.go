@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -90,7 +91,12 @@ var initCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return runInit(wd, force, initCI)
+		created, err := initProject(wd, force, initCI)
+		if err != nil {
+			return err
+		}
+		printInitReport(cmd.OutOrStdout(), created, initCI)
+		return nil
 	},
 }
 
@@ -117,35 +123,68 @@ jobs:
 `
 
 func runInit(dir string, overwrite, ci bool) error {
+	_, err := initProject(dir, overwrite, ci)
+	return err
+}
+
+// initProject writes the files and returns their paths relative to dir.
+func initProject(dir string, overwrite, ci bool) ([]string, error) {
 	onfly := filepath.Join(dir, ".onfly")
 	cfgPath := filepath.Join(onfly, "config.yaml")
 	if _, err := os.Stat(cfgPath); err == nil && ci {
 		if err := writeWorkflow(dir, overwrite); err != nil {
-			return err
+			return nil, err
 		}
-		return nil
+		return []string{workflowRel}, nil
 	}
 	if !overwrite {
 		if _, err := os.Stat(cfgPath); err == nil {
-			return fmt.Errorf(".onfly/config.yaml already exists")
+			return nil, fmt.Errorf(".onfly/config.yaml already exists (use --force to overwrite it)")
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(onfly, "plugins"), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Join(onfly, "rules"), 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.WriteFile(cfgPath, []byte(fmt.Sprintf(configTemplate, strconv.Quote(projectName(dir)))), 0o644); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(onfly, "rules", "project.md"), []byte(projectRule), 0o644); err != nil {
-		return err
+		return nil, err
 	}
+	created := []string{".onfly/config.yaml", ".onfly/rules/project.md", ".onfly/plugins/"}
 	if ci {
-		return writeWorkflow(dir, overwrite)
+		if err := writeWorkflow(dir, overwrite); err != nil {
+			return nil, err
+		}
+		created = append(created, workflowRel)
 	}
-	return nil
+	return created, nil
+}
+
+const workflowRel = ".github/workflows/onfly-index.yml"
+
+func printInitReport(w io.Writer, created []string, ci bool) {
+	for _, p := range created {
+		fmt.Fprintf(w, "created %s\n", p)
+	}
+	if len(created) == 1 && created[0] == workflowRel {
+		fmt.Fprintln(w, "\nCommit the workflow to index on every push to main.")
+		return
+	}
+	fmt.Fprint(w, `
+Next steps:
+  1. Start your embedder: ollama pull qwen3-embedding:0.6b
+     (or edit "embedder:" in .onfly/config.yaml)
+  2. Optional, for code: onfly ext install go
+  3. Build the index:    onfly index
+  4. Try it:             onfly search "your question"
+  5. Connect your IDE:   onfly mcp-config claude-code > .mcp.json
+
+Check the setup any time with: onfly doctor
+`)
 }
 
 // projectName is the directory name, which is what a person calls the project.
@@ -161,7 +200,7 @@ func projectName(dir string) string {
 }
 
 func writeWorkflow(dir string, overwrite bool) error {
-	path := filepath.Join(dir, ".github", "workflows", "onfly-index.yml")
+	path := filepath.Join(dir, filepath.FromSlash(workflowRel))
 	if !overwrite {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("%s already exists", path)

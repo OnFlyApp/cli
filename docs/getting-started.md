@@ -26,7 +26,15 @@ In the root of your project:
 onfly init
 ```
 
-This creates a `.onfly/` folder:
+It prints what it created and the next steps:
+
+```text
+created .onfly/config.yaml
+created .onfly/rules/project.md
+created .onfly/plugins/
+```
+
+The `.onfly/` folder holds:
 
 ```text
 .onfly/
@@ -102,7 +110,7 @@ Each line is a file, a line range, and the symbol. If this finds the right place
 onfly mcp-config claude-code > .mcp.json
 ```
 
-Use `cursor` or `vscode` instead of `claude-code` for those editors; the output goes in `.cursor/mcp.json` and `.vscode/mcp.json`. Restart the IDE. Ask it something about your code, such as "how is authentication handled?", and watch it call the `search` tool.
+Run without the redirect to see the entry, and which file it belongs in. Use `cursor` or `vscode` instead of `claude-code` for those editors; the output goes in `.cursor/mcp.json` and `.vscode/mcp.json`. Restart the IDE. Ask it something about your code, such as "how is authentication handled?", and watch it call the `search` tool.
 
 To keep the index fresh while you work, start the server with `--watch` (add it to `args` in the MCP entry), or set `server.watch: true` in the config.
 

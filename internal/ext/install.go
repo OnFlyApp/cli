@@ -245,6 +245,10 @@ func Update(ctx context.Context, opt Options, name string) error {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	if len(names) == 0 {
+		fmt.Fprintln(opt.Stdout, "No parsers installed, nothing to update.")
+		return nil
+	}
 	for _, n := range names {
 		if err := updateOne(ctx, opt, lock, n, false); err != nil {
 			return err
@@ -365,6 +369,22 @@ func List(ctx context.Context, opt Options) error {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	if len(names) == 0 {
+		fmt.Fprintln(opt.Stdout, "No parsers installed. Install one with: onfly ext install <name>  (for example: onfly ext install go)")
+		if regErr == nil {
+			var avail []string
+			for name := range latest {
+				avail = append(avail, name)
+			}
+			sort.Strings(avail)
+			if len(avail) > 0 {
+				fmt.Fprintf(opt.Stdout, "Available: %s\n", strings.Join(avail, ", "))
+			}
+		} else {
+			fmt.Fprintf(opt.Stdout, "registry: %s\n", regErr)
+		}
+		return nil
+	}
 	tw := tabwriter.NewWriter(opt.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tVERSION\tSTATUS")
 	for _, name := range names {

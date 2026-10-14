@@ -21,7 +21,7 @@ var indexCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		progress := newIndexProgress(os.Stderr)
+		progress := newIndexProgress(os.Stderr, indexDryRun)
 		stats, err := index.Run(cmd.Context(), cfg, progress.logger(), index.Options{
 			CI: indexCI, DryRun: indexDryRun, Progress: progress.Event,
 		})
@@ -29,6 +29,9 @@ var indexCmd = &cobra.Command{
 		if indexDryRun {
 			fmt.Printf("files: %d\nchunks: %d\ntokens: %d\n", stats.Files, stats.Chunks, stats.Tokens)
 			return err
+		}
+		if err != nil && stats == (index.Stats{}) {
+			return err // stopped before any file was looked at; a summary of zeros would mislead
 		}
 		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, reused %d, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Reused, stats.Skipped, stats.Pruned, stats.Failed)
 		return err

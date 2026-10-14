@@ -17,7 +17,7 @@ func TestPrintHitsPlain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "a.go:12-30  User.Save\nb.go\n"
+	want := "a.go:12-30  User.Save\n    x\nb.go\n    y\n"
 	if b.String() != want {
 		t.Fatalf("%q", b.String())
 	}

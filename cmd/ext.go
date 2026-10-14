@@ -25,8 +25,7 @@ var extInstallCmd = &cobra.Command{
 }
 
 func extOptions(dir string) ext.Options {
-	st, err := os.Stdin.Stat()
-	tty := err == nil && st.Mode()&os.ModeCharDevice != 0
+	tty := isTerminal(os.Stdin)
 	return ext.Options{
 		Dir: dir, Config: configPath, Yes: extYes, IsTTY: tty, Extensions: extExtensions,
 		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,

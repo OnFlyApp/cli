@@ -59,14 +59,22 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 				// DropTree also covers a removed directory.
 				if err := session.DropTree(ctx, rel); err != nil {
 					logger.Error("watch drop", "path", rel, "err", err)
+				} else {
+					logger.Info("removed " + rel)
 				}
 				return
 			}
 			logger.Error("watch stat", "path", rel, "err", err)
 			return
 		}
-		if _, err := session.Sync(ctx, rel); err != nil {
+		res, err := session.Sync(ctx, rel)
+		switch {
+		case err != nil:
 			logger.Error("watch sync", "path", rel, "err", err)
+		case res.Failed():
+			logger.Warn("could not index", "path", rel, "err", res.Err)
+		case !res.Skipped:
+			logger.Info("indexed "+rel, "chunks", res.Chunks, "reused", res.Reused)
 		}
 	})
 	defer func() {

@@ -24,8 +24,8 @@ var doctorCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadConfig()
 		if err != nil {
-			fmt.Fprintf(os.Stdout, "config: %s\n", err)
-			return err
+			fmt.Fprintf(os.Stdout, "config: %s\n", strings.TrimPrefix(err.Error(), "config: "))
+			return fmt.Errorf("doctor: failed")
 		}
 		return Doctor(cmd.Context(), cfg, os.Stdout)
 	},

@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,15 +15,19 @@ const progressWidth = 20
 type indexProgress struct {
 	out io.Writer
 	tty bool
+	// perFile keeps the "parsing" line of every file on a pipe or log. Without
+	// it a file gets one line, for its outcome (embedding, unchanged, failed).
+	perFile bool
 }
 
-func newIndexProgress(out *os.File) *indexProgress {
-	st, err := out.Stat()
-	tty := err == nil && st.Mode()&os.ModeCharDevice != 0
-	return &indexProgress{out: out, tty: tty}
+func newIndexProgress(out *os.File, perFile bool) *indexProgress {
+	return &indexProgress{out: out, tty: isTerminal(out), perFile: perFile}
 }
 
 func (p *indexProgress) Event(ev index.Event) {
+	if !p.tty && !p.perFile && ev.Action == "parsing" && ev.Total > 0 {
+		return
+	}
 	line := formatIndexProgress(ev, p.tty)
 	if p.tty {
 		fmt.Fprintf(p.out, "\r\033[K%s", line)
@@ -40,11 +43,7 @@ func (p *indexProgress) Finish() {
 }
 
 func (p *indexProgress) logger() *slog.Logger {
-	next := slog.NewTextHandler(p.out, nil)
-	if !p.tty {
-		return slog.New(next)
-	}
-	return slog.New(clearLineHandler{next: next, out: p.out})
+	return slog.New(newPlainHandler(p.out, slog.LevelInfo, p.tty))
 }
 
 func formatIndexProgress(ev index.Event, tty bool) string {
@@ -70,27 +69,4 @@ func formatIndexProgress(ev index.Event, tty bool) string {
 		line = line[:97] + "..."
 	}
 	return line
-}
-
-// clearLineHandler erases a terminal progress line before a log record.
-type clearLineHandler struct {
-	next slog.Handler
-	out  io.Writer
-}
-
-func (h clearLineHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.next.Enabled(ctx, level)
-}
-
-func (h clearLineHandler) Handle(ctx context.Context, rec slog.Record) error {
-	fmt.Fprint(h.out, "\r\033[K")
-	return h.next.Handle(ctx, rec)
-}
-
-func (h clearLineHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return clearLineHandler{next: h.next.WithAttrs(attrs), out: h.out}
-}
-
-func (h clearLineHandler) WithGroup(name string) slog.Handler {
-	return clearLineHandler{next: h.next.WithGroup(name), out: h.out}
 }

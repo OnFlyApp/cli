@@ -31,7 +31,7 @@ Stderr names the current step. On a terminal it stays on one line:
 [######--------------] 12/73 parsing internal/mcp/server.go
 ```
 
-The steps are `loading tokenizer`, `opening database`, `loading parsers`, `walking`, then `N/Total` with `parsing`, `embedding`, `unchanged`, or `failed`, then `pruning` and `linking references`. A pipe or a log file gets one line per step and no bar. Per-file warnings are logged there too. The run ends with:
+The steps are `loading tokenizer`, `opening database`, `loading parsers`, `walking`, then `N/Total` with `parsing`, `embedding`, `unchanged`, or `failed`, then `pruning` and `linking references`. A pipe or a log file gets one line per step and one line per file for its outcome (`embedding`, `unchanged`, or `failed`), and no bar. Warnings read `warning: parse path=src/a.go err=...`. Per-file warnings are logged there too. The run ends with:
 
 ```text
 indexed 12 files, 40 chunks, reused 25, skipped 3, pruned 2, failed 1

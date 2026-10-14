@@ -5,7 +5,7 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | Command | What it does |
 | --- | --- |
 | `onfly init` | Create `.onfly/`, a commented starter config, and one rule file (`.onfly/rules/project.md`). The project name is the directory name. |
-| `onfly init --force` | Overwrite that config and those rule files. |
+| `onfly init --force` | Overwrite that config and those rule files. Without it, an existing config is an error that names the flag. |
 | `onfly init --ci` | Also write `.github/workflows/onfly-index.yml`. An existing config is left in place. `--force` overwrites the workflow. |
 | `onfly index` | Parse matching files, embed the chunks, and update the database. |
 | `onfly index --dry-run` | Parse and print file, chunk, and token counts. Does not open the database or call the embedder. |

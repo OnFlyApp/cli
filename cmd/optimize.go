@@ -28,7 +28,7 @@ var optimizeCmd = &cobra.Command{
 		if err := store.Optimize(ctx); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, "optimized")
+		fmt.Fprintf(os.Stdout, "optimized %s\n", dbLabel(cfg.Database))
 		return nil
 	},
 }

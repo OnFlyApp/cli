@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 
@@ -18,6 +19,11 @@ var statsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if cfg.Database.Driver == "sqlite" && cfg.Database.DSN != ":memory:" {
+			if _, err := os.Stat(cfg.Database.DSN); err != nil {
+				return fmt.Errorf("no index yet at %s. Run: onfly index", cfg.Database.DSN)
+			}
+		}
 		st, err := vectorstore.OpenChecker(cmd.Context(), cfg.Database)
 		if err != nil {
 			return err
@@ -30,7 +36,13 @@ var statsCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		formatStats(cmd.OutOrStdout(), s)
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "index: %s, %d dimensions\n", dbLabel(cfg.Database), cfg.Embedder.Dimensions)
+		fmt.Fprintf(out, "embedder: %s %s\n", cfg.Embedder.Provider, cfg.Embedder.Model)
+		formatStats(out, s)
+		if s.Files == 0 {
+			fmt.Fprintln(out, "the index is empty. Run: onfly index")
+		}
 		return nil
 	},
 }

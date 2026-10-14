@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -33,20 +34,33 @@ var mcpConfigCmd = &cobra.Command{
 }
 
 func mcpSnippet(client string, serveArgs []string) (string, []byte, error) {
-	entry := map[string]any{"command": "onfly", "args": serveArgs}
-	var file string
-	var doc map[string]any
+	var file, key string
+	vscode := false
 	switch client {
 	case "claude-code":
-		file, doc = ".mcp.json", map[string]any{"mcpServers": map[string]any{"onfly": entry}}
+		file, key = ".mcp.json", "mcpServers"
 	case "cursor":
-		file, doc = ".cursor/mcp.json", map[string]any{"mcpServers": map[string]any{"onfly": entry}}
+		file, key = ".cursor/mcp.json", "mcpServers"
 	case "vscode":
-		entry["type"] = "stdio"
-		file, doc = ".vscode/mcp.json", map[string]any{"servers": map[string]any{"onfly": entry}}
+		file, key, vscode = ".vscode/mcp.json", "servers", true
 	default:
 		return "", nil, fmt.Errorf("unknown client %q: use claude-code, cursor or vscode", client)
 	}
-	body, err := json.MarshalIndent(doc, "", "  ")
-	return file, body, err
+	quoted := make([]string, len(serveArgs))
+	for i, a := range serveArgs {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			return "", nil, err
+		}
+		quoted[i] = string(raw)
+	}
+	args := "[" + strings.Join(quoted, ", ") + "]"
+	// Written by hand so the keys keep a readable order and args stay on one line.
+	var b strings.Builder
+	fmt.Fprintf(&b, "{\n  %q: {\n    \"onfly\": {\n", key)
+	if vscode {
+		b.WriteString("      \"type\": \"stdio\",\n")
+	}
+	fmt.Fprintf(&b, "      \"command\": \"onfly\",\n      \"args\": %s\n    }\n  }\n}", args)
+	return file, []byte(b.String()), nil
 }
