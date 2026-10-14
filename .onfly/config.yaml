@@ -1,0 +1,44 @@
+project: "onfly"
+
+database:
+  driver: sqlite
+  dsn: .onfly/vector.db
+
+embedder:
+  provider: ollama
+  endpoint: http://localhost:11434
+  model: qwen3-embedding:0.6b
+  dimensions: 1024               # must match the model; changing it needs a fresh index
+
+indexer:
+  # Go sources and Markdown docs. A file is indexed when it matches include,
+  # is not ignored (.gitignore and exclude) and a parser below handles it.
+  include: ["**/*.go", "**/*.md"]
+  exclude: [vendor, node_modules, bin, dist, build, target, testdata, .superpowers]
+  concurrency: 4                 # files indexed in parallel
+  parsers:
+    - extensions: [.go]
+      type: wasm
+      path: .onfly/plugins/go-parser.wasm
+      exclude: ["**/*_test.go"]      # tests crowd out the code they test in search results
+    # Built in, no download: Markdown and text, split into sections.
+    - extensions: [.md, .txt]
+      type: text
+
+rules:
+  - .onfly/rules/project.md
+
+# Optional, off by default. Measure each with "onfly eval" before keeping it.
+# search:
+#   recency_weight: 0.5            # favour files changed in the last recency_days (git)
+# reranker:
+#   provider: ollama               # voyage, cohere, jina, or ollama (a chat model)
+#   model: qwen2.5-coder:7b
+# indexer:
+#   embed_context: true            # embed "path: / symbol:" with each chunk; reindex after changing
+
+server:
+  transport: stdio
+  log_level: info
+  log_file: .onfly/server.log
+  watch: true                    # reindex changed files while serving

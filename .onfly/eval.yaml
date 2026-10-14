@@ -1,0 +1,21 @@
+cases:
+  - query: where is the content hash computed
+    expect: [{file: internal/index/index.go, symbol: ContentHash}]
+  - query: how are vectors reused on reindex
+    expect: [{file: internal/index/index.go, symbol: embedWithReuse}]
+  - query: how long can a rerank call take before falling back
+    expect: [{file: internal/query/query.go}, {file: internal/config/config.go}]
+  - query: which file prints the mcp-config entry for an IDE
+    expect: [{file: cmd/mcpconfig.go}]
+  - query: retry on 429 from the embedder
+    expect: [{file: internal/embedder/embedder.go}]
+  - query: refuse to index secret files like .env
+    expect: [{file: internal/ignore/ignore.go}]
+  - query: how does get_impact walk callers
+    expect: [{file: internal/mcp/graph.go}]
+  - query: how does a parser get matched to a file extension
+    expect: [{file: internal/parser/router.go}]
+  - query: split a chunk that is too large for the embedder
+    expect: [{file: internal/split/split.go}]
+  - query: where are rules rendered with frontmatter and templates
+    expect: [{file: internal/rules/rules.go}]

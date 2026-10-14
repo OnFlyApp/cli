@@ -753,3 +753,40 @@ func TestEmbedText(t *testing.T) {
 		t.Fatalf("unnamed = %q", got)
 	}
 }
+
+func TestReindexPrunesFilesThatLeftScope(t *testing.T) {
+	for _, workspace := range []string{"", "web"} {
+		srv := fakeOllama(t)
+		dir := t.TempDir()
+		script := filepath.Join(dir, "chunk.sh")
+		body := "#!/bin/sh\nprintf '%s\\n' '[{\"type\":\"function\",\"content\":\"func F\",\"metadata\":{\"name\":\"F\"}}]'\n"
+		if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeProject(t, dir, srv.URL, script)
+		for _, f := range []string{"keep.go", "drop.go"} {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("package p\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cfg := mustLoad(t, dir)
+		cfg.Workspace = workspace
+		ctx := context.Background()
+		if stats, err := Run(ctx, cfg, nil, Options{}); err != nil || stats.Files != 2 {
+			t.Fatalf("%q first run: %+v %v", workspace, stats, err)
+		}
+		cfg.Indexer.Exclude = append(cfg.Indexer.Exclude, "drop.go") // drop.go is still on disk, now out of scope
+		stats, err := Run(ctx, cfg, nil, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := 1
+		if workspace != "" {
+			want = 0 // cannot tell whether a sibling config owns it
+		}
+		if stats.Pruned != want {
+			t.Fatalf("workspace %q: pruned %d, want %d", workspace, stats.Pruned, want)
+		}
+		srv.Close()
+	}
+}

@@ -611,7 +611,12 @@ func (s *Session) prune(ctx context.Context, protected map[string]struct{}, stat
 	}
 	var drop []string
 	for path := range known {
-		if _, ok := protected[path]; ok || !s.inScope(path) {
+		if _, ok := protected[path]; ok {
+			continue
+		}
+		// A workspace config may share its database with sibling configs that
+		// index other paths, so it can only drop what its own scope still covers.
+		if s.cfg.Workspace != "" && !s.inScope(path) {
 			continue
 		}
 		drop = append(drop, path)

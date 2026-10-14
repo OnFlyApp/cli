@@ -11,3 +11,6 @@ vendor/
 .DS_Store
 .idea/
 .vscode/
+/onfly
+.onfly/vector.db-*
+.onfly/install.lock

@@ -205,3 +205,30 @@ func TestChangedSinceKeepsOnlyChangedFiles(t *testing.T) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
+
+func TestQueryWordsDropsStopWordsAndShortWords(t *testing.T) {
+	got := queryWords("How does the retry on 429 work in getUserId, retry?")
+	want := []string{"retry", "429", "work", "getUserId"}
+	if len(got) != len(want) {
+		t.Fatalf("%v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%v, want %v", got, want)
+		}
+	}
+	if len(queryWords("a b c d e f g h i j k l m n o p alpha beta gamma delta epsilon zeta eta theta")) != maxQueryWords {
+		t.Fatal("words must be capped")
+	}
+}
+
+func TestWordMatchesRanksByHowManyWordsMatch(t *testing.T) {
+	s := newSearcher(t)
+	got := s.wordMatches(context.Background(), "getUserId func", 10, "")
+	if len(got) != 2 || got[0].FilePath != "a.go" || got[1].FilePath != "b.go" {
+		t.Fatalf("the chunk with both words must come first, the one with only %q after it: %+v", "func", got)
+	}
+	if s.wordMatches(context.Background(), "single", 10, "") != nil {
+		t.Fatal("one word is left to the whole-query keyword search")
+	}
+}
