@@ -35,7 +35,7 @@ func TestImpactWalksCallersAndStopsOnCycles(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &tools{store: st}
-	got, err := h.impact(ctx, "C", 4)
+	got, err := h.impact(ctx, impactIn{Name: "C", Depth: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +59,63 @@ func TestCalleesReturnsDefinedNamesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &tools{store: st}
-	got, err := h.callees(ctx, "A")
+	got, err := h.callees(ctx, calleesIn{Name: "A"})
 	if err != nil || len(got) != 1 || got[0].Metadata["name"] != "B" {
 		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func ambiguousStore(t *testing.T) vectorstore.Store {
+	t.Helper()
+	st := openTestStore(t)
+	vec := []float32{1, 0, 0, 1}
+	fn := func(file, name, content string, out ...string) vectorstore.EmbeddedChunk {
+		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: file, Type: "function", Content: content,
+			Metadata: map[string]string{"name": name}, Outbound: out}, Vector: vec}
+	}
+	if err := storetest.Save(context.Background(), st, []vectorstore.EmbeddedChunk{
+		fn("pkg/y/run.go", "Run", "func Run() {}"),
+		fn("pkg/x/run.go", "Run", "func Run() {}"),
+		fn("pkg/x/use.go", "UseX", "func UseX() { Run() }", "Run"),
+		fn("pkg/y/use.go", "UseY", "func UseY() { Run() }", "Run"),
+		fn("cmd/top.go", "Top", "func Top() { UseX() }", "UseX"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestCalleesPicksNearestDefinition(t *testing.T) {
+	h := &tools{store: ambiguousStore(t)}
+	got, err := h.callees(context.Background(), calleesIn{Name: "UseX"})
+	if err != nil || len(got) != 1 || got[0].FilePath != "pkg/x/run.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	got, err = h.callees(context.Background(), calleesIn{Name: "UseY"})
+	if err != nil || len(got) != 1 || got[0].FilePath != "pkg/y/run.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := h.callees(context.Background(), calleesIn{Name: "Run", FilePath: "nope.go"}); err == nil {
+		t.Fatal("an unmatched file_path must fail")
+	}
+}
+
+func TestImpactScopedToOneDefinition(t *testing.T) {
+	ctx := context.Background()
+	h := &tools{store: ambiguousStore(t)}
+	all, err := h.impact(ctx, impactIn{Name: "Run"})
+	if err != nil || len(all) != 3 {
+		t.Fatalf("unscoped must keep every same-name caller: %d %v", len(all), err)
+	}
+	got, err := h.impact(ctx, impactIn{Name: "Run", FilePath: "pkg/x/run.go", Depth: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, c := range got {
+		names[c.Metadata["name"]] = true
+	}
+	if len(got) != 2 || !names["UseX"] || !names["Top"] {
+		t.Fatalf("%v", names)
 	}
 }

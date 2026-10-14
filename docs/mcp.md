@@ -95,18 +95,24 @@ Returns `{ "rules", "chunks" }`. `chunks` are the rows whose `outbound` list con
 
 Returns `{ "rules", "hits" }`. `hits` are the chunks for each name in the component's `outbound` list that is defined in this index, at most 50. Library and builtin names are skipped. An unknown component is a tool error.
 
+References carry names only, so a callee defined in several places resolves to the definition nearest the caller: same file, then same directory, then the longest shared parent, then the same receiver. `receiver` and `file_path` pick which definition of `name` to start from.
+
 | Argument | Required |
 | --- | --- |
 | `name` | yes |
+| `receiver` | no |
+| `file_path` | no |
 
 ### `get_impact`
 
-Returns `{ "rules", "hits" }`. `hits` are the distinct chunks that call `name`, directly or through callers, nearest first, at most 100. `depth` is the number of caller levels, from 1 to 4, default 2. The walk follows names, so two functions with the same name share callers.
+Returns `{ "rules", "hits" }`. `hits` are the distinct chunks that call `name`, directly or through callers, nearest first, at most 100. `depth` is the number of caller levels, from 1 to 4, default 2. Without `receiver` or `file_path` the walk follows names, so two functions with the same name share callers. With either, the start is one definition, and a caller nearer to another same-name definition (same file, then same directory, then shared parent) is dropped; ties stay. Callers found along the way are followed as the exact definition they came from.
 
 | Argument | Required |
 | --- | --- |
 | `name` | yes |
 | `depth` | no |
+| `receiver` | no |
+| `file_path` | no |
 
 ### `read_file_raw`
 
