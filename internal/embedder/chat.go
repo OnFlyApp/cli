@@ -45,6 +45,7 @@ func (c *ollamaChat) Complete(ctx context.Context, prompt string) (string, error
 		"model":    c.model,
 		"messages": []map[string]string{{"role": "user", "content": prompt}},
 		"stream":   false,
+		"think":    false, // reasoning models would spend seconds thinking before a one-line answer
 		"options":  map[string]any{"temperature": 0, "num_ctx": ollamaNumCtx},
 	})
 	if err != nil {
