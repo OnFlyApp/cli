@@ -58,3 +58,33 @@ func TestTextParserHeadingInsideFenceIsNotASection(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestTextParserDuplicateHeadingsGetUniqueNames(t *testing.T) {
+	src := "### Added\na\n### Added\nb\n### Added\nc\n"
+	got, _ := TextParser{}.Parse(context.Background(), "/p/CHANGELOG.md", []byte(src))
+	want := []string{"CHANGELOG.md#Added", "CHANGELOG.md#Added~2", "CHANGELOG.md#Added~3"}
+	if len(got) != 3 {
+		t.Fatalf("%+v", got)
+	}
+	for i := range want {
+		if got[i].Metadata["name"] != want[i] {
+			t.Fatalf("names %q", got[i].Metadata["name"])
+		}
+	}
+}
+
+func TestTextParserFrontMatterIsNotHeadings(t *testing.T) {
+	src := "---\ntitle: x\n# comment\n---\n# Real\nbody\n"
+	got, _ := TextParser{}.Parse(context.Background(), "/p/a.md", []byte(src))
+	if len(got) != 2 || got[0].Metadata["name"] != "a.md" || got[1].Metadata["name"] != "a.md#Real" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+func TestTextParserFenceCloseMustMatchOpener(t *testing.T) {
+	src := "# Real\n```sh\n~~~\n# shell comment\n```\nafter\n"
+	got, _ := TextParser{}.Parse(context.Background(), "/p/a.md", []byte(src))
+	if len(got) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}

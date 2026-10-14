@@ -53,20 +53,40 @@ func blank(lines []string) bool {
 
 func markdownSections(base string, lines []string) []Chunk {
 	var out []Chunk
-	name, start, inFence := base, 1, false
+	seen := map[string]int{}
+	name, start := base, 1
 	flush := func(end int) {
 		part := lines[start-1 : end]
 		if !blank(part) {
 			out = append(out, textChunk("section", name, part, start))
 		}
 	}
-	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			inFence = !inFence
-			continue
+	i := 0
+	if len(lines) > 0 && lines[0] == "---" {
+		for j := 1; j < len(lines); j++ {
+			if lines[j] == "---" || lines[j] == "..." {
+				i = j + 1
+				break
+			}
 		}
-		if inFence || !strings.HasPrefix(line, "#") {
+	}
+	var fenceCh byte
+	fenceN := 0
+	for ; i < len(lines); i++ {
+		line := lines[i]
+		trim := strings.TrimSpace(line)
+		if trim != "" && (trim[0] == '`' || trim[0] == '~') {
+			n := len(trim) - len(strings.TrimLeft(trim, trim[:1]))
+			if fenceN == 0 && n >= 3 {
+				fenceCh, fenceN = trim[0], n
+				continue
+			}
+			if fenceN > 0 && trim[0] == fenceCh && n >= fenceN {
+				fenceN = 0
+				continue
+			}
+		}
+		if fenceN > 0 || !strings.HasPrefix(line, "#") {
 			continue
 		}
 		hashes := len(line) - len(strings.TrimLeft(line, "#"))
@@ -78,6 +98,9 @@ func markdownSections(base string, lines []string) []Chunk {
 			flush(i)
 		}
 		name, start = base+"#"+heading, i+1
+		if seen[name]++; seen[name] > 1 {
+			name += "~" + strconv.Itoa(seen[name])
+		}
 	}
 	flush(len(lines))
 	return out
