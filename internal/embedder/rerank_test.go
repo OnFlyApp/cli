@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/axitdev/onfly/internal/config"
@@ -68,7 +69,76 @@ func TestHostedRerankerNeedsKey(t *testing.T) {
 	if _, err := NewReranker(config.Reranker{Provider: "cohere", Model: "m"}); err == nil {
 		t.Fatal("hosted endpoint without key must fail")
 	}
-	if _, err := NewReranker(config.Reranker{Provider: "ollama", Model: "m"}); err == nil {
-		t.Fatal("unknown provider must fail")
+	if _, err := NewReranker(config.Reranker{X		t.Fatal("unknown provider must fail")
+	}
+}
+
+func TestOllamaLLMRerank(t *testing.T) {
+	var prompt string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Model    string `json:"model"`
+			Format   string `json:"format"`
+			Stream   bool   `json:"stream"`
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if r.URL.Path != "/api/chat" || in.Model != "qwen" || in.Format != "json" || in.Stream {
+			t.Errorf("path %s body %+v", r.URL.Path, in)
+		}
+		prompt = in.Messages[0].Content
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": `{"ranking": [3, 1, 9, 3, 2]}`}})
+	}))
+	defer srv.Close()
+	rr, err := NewReranker(config.Reranker{Provider: "ollama", Endpoint: srv.URL, Model: "qwen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("x", 2000)
+	got, err := rr.Rerank(context.Background(), "find retry", []string{"a", "b", long}, 2)
+	if err != nil || len(got) != 2 || got[0] != 2 || got[1] != 0 {
+		t.Fatalf("out-of-range and repeated numbers must be dropped, then cut to topN: %v %v", got, err)
+	}
+	if !strings.Contains(prompt, "find retry") || !strings.Contains(prompt, "[3]") || strings.Contains(prompt, strings.Repeat("x", 600)) {
+		t.Fatalf("prompt must carry the query, numbered candidates and truncated snippets: %.300s", prompt)
+	}
+}
+
+func TestParseRankingFormats(t *testing.T) {
+	cases := map[string][]int{
+		`{"ranking":[2,1]}`:     {1, 0},
+		`[2,1]`:                 {1, 0},
+		"Best first: 2 then 1.": {1, 0},
+		`{"ranking":[0,5,1]}`:   {0},
+		`no numbers at all`:     nil,
+		`{"ranking":[1,1,1]}`:   {0},
+	}
+	for in, want := range cases {
+		got := parseRanking(in, 3)
+		if len(got) != len(want) {
+			t.Errorf("%q: %v, want %v", in, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("%q: %v, want %v", in, got, want)
+			}
+		}
+	}
+}
+
+func TestOllamaRerankerErrors(t *testing.T) {
+	if _, err := NewReranker(config.Reranker{Provider: "ollama"}); err == nil {
+		t.Fatal("a model is required")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": "I cannot do that"}})
+	}))
+	defer srv.Close()
+	rr, _ := NewReranker(config.Reranker{Provider: "ollama", Endpoint: srv.URL, Model: "m"})
+	if _, err := rr.Rerank(context.Background(), "q", []string{"a", "b"}, 2); err == nil {
+		t.Fatal("an answer with no ranking must be an error so the fused order is kept")
 	}
 }

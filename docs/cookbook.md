@@ -158,7 +158,7 @@ Files changed in the last 14 days (from git) get a boost.
 
 ```yaml
 reranker:
-  provider: voyage            # or cohere, jina
+  provider: voyage            # or cohere, jina, ollama
   model: rerank-2
   api_key: ${VOYAGE_API_KEY}
   timeout_ms: 3000
@@ -174,6 +174,18 @@ reranker:
   model: bge-reranker-v2-m3
   endpoint: http://localhost:8081
 ```
+
+To rerank with a local chat model through Ollama (no rerank server needed):
+
+```yaml
+reranker:
+  provider: ollama
+  model: qwen2.5-coder:7b
+  candidates: 20
+  timeout_ms: 30000
+```
+
+It is slower than the options above, so check it with `onfly eval` first.
 
 ## Tell if a change helped
 

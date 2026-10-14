@@ -161,7 +161,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	}
 	h.searcher = &query.Searcher{Store: store, Emb: embedder.Cached(emb, query.EmbedCacheSize), Logger: logger, Rerank: rr,
 		Candidates:     cfg.Reranker.Candidates,
-		RerankTimeout:  time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond,
+		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
 		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
 		Root: cfg.ProjectRoot}

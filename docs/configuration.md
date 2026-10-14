@@ -26,12 +26,12 @@ embedder:
   # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY; voyage to VOYAGE_API_KEY
 
 reranker:                        # optional, off by default (empty provider)
-  provider: voyage               # voyage, cohere, or jina
-  model: rerank-2
+  provider: voyage               # voyage, cohere, jina, or ollama
+  model: rerank-2                # for ollama: a chat model, e.g. qwen2.5-coder:7b
   # endpoint: http://localhost:8080   # optional; a self-hosted server, no key needed
   api_key: ${VOYAGE_API_KEY}     # falls back to VOYAGE_API_KEY, COHERE_API_KEY or JINA_API_KEY
   candidates: 30                 # fused hits sent to the reranker; default 30
-  timeout_ms: 5000               # one rerank call; on timeout the fused order is used
+  timeout_ms: 5000               # one rerank call; default 5000, 30000 for ollama; on timeout the fused order is used
 
 search:                          # optional; how the result lists are fused
   semantic_weight: 1             # relative weights, 0 means 1
@@ -160,7 +160,26 @@ The reranker is off by default. When `reranker.provider` is set, each search sen
 
 A hosted endpoint needs a key. With a custom `endpoint` the key is optional, so a self-hosted server works unauthenticated. Servers that copy the Cohere or Jina request shape (vLLM, llama.cpp with `--reranking`, Infinity, LiteLLM) can be used this way. Pick `cohere` or `jina` to match the path the server exposes.
 
-Ollama is not a rerank provider: as far as we know it has no rerank endpoint, only embeddings and generation. To rerank locally, run a rerank-capable server as above and point `endpoint` at it.
+### Ollama (LLM-based)
+
+`provider: ollama` needs no rerank endpoint. Onfly sends the query and the candidates (each cut to 500 characters) to a chat model through `POST {endpoint}/api/chat` (default `http://localhost:11434`) and asks for a JSON ranking, with `temperature: 0` and `num_ctx: 8192`. One call covers all candidates.
+
+```yaml
+reranker:
+  provider: ollama
+  model: qwen2.5-coder:7b
+  candidates: 20               # fewer candidates is faster and fits the context
+  timeout_ms: 30000
+```
+
+Things to know:
+
+- `model` is a chat model, not an embedding model. Use an instruction-tuned model of about 7B parameters or more; very small models often ignore the format.
+- It is slower than a rerank endpoint, typically seconds per search on a laptop. The default timeout is 30 s, and on timeout or an unusable answer the fused order is kept.
+- Numbers out of range, repeats, and extra text in the answer are ignored; candidates the model leaves out stay after the ranked ones in fused order.
+- Everything stays on your machine, unlike the hosted providers.
+
+Use `onfly eval` to check that it improves your results before keeping it.
 
 ## Embedders
 

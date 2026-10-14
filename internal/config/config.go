@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -59,6 +60,18 @@ type Search struct {
 	// RecencyDays days (git), most recent first. 0 turns it off.
 	RecencyWeight float64 `yaml:"recency_weight"`
 	RecencyDays   int     `yaml:"recency_days"`
+}
+
+// Timeout is the bound for one rerank call. An LLM reranker is slower than a
+// rerank endpoint, so ollama defaults to 30 s; zero elsewhere means the 5 s default.
+func (r Reranker) Timeout() time.Duration {
+	if r.TimeoutMS > 0 {
+		return time.Duration(r.TimeoutMS) * time.Millisecond
+	}
+	if r.Provider == "ollama" {
+		return 30 * time.Second
+	}
+	return 0
 }
 
 type Indexer struct {
@@ -536,9 +549,9 @@ func resolvePath(root, p string) string {
 
 func (c Config) validate() error {
 	switch c.Reranker.Provider {
-	case "", "voyage", "cohere", "jina":
+	case "", "voyage", "cohere", "jina", "ollama":
 	default:
-		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, or jina)", c.Reranker.Provider)
+		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, jina, or ollama)", c.Reranker.Provider)
 	}
 	if strings.TrimSpace(c.Embedder.Model) == "" {
 		return fmt.Errorf("embedder.model is required")

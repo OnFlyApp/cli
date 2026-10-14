@@ -84,7 +84,7 @@ Every command is listed in [Commands](docs/commands.md).
                                               IDE ◄── MCP ◄── onfly serve
 ```
 
-Parsers are small plugins, one per language. Onfly ships a text parser and installs others with `onfly ext install`. Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or reranker (Voyage, Cohere, Jina).
+Parsers are small plugins, one per language. Onfly ships a text parser and installs others with `onfly ext install`. Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or reranker (Voyage, Cohere, Jina; Ollama keeps it local).
 
 ## Guides
 
