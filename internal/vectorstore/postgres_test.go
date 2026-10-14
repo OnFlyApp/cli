@@ -114,3 +114,56 @@ func TestPostgresRejectsUnknownSchema(t *testing.T) {
 		t.Fatalf("version = %s", version)
 	}
 }
+
+func TestPostgresStatsAndVectors(t *testing.T) {
+	dsn := os.Getenv("ONFLY_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("set ONFLY_TEST_POSTGRES_DSN")
+	}
+	ctx := context.Background()
+	st, err := OpenPostgres(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	for _, tbl := range []string{"index_state", "chunks", "schema_meta"} {
+		if _, err := st.pool.Exec(ctx, "DROP TABLE IF EXISTS "+tbl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	vec := []float32{0.1, 0, 1e-7, 1}
+	fn := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func A() {}", Metadata: map[string]string{"name": "A"}}
+	blank := parser.Chunk{FilePath: "b.go", Type: "file", Content: "package p", Metadata: map[string]string{}}
+	if err := st.CommitFile(ctx, "a.go", "h1", []EmbeddedChunk{{Chunk: fn, Vector: vec, Workspace: "backend"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitFile(ctx, "b.go", "h2", []EmbeddedChunk{{Chunk: blank, Vector: vec, Workspace: "backend"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Files != 2 || got.Chunks != 2 || got.Unnamed != 1 || got.ByType["function"] != 1 || got.Workspaces["backend"] != 2 {
+		t.Fatalf("%+v", got)
+	}
+	if n, err := st.UnnamedChunks(ctx); err != nil || n != 1 {
+		t.Fatalf("unnamed %d %v", n, err)
+	}
+	vecs, err := st.VectorsByFile(ctx, "a.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := vecs[fn.Content]
+	if len(back) != len(vec) {
+		t.Fatalf("vectors %v", vecs)
+	}
+	for i := range vec {
+		if d := back[i] - vec[i]; d > 1e-6 || d < -1e-6 {
+			t.Fatalf("vec[%d] = %v, want %v", i, back[i], vec[i])
+		}
+	}
+}

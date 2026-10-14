@@ -30,6 +30,7 @@ reranker:                        # optional, off by default (empty provider)
   model: rerank-2
   api_key: ${VOYAGE_API_KEY}     # falls back to VOYAGE_API_KEY
   candidates: 30                 # fused hits sent to the reranker; default 30
+  timeout_ms: 5000               # one rerank call; on timeout the fused order is used
 
 rules:
   - .onfly/rules/backend_style.md

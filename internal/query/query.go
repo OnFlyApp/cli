@@ -108,7 +108,8 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		return nil, nil, err
 	}
 	return &Searcher{Store: store, Emb: emb, Rerank: rr, Candidates: cfg.Reranker.Candidates,
-		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
+		RerankTimeout: time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond,
+		Logger:        slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
 }
 
 // Fuse merges ranked lists by reciprocal rank. A chunk in several lists

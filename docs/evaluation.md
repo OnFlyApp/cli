@@ -24,10 +24,12 @@ A case hits at rank r when a returned chunk has a path ending in `expect.file` a
 ## Usage
 
 ```
-onfly eval [--cases .onfly/eval.yaml] [--k 10] [--min-recall 0] [--json]
+onfly eval [--cases .onfly/eval.yaml] [--k 10] [--min-recall 0] [--baseline FILE [--update-baseline]] [--json]
 ```
 
 `--min-recall` makes the command exit non-zero when recall falls below the value, for CI.
+
+`--baseline FILE` compares recall and mrr to a saved run and exits non-zero on any drop; the `k` must match. Record it with `--update-baseline` and commit the file.
 
 Write 20 to 50 real questions you would ask about your code. Fewer is noisy; synthetic ones mislead.
 

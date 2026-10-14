@@ -45,6 +45,8 @@ type Reranker struct {
 	Model      string `yaml:"model"`
 	APIKey     string `yaml:"api_key"`
 	Candidates int    `yaml:"candidates"`
+	// TimeoutMS bounds one rerank call; 0 uses the 5 s default.
+	TimeoutMS int `yaml:"timeout_ms"`
 }
 
 type Indexer struct {
@@ -243,6 +245,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Reranker.Candidates != 0 {
 		out.Reranker.Candidates = child.Reranker.Candidates
+	}
+	if child.Reranker.TimeoutMS != 0 {
+		out.Reranker.TimeoutMS = child.Reranker.TimeoutMS
 	}
 	if child.Embedder.Provider != "" {
 		out.Embedder.Provider = child.Embedder.Provider
@@ -509,6 +514,9 @@ func (c Config) validate() error {
 	}
 	if c.Indexer.ParseTimeoutMS < 0 {
 		return fmt.Errorf("indexer.parse_timeout_ms must be >= 0")
+	}
+	if c.Reranker.TimeoutMS < 0 {
+		return fmt.Errorf("reranker.timeout_ms must be >= 0")
 	}
 	if c.Server.MaxTokens < 0 {
 		return fmt.Errorf("server.max_tokens must be >= 0")

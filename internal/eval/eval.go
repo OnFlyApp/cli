@@ -3,6 +3,7 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -106,4 +107,43 @@ func Run(ctx context.Context, cases []Case, search SearchFunc, k int) (Report, e
 		rep.MRR = mrr / float64(rep.Total)
 	}
 	return rep, nil
+}
+
+// Baseline is a saved score that later runs must not fall below.
+type Baseline struct {
+	K      int     `json:"k"`
+	Recall float64 `json:"recall"`
+	MRR    float64 `json:"mrr"`
+}
+
+// SaveBaseline writes rep's scores to path.
+func SaveBaseline(path string, rep Report) error {
+	raw, err := json.MarshalIndent(Baseline{K: rep.K, Recall: rep.Recall, MRR: rep.MRR}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(raw, '\n'), 0o644)
+}
+
+// CheckBaseline fails when rep scores below the baseline at path.
+func CheckBaseline(path string, rep Report) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read baseline (create it with --update-baseline): %w", err)
+	}
+	var b Baseline
+	if err := json.Unmarshal(raw, &b); err != nil {
+		return fmt.Errorf("parse baseline %s: %w", path, err)
+	}
+	if b.K != rep.K {
+		return fmt.Errorf("baseline was recorded at k=%d, this run used k=%d", b.K, rep.K)
+	}
+	const eps = 1e-9
+	if rep.Recall < b.Recall-eps {
+		return fmt.Errorf("recall %.2f is below baseline %.2f", rep.Recall, b.Recall)
+	}
+	if rep.MRR < b.MRR-eps {
+		return fmt.Errorf("mrr %.3f is below baseline %.3f", rep.MRR, b.MRR)
+	}
+	return nil
 }

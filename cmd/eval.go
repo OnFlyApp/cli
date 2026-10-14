@@ -17,6 +17,8 @@ var (
 	evalK         int
 	evalMinRecall float64
 	evalJSON      bool
+	evalBaseline  string
+	evalUpdate    bool
 )
 
 var evalCmd = &cobra.Command{
@@ -70,7 +72,17 @@ var evalCmd = &cobra.Command{
 		if rep.Recall < evalMinRecall {
 			return fmt.Errorf("recall %.2f is below --min-recall %.2f", rep.Recall, evalMinRecall)
 		}
-		return nil
+		if evalBaseline == "" {
+			return nil
+		}
+		bpath := evalBaseline
+		if !filepath.IsAbs(bpath) {
+			bpath = filepath.Join(cfg.ProjectRoot, bpath)
+		}
+		if evalUpdate {
+			return eval.SaveBaseline(bpath, rep)
+		}
+		return eval.CheckBaseline(bpath, rep)
 	},
 }
 
@@ -78,6 +90,8 @@ func init() {
 	evalCmd.Flags().StringVar(&evalCases, "cases", ".onfly/eval.yaml", "path to the cases file, relative to the project root")
 	evalCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalCmd.Flags().Float64Var(&evalMinRecall, "min-recall", 0, "exit non-zero when recall is below this value")
+	evalCmd.Flags().StringVar(&evalBaseline, "baseline", "", "baseline file, relative to the project root; exit non-zero when recall or mrr drops below it")
+	evalCmd.Flags().BoolVar(&evalUpdate, "update-baseline", false, "write the current scores to --baseline instead of comparing")
 	evalCmd.Flags().BoolVar(&evalJSON, "json", false, "print the report as JSON")
 }
 

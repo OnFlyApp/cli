@@ -78,3 +78,25 @@ func TestRunRejectsNonPositiveK(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	rep := Report{K: 10, Recall: 0.8, MRR: 0.5}
+	if err := CheckBaseline(path, rep); err == nil {
+		t.Fatal("a missing baseline must fail")
+	}
+	if err := SaveBaseline(path, rep); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckBaseline(path, rep); err != nil {
+		t.Fatalf("equal scores must pass: %v", err)
+	}
+	if err := CheckBaseline(path, Report{K: 10, Recall: 0.9, MRR: 0.6}); err != nil {
+		t.Fatalf("better scores must pass: %v", err)
+	}
+	for _, worse := range []Report{{K: 10, Recall: 0.7, MRR: 0.5}, {K: 10, Recall: 0.8, MRR: 0.4}, {K: 5, Recall: 0.8, MRR: 0.5}} {
+		if err := CheckBaseline(path, worse); err == nil {
+			t.Fatalf("%+v must fail", worse)
+		}
+	}
+}

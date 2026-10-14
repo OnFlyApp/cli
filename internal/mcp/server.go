@@ -158,7 +158,8 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		logger.Warn("reranker disabled", "err", err)
 		rr = nil
 	}
-	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger, Rerank: rr, Candidates: cfg.Reranker.Candidates}
+	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger, Rerank: rr, Candidates: cfg.Reranker.Candidates,
+		RerankTimeout: time.Duration(cfg.Reranker.TimeoutMS) * time.Millisecond}
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
 	} else {
