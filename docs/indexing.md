@@ -53,6 +53,8 @@ tokens: 18000
 
 `onfly watch` watches the project, except `.git` and `.onfly`, and waits `indexer.debounce_ms` (default 2000) before reindexing one path. Writes inside `.onfly` do not call the parser. A removed file or directory is dropped after the same delay. Editing a `.gitignore` reloads the ignore rules, drops files that became ignored, and reindexes files that became allowed. Reference links are recomputed only for the changed file unless the set of defined names changed.
 
+`onfly serve --watch` (or `server.watch: true`) runs the same watcher inside the MCP server process. It loads the parsers and the embedder there. Watcher errors go to the server log, not stdout.
+
 ## What gets stored
 
 SQLite keeps text, metadata, `outbound`, and `workspace` in `chunk_meta`, the content hash in `index_state`, vectors in a `vec0` table, and an FTS5 index maintained by insert and delete triggers. Semantic search uses sqlite-vec `MATCH` with `distance_metric=cosine`. `Init` rewrites an existing L2 `vec0` table in place and leaves the schema version at `2`. After the parser returns, the indexer fills `metadata.start_line` and `metadata.end_line` when the parser left them empty, using the first match of the chunk text in the file, searching forward from the previous chunk so repeated snippets get successive lines. Keyword search is a case-insensitive substring match. The FTS5 table uses the `trigram` tokenizer, so keywords of three or more characters are answered from the index; shorter ones scan `chunk_meta`. An index created by an older build is rebuilt with trigrams on the next `Init`.

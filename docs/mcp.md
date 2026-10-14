@@ -158,3 +158,7 @@ No arguments. Returns the rendered rules that apply to every request, highest pr
   "outbound": ["User"]
 }
 ```
+
+## Watching while serving
+
+`onfly serve --watch`, or `server.watch: true`, reindexes changed files while the server runs. It loads the parsers and the embedder in the serve process. Watcher errors go to the server log, never stdout, and do not stop the server.

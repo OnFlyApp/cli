@@ -71,6 +71,7 @@ type Server struct {
 	LogFile   string `yaml:"log_file"`
 	MaxTokens int    `yaml:"max_tokens"`
 	TraceFile string `yaml:"trace_file"`
+	Watch     bool   `yaml:"watch"`
 }
 
 type RulesEngine struct {
@@ -272,6 +273,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Server.MaxTokens != 0 {
 		out.Server.MaxTokens = child.Server.MaxTokens
+	}
+	if child.Server.Watch {
+		out.Server.Watch = true
 	}
 	if child.Server.TraceFile != "" {
 		out.Server.TraceFile = child.Server.TraceFile

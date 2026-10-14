@@ -26,6 +26,7 @@ import (
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
+	"github.com/axitdev/onfly/internal/watch"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -229,6 +230,10 @@ func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) 
 		return err
 	}
 	defer closer()
+	if cfg.Server.Watch {
+		stopWatch := startWatch(ctx, cfg, logger, watch.Run)
+		defer stopWatch()
+	}
 	pollCtx, pollCancel := context.WithCancel(ctx)
 	defer pollCancel()
 	go pollGeneration(pollCtx, store, func() error {
@@ -797,3 +802,20 @@ func logLevel(name string) slog.Level {
 type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
+
+// startWatch runs the index watcher beside the MCP server. A watcher error is
+// logged and does not end the session. stop cancels it and waits.
+func startWatch(ctx context.Context, cfg config.Config, logger *slog.Logger, run func(context.Context, config.Config, *slog.Logger) error) (stop func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := run(ctx, cfg, logger); err != nil && ctx.Err() == nil {
+			logger.Error("watch stopped", "err", err)
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
