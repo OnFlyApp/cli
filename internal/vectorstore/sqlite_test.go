@@ -427,3 +427,28 @@ func TestKeywordSearchIsSubstringAndUpgradesOldFTS(t *testing.T) {
 		t.Fatalf("absent: %+v %v", got, err)
 	}
 }
+
+func TestUnnamedChunks(t *testing.T) {
+	st, err := OpenSQLite(filepath.Join(t.TempDir(), "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ctx := context.Background()
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	named := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func A() {}", Metadata: map[string]string{"name": "A"}}
+	blank := parser.Chunk{FilePath: "b.go", Type: "file", Content: "package p", Metadata: map[string]string{}}
+	vec := []float32{1, 0, 0, 0}
+	if err := st.CommitFile(ctx, "a.go", "h1", []EmbeddedChunk{{Chunk: named, Vector: vec}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CommitFile(ctx, "b.go", "h2", []EmbeddedChunk{{Chunk: blank, Vector: vec}}); err != nil {
+		t.Fatal(err)
+	}
+	n, err := st.UnnamedChunks(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("%d %v", n, err)
+	}
+}

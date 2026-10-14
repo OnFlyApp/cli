@@ -818,3 +818,12 @@ func scanChunks(rows *sql.Rows) ([]parser.Chunk, error) {
 	}
 	return out, rows.Err()
 }
+
+// UnnamedChunks counts chunks without metadata.name, which get_component_ast cannot find.
+func (s *SQLite) UnnamedChunks(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT count(*) FROM chunk_meta
+		WHERE coalesce(json_extract(metadata, '$.name'), '') = ''`).Scan(&n)
+	return n, err
+}

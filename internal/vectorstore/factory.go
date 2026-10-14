@@ -22,6 +22,7 @@ func New(ctx context.Context, cfg config.Database) (Store, error) {
 type Checker interface {
 	CheckMeta(ctx context.Context, dimensions int) error
 	Ping(ctx context.Context) error
+	UnnamedChunks(ctx context.Context) (int, error)
 	Close() error
 }
 
