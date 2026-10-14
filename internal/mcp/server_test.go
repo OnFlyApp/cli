@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -970,5 +971,37 @@ func TestComponentReceiverDisambiguation(t *testing.T) {
 	dto = call(map[string]any{"name": "Save", "receiver": "Order"})
 	if dto.Metadata["receiver"] != "Order" || len(dto.Alternatives) != 0 {
 		t.Fatalf("%+v", dto)
+	}
+}
+
+func TestComponentAlternativesAreCapped(t *testing.T) {
+	store, err := vectorstore.OpenSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	ctx := context.Background()
+	if err := store.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	var chunks []vectorstore.EmbeddedChunk
+	for i := 0; i < 25; i++ {
+		f := fmt.Sprintf("f%02d.go", i)
+		chunks = append(chunks, vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: f, Type: "function", Content: "func init() { /*" + f + "*/ }", Metadata: map[string]string{"name": "init"}}, Vector: []float32{1, 0, 0, 0}})
+	}
+	if err := storetest.Save(ctx, store, chunks); err != nil {
+		t.Fatal(err)
+	}
+	session := openServer(t, config.Config{}, store, fakeEmbedder{})
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_component_ast", Arguments: map[string]any{"name": "init"}})
+	if err != nil || res.IsError {
+		t.Fatalf("%v %+v", err, res)
+	}
+	var dto chunkDTO
+	if err := json.Unmarshal([]byte(mustJSON(res.StructuredContent)), &dto); err != nil {
+		t.Fatal(err)
+	}
+	if len(dto.Alternatives) != 20 || dto.AlternativesOmitted != 4 {
+		t.Fatalf("alts=%d omitted=%d", len(dto.Alternatives), dto.AlternativesOmitted)
 	}
 }

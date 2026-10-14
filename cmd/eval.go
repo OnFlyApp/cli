@@ -23,6 +23,9 @@ var evalCmd = &cobra.Command{
 	Use:   "eval",
 	Short: "Score search results against expected files and symbols",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := checkEvalK(evalK); err != nil {
+			return err
+		}
 		cfg, err := loadConfig()
 		if err != nil {
 			return err
@@ -76,4 +79,11 @@ func init() {
 	evalCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalCmd.Flags().Float64Var(&evalMinRecall, "min-recall", 0, "exit non-zero when recall is below this value")
 	evalCmd.Flags().BoolVar(&evalJSON, "json", false, "print the report as JSON")
+}
+
+func checkEvalK(k int) error {
+	if k < 1 || k > query.MaxLimit {
+		return fmt.Errorf("--k must be between 1 and %d, got %d", query.MaxLimit, k)
+	}
+	return nil
 }

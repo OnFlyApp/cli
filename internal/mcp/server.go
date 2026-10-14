@@ -49,7 +49,11 @@ type chunkDTO struct {
 	Outbound []string          `json:"outbound,omitempty"`
 	// Alternatives lists other definitions of the requested component name.
 	Alternatives []altDTO `json:"alternatives,omitempty"`
+	// AlternativesOmitted counts alternatives dropped by the cap.
+	AlternativesOmitted int `json:"alternatives_omitted,omitempty"`
 }
+
+const maxAlternatives = 20
 
 type altDTO struct {
 	FilePath  string `json:"file_path"`
@@ -93,8 +97,12 @@ type keywordIn struct {
 }
 
 type nameIn struct {
+	Name string `json:"name" jsonschema:"component name from chunk metadata"`
+}
+
+type componentIn struct {
 	Name     string `json:"name" jsonschema:"component name from chunk metadata"`
-	Receiver string `json:"receiver,omitempty" jsonschema:"optional receiver or class to pick one of several same-name definitions (get_component_ast)"`
+	Receiver string `json:"receiver,omitempty" jsonschema:"optional receiver or class to pick one of several same-name definitions"`
 }
 
 type pathIn struct {
@@ -353,7 +361,7 @@ func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	return contentWithRules(text, out), out, err
 }
 
-func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in nameIn) (*sdkmcp.CallToolResult, chunkDTO, error) {
+func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in componentIn) (*sdkmcp.CallToolResult, chunkDTO, error) {
 	start := time.Now()
 	comps, err := h.store.GetComponents(ctx, in.Name)
 	if errors.Is(err, vectorstore.ErrNotFound) {
@@ -382,6 +390,10 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in nam
 	for i, c := range comps {
 		// With an explicit receiver, only same-receiver definitions in other files are ambiguous.
 		if i == pick || in.Receiver != "" && c.Metadata["receiver"] != in.Receiver {
+			continue
+		}
+		if len(dto.Alternatives) >= maxAlternatives {
+			dto.AlternativesOmitted++
 			continue
 		}
 		dto.Alternatives = append(dto.Alternatives, altDTO{

@@ -25,7 +25,7 @@ Postgres tests skip unless `ONFLY_TEST_POSTGRES_DSN` points at a disposable data
 
 ```text
 main.go                 process entry
-cmd/                    cobra commands: init, index, watch, serve, doctor, stats, optimize, ext
+cmd/                    cobra commands: init, index, watch, serve, search, eval, mcp-config, doctor, stats, optimize, ext
 internal/config/        YAML load, env expansion, git-root merge
 internal/ext/           plugin registry, checksum download, lockfile
 internal/ignore/        gitignore, secret-name list, and Filter (the one scope check)
@@ -37,6 +37,8 @@ internal/index/         hash skip, embed, save, prune, incremental ref linking, 
 internal/watch/         fsnotify debounce, .gitignore reload
 internal/vectorstore/   sqlite and postgres, schema version 2 (storetest/: fixtures for tests)
 internal/mcp/           MCP tools, token budget, trace, index resource
+internal/query/         one search: embed, semantic, keyword, rank fusion, optional rerank (5s bound)
+internal/eval/          eval cases file, recall@k and MRR scoring
 internal/rules/         rule frontmatter, templates, token budget, fallback files
 ```
 

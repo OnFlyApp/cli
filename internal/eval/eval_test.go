@@ -62,3 +62,19 @@ func TestLoadRejectsEmptyExpectation(t *testing.T) {
 		t.Fatal("a case without expectations must fail to load")
 	}
 }
+
+func TestMatchesIsNotAFuzzySuffix(t *testing.T) {
+	if matches(chunk("internal/reindex.go", "X"), Expect{File: "index.go"}) {
+		t.Fatal("reindex.go matched index.go")
+	}
+	if !matches(chunk("internal/index.go", "X"), Expect{File: "index.go"}) || !matches(chunk("index.go", "X"), Expect{File: "index.go"}) {
+		t.Fatal("exact and path-suffix must match")
+	}
+}
+
+func TestRunRejectsNonPositiveK(t *testing.T) {
+	_, err := Run(context.Background(), nil, nil, 0)
+	if err == nil {
+		t.Fatal("want error")
+	}
+}

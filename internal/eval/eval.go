@@ -65,13 +65,16 @@ func Load(path string) ([]Case, error) {
 }
 
 func matches(c parser.Chunk, want Expect) bool {
-	if !strings.HasSuffix(c.FilePath, want.File) {
+	if c.FilePath != want.File && !strings.HasSuffix(c.FilePath, "/"+want.File) {
 		return false
 	}
 	return want.Symbol == "" || c.Metadata["name"] == want.Symbol
 }
 
 func Run(ctx context.Context, cases []Case, search SearchFunc, k int) (Report, error) {
+	if k < 1 {
+		return Report{}, fmt.Errorf("k must be at least 1, got %d", k)
+	}
 	rep := Report{K: k, Total: len(cases)}
 	var mrr float64
 	for _, c := range cases {

@@ -710,3 +710,31 @@ func TestReindexEmbedsOnlyChangedChunks(t *testing.T) {
 		t.Fatalf("keyword = %+v %v", got, err)
 	}
 }
+
+type countEmb struct{ n int }
+
+func (e *countEmb) Embed(context.Context, string) ([]float32, error) {
+	e.n++
+	return []float32{1, 2, 3, 4}, nil
+}
+
+func (e *countEmb) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		e.n++
+		out[i] = []float32{1, 2, 3, 4}
+	}
+	return out, nil
+}
+
+func TestEmbedWithReuseRejectsWrongDims(t *testing.T) {
+	emb := &countEmb{}
+	var cfg config.Config
+	cfg.Embedder.Dimensions = 4
+	s := &Session{cfg: cfg, emb: emb}
+	ch := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func a() {}"}
+	out, reused, err := s.embedWithReuse(context.Background(), []parser.Chunk{ch}, map[string][]float32{ch.Content: {1, 2}})
+	if err != nil || reused != 0 || emb.n != 1 || len(out[0].Vector) != 4 {
+		t.Fatalf("reused=%d embedded=%d out=%+v err=%v", reused, emb.n, out, err)
+	}
+}

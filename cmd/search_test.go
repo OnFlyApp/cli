@@ -33,3 +33,14 @@ func TestPrintHitsJSONAndEmpty(t *testing.T) {
 		t.Fatalf("%q %v", b.String(), err)
 	}
 }
+
+func TestCheckEvalK(t *testing.T) {
+	for _, k := range []int{0, -1, 51} {
+		if checkEvalK(k) == nil {
+			t.Fatalf("k=%d accepted", k)
+		}
+	}
+	if checkEvalK(1) != nil || checkEvalK(50) != nil {
+		t.Fatal("bounds rejected")
+	}
+}

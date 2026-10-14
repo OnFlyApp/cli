@@ -2,8 +2,10 @@ package query
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
@@ -96,5 +98,38 @@ func TestRerankIgnoresOutOfRangeAndDuplicateIndices(t *testing.T) {
 	got, err := s.Search(context.Background(), "getUserId", 5, "")
 	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" || got[1].FilePath != "a.go" {
 		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+type failKeyword struct{ vectorstore.Store }
+
+func (failKeyword) SearchKeyword(context.Context, string, int, string) ([]parser.Chunk, error) {
+	return nil, errors.New("fts broken")
+}
+
+func TestSearchFallsBackToSemanticWhenKeywordFails(t *testing.T) {
+	s := newSearcher(t)
+	s.Store = failKeyword{s.Store}
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+type blockRerank struct{}
+
+func (blockRerank) Rerank(ctx context.Context, _ string, _ []string, _ int) ([]int, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestRerankTimeoutKeepsFusedOrder(t *testing.T) {
+	s := newSearcher(t)
+	s.Rerank = blockRerank{}
+	s.RerankTimeout = 50 * time.Millisecond
+	start := time.Now()
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 2 || got[0].FilePath != "a.go" || time.Since(start) > 2*time.Second {
+		t.Fatalf("%+v %v %v", got, err, time.Since(start))
 	}
 }

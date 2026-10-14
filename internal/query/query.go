@@ -5,7 +5,9 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"sort"
+	"time"
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
@@ -52,6 +54,8 @@ type Searcher struct {
 	// Rerank, when set, reorders the top Candidates fused hits.
 	Rerank     embedder.Reranker
 	Candidates int
+	// RerankTimeout bounds one rerank call; zero means 5s.
+	RerankTimeout time.Duration
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -103,7 +107,8 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, err
 	}
-	return &Searcher{Store: store, Emb: emb, Rerank: rr, Candidates: cfg.Reranker.Candidates}, store.Close, nil
+	return &Searcher{Store: store, Emb: emb, Rerank: rr, Candidates: cfg.Reranker.Candidates,
+		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
 }
 
 // Fuse merges ranked lists by reciprocal rank. A chunk in several lists
@@ -158,7 +163,10 @@ func ChunkKey(c parser.Chunk) string {
 	return c.FilePath + "\x00" + c.Type + "\x00" + m["name"] + "\x00" + m["part"] + "\x00" + m["start_line"] + "\x00" + c.Content
 }
 
-const defaultRerankPool = 30
+const (
+	defaultRerankPool    = 30
+	defaultRerankTimeout = 5 * time.Second
+)
 
 func (s *Searcher) rerank(ctx context.Context, q string, fused []parser.Chunk) []parser.Chunk {
 	if s.Rerank == nil || len(fused) < 2 {
@@ -176,7 +184,13 @@ func (s *Searcher) rerank(ctx context.Context, q string, fused []parser.Chunk) [
 	for i, c := range head {
 		docs[i] = c.Content
 	}
-	order, err := s.Rerank.Rerank(ctx, q, docs, len(head))
+	timeout := s.RerankTimeout
+	if timeout <= 0 {
+		timeout = defaultRerankTimeout
+	}
+	rctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	order, err := s.Rerank.Rerank(rctx, q, docs, len(head))
 	if err != nil {
 		s.logger().Warn("rerank", "err", err)
 		return fused

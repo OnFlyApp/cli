@@ -3,8 +3,10 @@ package vectorstore
 import (
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -694,7 +696,7 @@ func (s *SQLite) FileHashes(ctx context.Context) (map[string]string, error) {
 
 func (s *SQLite) VectorsByFile(ctx context.Context, path string) (map[string][]float32, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.content, vec_to_json(v.embedding)
+		SELECT m.content, v.embedding
 		FROM chunk_meta AS m JOIN chunk_vecs AS v ON v.rowid = m.rowid
 		WHERE m.file_path = ?`, slashPath(path))
 	if err != nil {
@@ -703,13 +705,17 @@ func (s *SQLite) VectorsByFile(ctx context.Context, path string) (map[string][]f
 	defer rows.Close()
 	out := map[string][]float32{}
 	for rows.Next() {
-		var content, lit string
-		if err := rows.Scan(&content, &lit); err != nil {
+		var content string
+		var blob []byte
+		if err := rows.Scan(&content, &blob); err != nil {
 			return nil, err
 		}
-		v, err := parseVecLiteral(lit)
-		if err != nil {
-			return nil, err
+		if len(blob)%4 != 0 {
+			return nil, fmt.Errorf("embedding blob length %d is not a multiple of 4", len(blob))
+		}
+		v := make([]float32, len(blob)/4)
+		for i := range v {
+			v[i] = math.Float32frombits(binary.LittleEndian.Uint32(blob[i*4:]))
 		}
 		out[content] = v
 	}
