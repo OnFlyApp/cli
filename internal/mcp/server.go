@@ -22,6 +22,7 @@ import (
 	"github.com/axitdev/onfly/internal/embedder"
 	"github.com/axitdev/onfly/internal/ignore"
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/query"
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
@@ -32,10 +33,8 @@ import (
 var Version = "dev"
 
 const (
-	maxRawBytes     = 1 << 20
-	keywordLimit    = 20
-	defaultSemLimit = 10
-	maxSemLimit     = 50
+	maxRawBytes  = 1 << 20
+	keywordLimit = 20
 )
 
 var componentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -118,6 +117,7 @@ type tools struct {
 	engine    *rules.Engine
 	filter    *ignore.Filter
 	logger    *slog.Logger
+	searcher  *query.Searcher
 	trace     io.Writer
 	traceMu   sync.Mutex
 }
@@ -135,6 +135,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		workspace: cfg.Workspace, maxTokens: maxTokens, logger: logger,
 		engine: rules.Load(cfg),
 	}
+	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger}
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
 	} else {
@@ -277,24 +278,9 @@ func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in s
 }
 
 func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
-	vec, err := h.emb.Embed(ctx, in.Query)
+	fused, err := h.searcher.Search(ctx, in.Query, in.Limit, workspace)
 	if err != nil {
 		return nil, hitList{}, err
-	}
-	pool := candidatePool(in.Limit)
-	semantic, err := h.store.SearchSemantic(ctx, vec, pool, workspace)
-	if err != nil {
-		return nil, hitList{}, err
-	}
-	keyword, err := h.store.SearchKeyword(ctx, in.Query, pool, workspace)
-	if err != nil {
-		h.logger.Warn("search keyword", "err", err)
-		keyword = nil
-	}
-	fused := fuseChunks(semantic, keyword)
-	limit := clampLimit(in.Limit)
-	if len(fused) > limit {
-		fused = fused[:limit]
 	}
 	budget, text := h.fitBudget(chunkQuery(fused))
 	hits, err := fitHits(fused, budget)
@@ -566,15 +552,7 @@ func contentWithRules(text string, out any) *sdkmcp.CallToolResult {
 	return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text + "\n" + string(raw)}}}
 }
 
-func (h *tools) scope(arg string) string {
-	if arg == "" {
-		return h.workspace
-	}
-	if arg == "*" {
-		return ""
-	}
-	return arg
-}
+func (h *tools) scope(arg string) string { return query.Scope(h.workspace, arg) }
 
 func truncationText(omitted int) string {
 	return fmt.Sprintf("// [Truncated: %d matches omitted due to context limits.]", omitted)
@@ -711,23 +689,7 @@ func toDTO(chunks []parser.Chunk) []chunkDTO {
 	return out
 }
 
-func clampLimit(n int) int {
-	if n < 1 {
-		return defaultSemLimit
-	}
-	if n > maxSemLimit {
-		return maxSemLimit
-	}
-	return n
-}
-
-func candidatePool(limit int) int {
-	n := clampLimit(limit)
-	if n < keywordLimit {
-		return keywordLimit
-	}
-	return n
-}
+func clampLimit(n int) int { return query.ClampLimit(n) }
 
 func fitHits(chunks []parser.Chunk, maxTokens int) ([]hitDTO, error) {
 	n := len(chunks)
@@ -778,58 +740,6 @@ func lineNum(raw string) int {
 		return 0
 	}
 	return n
-}
-
-func fuseChunks(lists ...[]parser.Chunk) []parser.Chunk {
-	const k = 60
-	type acc struct {
-		chunk parser.Chunk
-		score float64
-	}
-	order := []string{}
-	by := map[string]*acc{}
-	for _, list := range lists {
-		seen := map[string]bool{}
-		rank := 0
-		for _, ch := range list {
-			key := chunkKey(ch)
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			rank++
-			item := by[key]
-			if item == nil {
-				item = &acc{chunk: ch}
-				by[key] = item
-				order = append(order, key)
-			}
-			item.score += 1 / float64(k+rank)
-		}
-	}
-	out := make([]parser.Chunk, 0, len(order))
-	for _, key := range order {
-		out = append(out, by[key].chunk)
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		si := by[chunkKey(out[i])].score
-		sj := by[chunkKey(out[j])].score
-		if si != sj {
-			return si > sj
-		}
-		if out[i].FilePath != out[j].FilePath {
-			return out[i].FilePath < out[j].FilePath
-		}
-		return out[i].Content < out[j].Content
-	})
-	return out
-}
-
-// chunkKey identifies a chunk across the semantic and keyword result lists.
-// Path, type, name, part, first line and content together are unique per row.
-func chunkKey(c parser.Chunk) string {
-	m := c.Metadata
-	return c.FilePath + "\x00" + c.Type + "\x00" + m["name"] + "\x00" + m["part"] + "\x00" + m["start_line"] + "\x00" + c.Content
 }
 
 func logLevel(name string) slog.Level {
