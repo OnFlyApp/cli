@@ -21,7 +21,7 @@ func runStoreContract(t *testing.T, st Store) {
 	other := parser.Chunk{FilePath: "b.php", Type: "function", Content: "function other() {}", Metadata: map[string]string{"name": "Other"}}
 	near := []float32{1, 0, 0, 0}
 	far := []float32{0, 1, 0, 0}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: user, Vector: near}, {Chunk: other, Vector: far}}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: user, Vector: near}, {Chunk: other, Vector: far}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.SearchSemantic(ctx, near, 2, "")
@@ -39,7 +39,7 @@ func runStoreContract(t *testing.T, st Store) {
 		t.Fatalf("keyword = %+v", got)
 	}
 	user.Outbound = []string{"OrderService.Execute"}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: user, Vector: near, Workspace: "backend"}}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: user, Vector: near, Workspace: "backend"}}); err != nil {
 		t.Fatal(err)
 	}
 	refs, err := st.GetReferences(ctx, "OrderService.Execute")
@@ -67,7 +67,7 @@ func runStoreContract(t *testing.T, st Store) {
 	}
 	win := user
 	win.FilePath = `src\main.go`
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: win, Vector: near, Workspace: ""}}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: win, Vector: near, Workspace: ""}}); err != nil {
 		t.Fatal(err)
 	}
 	files, err := st.ListFiles(ctx)
@@ -104,13 +104,13 @@ func runStoreContract(t *testing.T, st Store) {
 	}
 	replaced := user
 	replaced.Content = "function getUserId() { return 1 }"
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{
+	if err := saveChunks(ctx, st, []EmbeddedChunk{
 		{Chunk: user, Vector: near},
 		{Chunk: parser.Chunk{FilePath: "a.php", Type: "function", Content: "second", Metadata: map[string]string{"name": "Two"}}, Vector: near},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: replaced, Vector: near}}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: replaced, Vector: near}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = st.SearchKeyword(ctx, "return 1", 10, "")
@@ -120,13 +120,13 @@ func runStoreContract(t *testing.T, st Store) {
 	if _, err := st.GetComponentAST(ctx, "Two"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("old chunk survived replace")
 	}
-	if err := st.SaveChunks(ctx, nil); err != nil {
+	if err := saveChunks(ctx, st, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.GetComponentAST(ctx, "User"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: user, Vector: []float32{1}}}); err == nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: user, Vector: []float32{1}}}); err == nil {
 		t.Fatal("expected dimension error")
 	}
 	if _, err := st.GetComponentAST(ctx, "User"); err != nil {
@@ -171,7 +171,7 @@ func runWorkspaceKNN(t *testing.T, st Store) {
 			Workspace: "mine",
 		})
 	}
-	if err := st.SaveChunks(ctx, chunks); err != nil {
+	if err := saveChunks(ctx, st, chunks); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.SearchSemantic(ctx, []float32{1, 0, 0, 0}, 3, "mine")

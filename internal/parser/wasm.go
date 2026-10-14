@@ -27,6 +27,15 @@ type WasmParser struct {
 	compiled wazero.CompiledModule
 	mu       sync.Mutex
 	closed   bool
+	// Timeout bounds one Parse call; zero means parseTimeout.
+	Timeout time.Duration
+}
+
+func timeoutOr(d time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return parseTimeout
 }
 
 func newWasmParser(ctx context.Context, path string) (*WasmParser, error) {
@@ -60,7 +69,7 @@ func (p *WasmParser) Parse(ctx context.Context, filePath string, content []byte)
 		WithStdin(bytes.NewReader(content)).
 		WithStdout(stdout).
 		WithStderr(stderr)
-	ctx, cancel := context.WithTimeout(ctx, parseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeoutOr(p.Timeout))
 	defer cancel()
 	mod, err := p.rt.InstantiateModule(ctx, p.compiled, cfg)
 	if mod != nil {

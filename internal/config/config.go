@@ -6,70 +6,72 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/viper"
+	"go.yaml.in/yaml/v3"
 )
 
 // DefaultMaxTokens is the search result budget when server.max_tokens is unset.
 const DefaultMaxTokens = 8192
 
 type Config struct {
-	Project     string      `mapstructure:"project"`
-	Workspace   string      `mapstructure:"workspace"`
-	Database    Database    `mapstructure:"database"`
-	Embedder    Embedder    `mapstructure:"embedder"`
-	Rules       []string    `mapstructure:"rules"`
-	RulesEngine RulesEngine `mapstructure:"rules_engine"`
-	Indexer     Indexer     `mapstructure:"indexer"`
-	Server      Server      `mapstructure:"server"`
-	ProjectRoot string      `mapstructure:"-"`
+	Project     string      `yaml:"project"`
+	Workspace   string      `yaml:"workspace"`
+	Database    Database    `yaml:"database"`
+	Embedder    Embedder    `yaml:"embedder"`
+	Rules       []string    `yaml:"rules"`
+	RulesEngine RulesEngine `yaml:"rules_engine"`
+	Indexer     Indexer     `yaml:"indexer"`
+	Server      Server      `yaml:"server"`
+	ProjectRoot string      `yaml:"-"`
 }
 
 type Database struct {
-	Driver string `mapstructure:"driver"`
-	DSN    string `mapstructure:"dsn"`
+	Driver string `yaml:"driver"`
+	DSN    string `yaml:"dsn"`
 }
 
 type Embedder struct {
-	Provider       string `mapstructure:"provider"`
-	Endpoint       string `mapstructure:"endpoint"`
-	Model          string `mapstructure:"model"`
-	Dimensions     int    `mapstructure:"dimensions"`
-	APIKey         string `mapstructure:"api_key"`
-	MaxInputTokens int    `mapstructure:"max_input_tokens"`
+	Provider       string `yaml:"provider"`
+	Endpoint       string `yaml:"endpoint"`
+	Model          string `yaml:"model"`
+	Dimensions     int    `yaml:"dimensions"`
+	APIKey         string `yaml:"api_key"`
+	MaxInputTokens int    `yaml:"max_input_tokens"`
 }
 
 type Indexer struct {
-	Include    []string       `mapstructure:"include"`
-	Exclude    []string       `mapstructure:"exclude"`
-	Parsers    []ParserConfig `mapstructure:"parsers"`
-	DebounceMS int            `mapstructure:"debounce_ms"`
+	Include    []string       `yaml:"include"`
+	Exclude    []string       `yaml:"exclude"`
+	Parsers    []ParserConfig `yaml:"parsers"`
+	DebounceMS int            `yaml:"debounce_ms"`
 	// Concurrency is the number of files indexed in parallel (0 or 1: sequential).
-	Concurrency int `mapstructure:"concurrency"`
+	Concurrency int `yaml:"concurrency"`
+	// ParseTimeoutMS bounds one parser call; 0 uses the 5 s default.
+	ParseTimeoutMS int `yaml:"parse_timeout_ms"`
 }
 
 type ParserConfig struct {
-	Extensions []string `mapstructure:"extensions"`
-	Type       string   `mapstructure:"type"`
-	Path       string   `mapstructure:"path"`
-	Command    string   `mapstructure:"command"`
+	Extensions []string `yaml:"extensions"`
+	Type       string   `yaml:"type"`
+	Path       string   `yaml:"path"`
+	Command    string   `yaml:"command"`
 }
 
 type Server struct {
-	Transport string `mapstructure:"transport"`
-	LogLevel  string `mapstructure:"log_level"`
-	LogFile   string `mapstructure:"log_file"`
-	MaxTokens int    `mapstructure:"max_tokens"`
-	TraceFile string `mapstructure:"trace_file"`
+	Transport string `yaml:"transport"`
+	LogLevel  string `yaml:"log_level"`
+	LogFile   string `yaml:"log_file"`
+	MaxTokens int    `yaml:"max_tokens"`
+	TraceFile string `yaml:"trace_file"`
 }
 
 type RulesEngine struct {
-	MaxTokenBudgetPercent int           `mapstructure:"max_token_budget_percent"`
-	AutoDiscovery         AutoDiscovery `mapstructure:"auto_discovery"`
+	MaxTokenBudgetPercent int           `yaml:"max_token_budget_percent"`
+	AutoDiscovery         AutoDiscovery `yaml:"auto_discovery"`
 }
 
 type AutoDiscovery struct {
-	Enabled       *bool    `mapstructure:"enabled"`
-	FallbackOrder []string `mapstructure:"fallback_order"`
+	Enabled       *bool    `yaml:"enabled"`
+	FallbackOrder []string `yaml:"fallback_order"`
 }
 
 func Load(startDir, explicitPath string) (Config, error) {
@@ -112,15 +114,13 @@ func Load(startDir, explicitPath string) (Config, error) {
 }
 
 func readFile(path string) (Config, error) {
-	v := viper.New()
-	v.SetConfigFile(path)
-	v.SetConfigType("yaml")
-	if err := v.ReadInConfig(); err != nil {
+	body, err := os.ReadFile(path)
+	if err != nil {
 		return Config{}, err
 	}
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return Config{}, err
+	if err := yaml.Unmarshal(body, &cfg); err != nil {
+		return Config{}, fmt.Errorf("config: %s: %w", path, err)
 	}
 	cfg.ProjectRoot = ProjectRoot(path)
 	if err := expand(&cfg); err != nil {
@@ -269,6 +269,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	out.Indexer.Exclude = unionStrings(parent.Indexer.Exclude, child.Indexer.Exclude)
 	out.Indexer.Parsers = mergeParsers(parent.Indexer.Parsers, child.Indexer.Parsers)
+	if child.Indexer.ParseTimeoutMS != 0 {
+		out.Indexer.ParseTimeoutMS = child.Indexer.ParseTimeoutMS
+	}
 	if child.Indexer.Concurrency != 0 {
 		out.Indexer.Concurrency = child.Indexer.Concurrency
 	}
@@ -458,6 +461,9 @@ func (c Config) validate() error {
 	}
 	if c.Indexer.Concurrency < 0 || c.Indexer.Concurrency > 32 {
 		return fmt.Errorf("indexer.concurrency must be from 0 to 32")
+	}
+	if c.Indexer.ParseTimeoutMS < 0 {
+		return fmt.Errorf("indexer.parse_timeout_ms must be >= 0")
 	}
 	if c.Server.MaxTokens < 0 {
 		return fmt.Errorf("server.max_tokens must be >= 0")

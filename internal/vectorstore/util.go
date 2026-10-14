@@ -199,17 +199,3 @@ func likePattern(keyword string) string {
 func ftsPhrase(keyword string) string {
 	return `"` + strings.ReplaceAll(keyword, `"`, `""`) + `"`
 }
-
-func distinctPaths(chunks []EmbeddedChunk) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, c := range chunks {
-		path := slashPath(c.Chunk.FilePath)
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		out = append(out, path)
-	}
-	return out
-}

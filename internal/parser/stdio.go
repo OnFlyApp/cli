@@ -8,11 +8,14 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 type StdioParser struct {
 	command string
 	mu      sync.Mutex
+	// Timeout bounds one Parse call; zero means parseTimeout.
+	Timeout time.Duration
 }
 
 func newStdioParser(command string) *StdioParser {
@@ -33,7 +36,7 @@ func quoteCmd(s string) string {
 func (p *StdioParser) Parse(ctx context.Context, filePath string, content []byte) ([]Chunk, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, parseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, timeoutOr(p.Timeout))
 	defer cancel()
 	cmd := shellCommand(ctx, p.command, filePath)
 	prepareCmd(cmd)

@@ -16,7 +16,7 @@ const DefaultRegistryURL = "https://raw.githubusercontent.com/OnFlyApp/registry/
 
 const maxRedirects = 5
 
-var maxPluginBytes int64 = 64 << 20
+const maxPluginBytes int64 = 64 << 20
 
 const maxManifestBytes = 1 << 20
 

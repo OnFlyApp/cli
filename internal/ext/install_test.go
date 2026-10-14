@@ -59,8 +59,7 @@ func writeProject(t *testing.T) string {
 
 func registryServer(t *testing.T, latest, old []byte, sumLatest, sumOld string) (*httptest.Server, *http.Client) {
 	t.Helper()
-	var srv *httptest.Server
-	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/registry.json":
 			fmt.Fprintf(w, `{
@@ -661,9 +660,7 @@ func TestRemoveRestoresWasmWhenLockSaveFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	wasm := filepath.Join(dir, ".onfly", "plugins", "php-parser.wasm")
-	orig := lockSaver
-	lockSaver = func(string, map[string]Installed) error { return errors.New("disk") }
-	t.Cleanup(func() { lockSaver = orig })
+	opt.SaveLock = func(string, map[string]Installed) error { return errors.New("disk") }
 	if err := Remove(opt, "php"); err == nil {
 		t.Fatal("expected lock save error")
 	}

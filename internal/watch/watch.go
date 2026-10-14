@@ -25,7 +25,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	ign, err := ignore.Load(cfg.ProjectRoot)
+	filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude)
 	if err != nil {
 		session.Close()
 		return err
@@ -35,7 +35,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		session.Close()
 		return err
 	}
-	if err := addDirs(w, cfg.ProjectRoot, ign); err != nil {
+	if err := addDirs(w, cfg.ProjectRoot, filter); err != nil {
 		w.Close()
 		session.Close()
 		return err
@@ -88,7 +88,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			}
 			if errors.Is(err, fsnotify.ErrEventOverflow) {
 				opMu.Lock()
-				rescan(w, cfg.ProjectRoot, ign, coal.push)
+				rescan(w, cfg.ProjectRoot, filter, coal.push)
 				if err := session.DropAbsent(ctx); err != nil {
 					logger.Error("watch rescan", "err", err)
 				}
@@ -108,8 +108,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			}
 			if filepath.Base(rel) == ".gitignore" && !ev.Has(fsnotify.Remove) {
 				// Scope changed: reload matchers, drop newly ignored files, index newly allowed ones.
-				if next, err := ignore.Load(cfg.ProjectRoot); err == nil {
-					ign = next
+				if next, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err == nil {
+					filter = next
 					opMu.Lock()
 					if err := session.ReloadIgnore(); err != nil {
 						logger.Error("watch ignore", "err", err)
@@ -117,7 +117,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 						logger.Error("watch ignore", "err", err)
 					}
 					opMu.Unlock()
-					rescan(w, cfg.ProjectRoot, ign, coal.push)
+					rescan(w, cfg.ProjectRoot, filter, coal.push)
 				}
 				continue
 			}
@@ -129,8 +129,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			if ev.Has(fsnotify.Create) {
 				info, err := os.Stat(ev.Name)
 				if err == nil && info.IsDir() {
-					if !skipDir(rel, ign) {
-						watchTree(w, cfg.ProjectRoot, ev.Name, ign, coal.push)
+					if !skipDir(rel, filter) {
+						watchTree(w, cfg.ProjectRoot, ev.Name, filter, coal.push)
 					}
 					continue
 				}
@@ -144,7 +144,7 @@ func interesting(op fsnotify.Op) bool {
 	return op.Has(fsnotify.Write) || op.Has(fsnotify.Create) || op.Has(fsnotify.Rename) || op.Has(fsnotify.Remove)
 }
 
-func watchTree(w *fsnotify.Watcher, root, dir string, ign *ignore.Set, push func(string)) {
+func watchTree(w *fsnotify.Watcher, root, dir string, filter *ignore.Filter, push func(string)) {
 	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -157,7 +157,7 @@ func watchTree(w *fsnotify.Watcher, root, dir string, ign *ignore.Set, push func
 			return nil
 		}
 		if d.IsDir() {
-			if rel != "." && skipDir(rel, ign) {
+			if rel != "." && skipDir(rel, filter) {
 				return filepath.SkipDir
 			}
 			if err := w.Add(path); err != nil {
@@ -170,11 +170,11 @@ func watchTree(w *fsnotify.Watcher, root, dir string, ign *ignore.Set, push func
 	})
 }
 
-func rescan(w *fsnotify.Watcher, root string, ign *ignore.Set, push func(string)) {
-	watchTree(w, root, root, ign, push)
+func rescan(w *fsnotify.Watcher, root string, filter *ignore.Filter, push func(string)) {
+	watchTree(w, root, root, filter, push)
 }
 
-func addDirs(w *fsnotify.Watcher, root string, ign *ignore.Set) error {
+func addDirs(w *fsnotify.Watcher, root string, filter *ignore.Filter) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -187,22 +187,15 @@ func addDirs(w *fsnotify.Watcher, root string, ign *ignore.Set) error {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if rel != "." && skipDir(rel, ign) {
+		if rel != "." && skipDir(rel, filter) {
 			return filepath.SkipDir
 		}
 		return w.Add(path)
 	})
 }
 
-func skipDir(rel string, ign *ignore.Set) bool {
-	base := rel
-	if i := strings.LastIndex(rel, "/"); i >= 0 {
-		base = rel[i+1:]
-	}
-	if base == ".git" || base == ".onfly" {
-		return true
-	}
-	return ign != nil && ign.Ignored(rel, true)
+func skipDir(rel string, filter *ignore.Filter) bool {
+	return filter.Skip(rel, true)
 }
 
 func relEvent(root, name string) (string, bool) {

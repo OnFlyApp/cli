@@ -215,30 +215,6 @@ func (p *Postgres) meta(ctx context.Context, key string) (string, error) {
 	return value, err
 }
 
-func (p *Postgres) SaveChunks(ctx context.Context, chunks []EmbeddedChunk) error {
-	if len(chunks) == 0 {
-		return nil
-	}
-	if err := checkVectors(chunks, p.dimensions); err != nil {
-		return err
-	}
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err := p.deletePaths(ctx, tx, distinctPaths(chunks)); err != nil {
-		return err
-	}
-	if err := insertPGChunks(ctx, tx, chunks); err != nil {
-		return err
-	}
-	if err := bumpPostgres(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
 func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []EmbeddedChunk) error {
 	if len(chunks) > 0 {
 		if err := checkVectors(chunks, p.dimensions); err != nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
+	"github.com/axitdev/onfly/internal/vectorstore/storetest"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -52,7 +53,7 @@ func TestTools(t *testing.T) {
 	if err := store.Init(context.Background(), 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(context.Background(), []vectorstore.EmbeddedChunk{{
+	err = storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{{
 		Chunk: parser.Chunk{
 			FilePath: "src/a.go",
 			Type:     "function",
@@ -248,7 +249,7 @@ func seedUsers(t *testing.T) *vectorstore.SQLite {
 	if err := store.Init(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(ctx, []vectorstore.EmbeddedChunk{
+	err = storetest.Save(ctx, store, []vectorstore.EmbeddedChunk{
 		{Chunk: parser.Chunk{FilePath: "backend/user.go", Type: "function", Content: "func User() {}", Metadata: map[string]string{"name": "User"}}, Vector: []float32{1, 0, 0, 0}, Workspace: "backend"},
 		{Chunk: parser.Chunk{FilePath: "frontend/user.go", Type: "function", Content: "func User() {}", Metadata: map[string]string{"name": "User"}}, Vector: []float32{0, 1, 0, 0}, Workspace: "frontend"},
 	})
@@ -333,7 +334,7 @@ func TestSemanticBudgetDropsTail(t *testing.T) {
 			Vector: vecs[i],
 		})
 	}
-	if err := store.SaveChunks(context.Background(), saved); err != nil {
+	if err := storetest.Save(context.Background(), store, saved); err != nil {
 		t.Fatal(err)
 	}
 	one, err := tokens.Count(mustJSON([]hitDTO{toHit(saved[0].Chunk), diagnosticHit(2)}))
@@ -380,7 +381,7 @@ func TestGetReferences(t *testing.T) {
 	if err := store.Init(context.Background(), 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(context.Background(), []vectorstore.EmbeddedChunk{{
+	err = storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{{
 		Chunk: parser.Chunk{
 			FilePath: "src/order.go",
 			Type:     "function",
@@ -426,7 +427,7 @@ func TestWorkspaceArg(t *testing.T) {
 	if err := store.Init(context.Background(), 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(context.Background(), []vectorstore.EmbeddedChunk{
+	err = storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{
 		{Chunk: parser.Chunk{FilePath: "back.go", Type: "function", Content: "alpha backend", Metadata: map[string]string{"name": "Back"}}, Vector: []float32{1, 0, 0, 1}, Workspace: "backend"},
 		{Chunk: parser.Chunk{FilePath: "front.go", Type: "function", Content: "alpha frontend", Metadata: map[string]string{"name": "Front"}}, Vector: []float32{0, 1, 0, 1}, Workspace: "frontend"},
 	})
@@ -456,7 +457,7 @@ func TestTraceLine(t *testing.T) {
 	if err := store.Init(context.Background(), 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(context.Background(), []vectorstore.EmbeddedChunk{{
+	err = storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{{
 		Chunk:  parser.Chunk{FilePath: "a.go", Type: "function", Content: "func getUserId() {}", Metadata: map[string]string{"name": "User"}},
 		Vector: []float32{1, 0, 0, 1},
 	}})
@@ -536,7 +537,7 @@ func TestGenerationNotify(t *testing.T) {
 		t.Fatalf("early notify %s", uri)
 	default:
 	}
-	err = store.SaveChunks(ctx, []vectorstore.EmbeddedChunk{{
+	err = storetest.Save(ctx, store, []vectorstore.EmbeddedChunk{{
 		Chunk:  parser.Chunk{FilePath: "a.go", Type: "function", Content: "func a() {}", Metadata: map[string]string{"name": "A"}},
 		Vector: []float32{1, 0, 0, 1},
 	}})
@@ -668,7 +669,7 @@ func TestComponentASTIsObject(t *testing.T) {
 	if err := store.Init(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(ctx, []vectorstore.EmbeddedChunk{{
+	err = storetest.Save(ctx, store, []vectorstore.EmbeddedChunk{{
 		Chunk:  parser.Chunk{FilePath: "src/a.go", Type: "function", Content: "func User() {}", Metadata: map[string]string{"name": "User"}},
 		Vector: []float32{1, 0, 0, 0},
 	}})
@@ -706,7 +707,7 @@ func TestSearchToolsAndFusion(t *testing.T) {
 	if err := store.Init(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(ctx, []vectorstore.EmbeddedChunk{
+	err = storetest.Save(ctx, store, []vectorstore.EmbeddedChunk{
 		{Chunk: parser.Chunk{
 			FilePath: "far.go", Type: "method", Content: "func getUserId() {}",
 			Metadata: map[string]string{"name": "getUserId", "receiver": "Service", "start_line": "4", "end_line": "4"},
@@ -814,7 +815,7 @@ func TestRulesFollowTheRequest(t *testing.T) {
 	if err := store.Init(context.Background(), 4); err != nil {
 		t.Fatal(err)
 	}
-	err = store.SaveChunks(context.Background(), []vectorstore.EmbeddedChunk{{
+	err = storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{{
 		Chunk: parser.Chunk{
 			FilePath: "src/a.go",
 			Type:     "interface",
@@ -907,12 +908,12 @@ func TestReadAndListHonourGitignoreAndExclude(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := &tools{root: root, exclude: []string{"gen"}}
-	ign, err := ignore.Load(root)
+	h := &tools{root: root}
+	filter, err := ignore.LoadFilter(root, []string{"gen"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.ign = ign
+	h.filter = filter
 	for _, bad := range []string{"secret.txt", "gen/out.txt", "id_ed25519"} {
 		if _, err := h.readFileBody(pathIn{Path: bad}); err == nil {
 			t.Fatalf("%s was readable", bad)

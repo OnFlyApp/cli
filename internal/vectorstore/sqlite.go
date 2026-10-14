@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/axitdev/onfly/internal/parser"
 	_ "modernc.org/sqlite"
@@ -77,24 +78,53 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 	if dimensions < 1 || dimensions > 8192 {
 		return fmt.Errorf("vectorstore: dimensions %d out of range", dimensions)
 	}
-	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
-		return err
-	}
-	var existing string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM schema_meta WHERE key = 'dimensions'`).Scan(&existing)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil && existing != fmt.Sprint(dimensions) {
-		return fmt.Errorf("%w: database %s, config %d", ErrDimensionMismatch, existing, dimensions)
-	}
-	version, err := s.meta(ctx, "version")
+	existing, version, err := s.readMeta(ctx, dimensions)
 	if err != nil {
 		return err
 	}
-	if version != "" && version != schemaVersion {
-		return fmt.Errorf("vectorstore: schema version %s cannot be migrated; rebuild the index", version)
+	if err := s.ensureTables(ctx, version); err != nil {
+		return err
 	}
+	if err := s.ensureCosine(ctx, dimensions); err != nil {
+		return err
+	}
+	if width, ok, err := vecWidth(ctx, s.db); err != nil {
+		return err
+	} else if ok && width != dimensions {
+		return fmt.Errorf("%w: database %d, config %d", ErrDimensionMismatch, width, dimensions)
+	}
+	if err := s.writeMeta(ctx, existing, version, dimensions); err != nil {
+		return err
+	}
+	s.dimensions = dimensions
+	return nil
+}
+
+// readMeta returns the stored dimensions and schema version, rejecting a
+// mismatch or a version this build cannot migrate.
+func (s *SQLite) readMeta(ctx context.Context, dimensions int) (existing, version string, err error) {
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+		return "", "", err
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT value FROM schema_meta WHERE key = 'dimensions'`).Scan(&existing)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", "", err
+	}
+	if err == nil && existing != fmt.Sprint(dimensions) {
+		return "", "", fmt.Errorf("%w: database %s, config %d", ErrDimensionMismatch, existing, dimensions)
+	}
+	version, err = s.meta(ctx, "version")
+	if err != nil {
+		return "", "", err
+	}
+	if version != "" && version != schemaVersion {
+		return "", "", fmt.Errorf("vectorstore: schema version %s cannot be migrated; rebuild the index", version)
+	}
+	return existing, version, nil
+}
+
+// ensureTables creates or migrates chunk_meta, the FTS table, triggers and index_state.
+func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 	exists, err := sqliteTable(ctx, s.db, "chunk_meta")
 	if err != nil {
 		return err
@@ -120,10 +150,24 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 	if err != nil {
 		return err
 	}
+	if hadFTS {
+		// An index built with the default tokenizer cannot answer substring
+		// queries. Drop it so the rebuild below recreates it with trigrams.
+		var create string
+		if err := s.db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE name = 'chunk_fts'`).Scan(&create); err != nil {
+			return err
+		}
+		if !strings.Contains(strings.ToLower(create), "trigram") {
+			if _, err := s.db.ExecContext(ctx, `DROP TABLE chunk_fts`); err != nil {
+				return err
+			}
+			hadFTS = false
+		}
+	}
 	stmts := []string{
 		`CREATE INDEX IF NOT EXISTS idx_chunk_meta_file ON chunk_meta(file_path)`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
-			content, file_path, content='chunk_meta', content_rowid='rowid'
+			content, file_path, content='chunk_meta', content_rowid='rowid', tokenize='trigram'
 		)`,
 		`CREATE TRIGGER IF NOT EXISTS chunk_meta_ai AFTER INSERT ON chunk_meta BEGIN
 			INSERT INTO chunk_fts(rowid, content, file_path) VALUES (new.rowid, new.content, new.file_path);
@@ -146,14 +190,11 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 			return err
 		}
 	}
-	if err := s.ensureCosine(ctx, dimensions); err != nil {
-		return err
-	}
-	if width, ok, err := vecWidth(ctx, s.db); err != nil {
-		return err
-	} else if ok && width != dimensions {
-		return fmt.Errorf("%w: database %d, config %d", ErrDimensionMismatch, width, dimensions)
-	}
+	return nil
+}
+
+// writeMeta records dimensions, schema version and the generation counter.
+func (s *SQLite) writeMeta(ctx context.Context, existing, version string, dimensions int) error {
 	if existing == "" {
 		if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_meta(key, value) VALUES ('dimensions', ?)
 			ON CONFLICT(key) DO NOTHING`, fmt.Sprint(dimensions)); err != nil {
@@ -177,7 +218,6 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 		ON CONFLICT(key) DO NOTHING`); err != nil {
 		return err
 	}
-	s.dimensions = dimensions
 	return nil
 }
 
@@ -241,30 +281,6 @@ func (s *SQLite) migrateV1(ctx context.Context) error {
 	}
 	_, err := s.db.ExecContext(ctx, `UPDATE chunk_meta SET file_path = replace(file_path, '\', '/') WHERE instr(file_path, '\') > 0`)
 	return err
-}
-
-func (s *SQLite) SaveChunks(ctx context.Context, chunks []EmbeddedChunk) error {
-	if len(chunks) == 0 {
-		return nil
-	}
-	if err := checkVectors(chunks, s.dimensions); err != nil {
-		return err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := s.deletePaths(ctx, tx, distinctPaths(chunks)); err != nil {
-		return err
-	}
-	if err := insertSQLiteChunks(ctx, tx, chunks); err != nil {
-		return err
-	}
-	if err := bumpSQLite(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func (s *SQLite) CommitFile(ctx context.Context, path, hash string, chunks []EmbeddedChunk) error {
@@ -455,6 +471,8 @@ func (s *SQLite) SearchSemantic(ctx context.Context, queryVector []float32, limi
 	return scanChunks(rows)
 }
 
+// SearchKeyword is a case-insensitive substring match. Keywords of three or
+// more characters use the trigram FTS index; shorter ones scan chunk_meta.
 func (s *SQLite) SearchKeyword(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error) {
 	if strings.TrimSpace(keyword) == "" {
 		return nil, fmt.Errorf("vectorstore: empty keyword")
@@ -462,58 +480,28 @@ func (s *SQLite) SearchKeyword(ctx context.Context, keyword string, limit int, w
 	if limit < 1 {
 		return nil, fmt.Errorf("vectorstore: limit must be positive")
 	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT rowid, file_path, type, content, metadata, outbound FROM chunk_meta
-		WHERE instr(lower(content), lower(?)) > 0
-		  AND (? = '' OR ? = '*' OR workspace = ?)
-		LIMIT ?`, keyword, workspace, workspace, workspace, limit)
+	var rows *sql.Rows
+	var err error
+	if utf8.RuneCountInString(keyword) >= 3 {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT m.file_path, m.type, m.content, m.metadata, m.outbound
+			FROM chunk_fts
+			JOIN chunk_meta m ON m.rowid = chunk_fts.rowid
+			WHERE chunk_fts MATCH ?
+			  AND (? = '' OR ? = '*' OR m.workspace = ?)
+			ORDER BY chunk_fts.rank
+			LIMIT ?`, "content : "+ftsPhrase(keyword), workspace, workspace, workspace, limit)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT file_path, type, content, metadata, outbound FROM chunk_meta
+			WHERE instr(lower(content), lower(?)) > 0
+			  AND (? = '' OR ? = '*' OR workspace = ?)
+			LIMIT ?`, keyword, workspace, workspace, workspace, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
-	sub, ids, err := scanChunksWithID(rows)
-	if err != nil {
-		return nil, err
-	}
-	seen := map[int64]bool{}
-	for _, id := range ids {
-		seen[id] = true
-	}
-	if len(sub) >= limit {
-		return sub, nil
-	}
-	ftsRows, err := s.db.QueryContext(ctx, `
-		SELECT m.rowid, m.file_path, m.type, m.content, m.metadata, m.outbound
-		FROM chunk_fts
-		JOIN chunk_meta m ON m.rowid = chunk_fts.rowid
-		WHERE chunk_fts MATCH ?
-		  AND (? = '' OR ? = '*' OR m.workspace = ?)
-		LIMIT ?`, ftsPhrase(keyword), workspace, workspace, workspace, limit)
-	if err != nil {
-		return sub, nil
-	}
-	defer ftsRows.Close()
-	for ftsRows.Next() {
-		if len(sub) >= limit {
-			break
-		}
-		var id int64
-		var filePath, typ, content, meta, outbound string
-		if err := ftsRows.Scan(&id, &filePath, &typ, &content, &meta, &outbound); err != nil {
-			return nil, err
-		}
-		if seen[id] {
-			continue
-		}
-		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
-		if err != nil {
-			return nil, err
-		}
-		sub = append(sub, ch)
-	}
-	if err := ftsRows.Err(); err != nil {
-		return nil, err
-	}
-	return sub, nil
+	return scanChunks(rows)
 }
 
 func (s *SQLite) GetComponentAST(ctx context.Context, name string) (*parser.Chunk, error) {
@@ -829,24 +817,4 @@ func scanChunks(rows *sql.Rows) ([]parser.Chunk, error) {
 		out = append(out, ch)
 	}
 	return out, rows.Err()
-}
-
-func scanChunksWithID(rows *sql.Rows) ([]parser.Chunk, []int64, error) {
-	defer rows.Close()
-	var out []parser.Chunk
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		var filePath, typ, content, meta, outbound string
-		if err := rows.Scan(&id, &filePath, &typ, &content, &meta, &outbound); err != nil {
-			return nil, nil, err
-		}
-		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, ch)
-		ids = append(ids, id)
-	}
-	return out, ids, rows.Err()
 }

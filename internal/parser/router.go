@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/axitdev/onfly/internal/config"
 )
@@ -35,6 +36,14 @@ func newRouter(index config.Indexer, projectRoot string, open opener) (*Router, 
 		if err != nil {
 			_ = r.Close()
 			return nil, err
+		}
+		if d := time.Duration(index.ParseTimeoutMS) * time.Millisecond; d > 0 {
+			switch v := p.(type) {
+			case *WasmParser:
+				v.Timeout = d
+			case *StdioParser:
+				v.Timeout = d
+			}
 		}
 		r.parsers = append(r.parsers, p)
 		for _, ext := range cfg.Extensions {

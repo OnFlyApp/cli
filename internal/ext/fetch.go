@@ -17,6 +17,10 @@ var ErrChecksumMismatch = errors.New("ext: checksum mismatch")
 // Download writes the body to a temp file and returns that path only when
 // the SHA-256 matches wantSHA. Any other result deletes the temp file.
 func Download(ctx context.Context, client *http.Client, rawURL, wantSHA string) (string, string, error) {
+	return download(ctx, client, rawURL, wantSHA, maxPluginBytes)
+}
+
+func download(ctx context.Context, client *http.Client, rawURL, wantSHA string, limit int64) (string, string, error) {
 	if client == nil {
 		client = NewClient()
 	}
@@ -48,11 +52,11 @@ func Download(ctx context.Context, client *http.Client, rawURL, wantSHA string) 
 		return "", "", fmt.Errorf("ext: download %s: %s", rawURL, res.Status)
 	}
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(res.Body, maxPluginBytes+1))
+	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(res.Body, limit+1))
 	if err != nil {
 		return "", "", fmt.Errorf("ext: download %s: %w", rawURL, err)
 	}
-	if n > maxPluginBytes {
+	if n > limit {
 		return "", "", fmt.Errorf("ext: plugin exceeds 64MiB")
 	}
 	if err := f.Close(); err != nil {

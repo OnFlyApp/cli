@@ -69,7 +69,7 @@ func TestPostgresOptimizeKeepsRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := parser.Chunk{FilePath: "optimize.go", Type: "function", Content: "func OptimizeProbe() {}", Metadata: map[string]string{"name": "OptimizeProbe"}}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: ch, Vector: []float32{1, 0, 0, 0}}}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: ch, Vector: []float32{1, 0, 0, 0}}}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.DeleteFiles(context.Background(), []string{ch.FilePath}) })

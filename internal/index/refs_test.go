@@ -6,6 +6,7 @@ import (
 
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
+	"github.com/axitdev/onfly/internal/vectorstore/storetest"
 )
 
 func TestMentionedSkipsSelf(t *testing.T) {
@@ -30,7 +31,7 @@ func TestLinkRefsFillsCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	vec := []float32{1, 0, 0, 0}
-	err = st.SaveChunks(ctx, []vectorstore.EmbeddedChunk{
+	err = storetest.Save(ctx, st, []vectorstore.EmbeddedChunk{
 		{Chunk: parser.Chunk{
 			FilePath: "svc.go", Type: "method", Content: "func (s *Service) Execute() { _ = App\\Models\\User }",
 			Metadata: map[string]string{"name": "Execute"},

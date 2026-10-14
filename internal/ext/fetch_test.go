@@ -53,10 +53,7 @@ func TestDownloadRejectsHTTPRedirectAndOversize(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not https") {
 		t.Fatal(err)
 	}
-	old := maxPluginBytes
-	maxPluginBytes = 8
-	t.Cleanup(func() { maxPluginBytes = old })
-	_, _, err = Download(context.Background(), client, srv.URL+"/big", fmt.Sprintf("%x", sha256.Sum256([]byte("0123456789"))))
+	_, _, err = download(context.Background(), client, srv.URL+"/big", fmt.Sprintf("%x", sha256.Sum256([]byte("0123456789"))), 8)
 	if err == nil || !strings.Contains(err.Error(), "64MiB") {
 		t.Fatal(err)
 	}

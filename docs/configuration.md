@@ -46,6 +46,7 @@ indexer:
   include: ["**/*.go", "src/**/*", "cmd/**/*", "internal/**/*", "pkg/**/*", "assets/**/*", "docs/**/*.md"]
   exclude: ["vendor", "node_modules", "var", "public"]
   debounce_ms: 2000              # onfly watch; default 2000
+  parse_timeout_ms: 5000         # per parser call; default 5000
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]

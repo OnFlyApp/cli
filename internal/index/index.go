@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -21,7 +20,6 @@ import (
 	"github.com/axitdev/onfly/internal/split"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
-	"github.com/bmatcuk/doublestar/v4"
 	"github.com/cespare/xxhash/v2"
 )
 
@@ -63,7 +61,7 @@ type Session struct {
 	store    vectorstore.Store
 	emb      embedder.Embedder
 	router   *parser.Router
-	ign      *ignore.Set
+	filter   *ignore.Filter
 	count    func(string) int
 	progress func(Event)
 	n        atomic.Int64
@@ -120,7 +118,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		}
 		return nil, err
 	}
-	ign, err := ignore.Load(cfg.ProjectRoot)
+	filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude)
 	if err != nil {
 		router.Close()
 		if store != nil {
@@ -135,7 +133,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		store:  store,
 		emb:    emb,
 		router: router,
-		ign:    ign,
+		filter: filter,
 		count: func(s string) int {
 			n, err := tokens.Count(s)
 			if err != nil {
@@ -149,11 +147,11 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 
 // ReloadIgnore re-reads every .gitignore under the project root.
 func (s *Session) ReloadIgnore() error {
-	ign, err := ignore.Load(s.cfg.ProjectRoot)
+	filter, err := ignore.LoadFilter(s.cfg.ProjectRoot, s.cfg.Indexer.Exclude)
 	if err != nil {
 		return err
 	}
-	s.ign = ign
+	s.filter = filter
 	return nil
 }
 
@@ -172,7 +170,7 @@ func (s *Session) Close() error {
 
 func (s *Session) Run(ctx context.Context) (Stats, error) {
 	s.report("walking", "")
-	files, err := walk(s.cfg.ProjectRoot, s.cfg.Indexer.Include, s.cfg.Indexer.Exclude, s.ign, s.router.HasParser)
+	files, err := walk(s.cfg.ProjectRoot, s.cfg.Indexer.Include, s.filter, s.router.HasParser)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -386,16 +384,7 @@ func (s *Session) DropAbsent(ctx context.Context) error {
 
 func (s *Session) inScope(rel string) bool {
 	rel = slash(rel)
-	if s.ign != nil && s.ign.Ignored(rel, false) {
-		return false
-	}
-	skip := map[string]bool{".onfly": true, ".git": true}
-	for _, name := range s.cfg.Indexer.Exclude {
-		if name != "" {
-			skip[name] = true
-		}
-	}
-	if hitSegment(rel, skip) {
+	if s.filter.Skip(rel, false) {
 		return false
 	}
 	ok, err := matchAny(rel, s.cfg.Indexer.Include)
@@ -437,43 +426,60 @@ func (s *Session) omit(ctx context.Context, rel string) (FileResult, error) {
 	return FileResult{Omit: true}, nil
 }
 
-func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResult, error) {
-	rel = slash(rel)
+// readSource validates and reads a project file. A non-nil early result means
+// the file must not be parsed: it was omitted (and dropped from the store), or
+// it failed with a per-file error.
+func (s *Session) readSource(ctx context.Context, rel string) ([]byte, *FileResult, error) {
 	full := filepath.Join(s.cfg.ProjectRoot, filepath.FromSlash(rel))
 	lst, lerr := os.Lstat(full)
 	if lerr != nil {
 		if os.IsNotExist(lerr) {
-			return s.omit(ctx, rel)
+			return s.omitEarly(ctx, rel)
 		}
 		s.logger.Warn("stat", "path", rel, "err", lerr)
 		s.report("failed", rel)
-		return FileResult{Err: fmt.Errorf("%s: %w", rel, lerr)}, nil
+		return nil, &FileResult{Err: fmt.Errorf("%s: %w", rel, lerr)}, nil
 	}
 	if lst.Mode()&os.ModeSymlink != 0 {
 		target, err := filepath.EvalSymlinks(full)
-		if err != nil || !withinRoot(s.cfg.ProjectRoot, target) || !linkTargetOK(s.cfg.ProjectRoot, target, s.ign, s.cfg.Indexer.Exclude) {
-			return s.omit(ctx, rel)
+		if err != nil || !withinRoot(s.cfg.ProjectRoot, target) || !linkTargetOK(s.cfg.ProjectRoot, target, s.filter) {
+			return s.omitEarly(ctx, rel)
 		}
 	}
 	info, err := os.Stat(full)
 	if err != nil {
 		s.logger.Warn("stat", "path", rel, "err", err)
 		s.report("failed", rel)
-		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
+		return nil, &FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
 	if !info.Mode().IsRegular() {
-		return s.omit(ctx, rel)
+		return s.omitEarly(ctx, rel)
 	}
 	if info.Size() > maxFileBytes {
 		s.logger.Warn("skip large file", "path", rel, "size", info.Size())
-		return s.omit(ctx, rel)
+		return s.omitEarly(ctx, rel)
 	}
 	body, err := os.ReadFile(full)
 	if err != nil {
 		s.logger.Warn("read", "path", rel, "err", err)
 		s.report("failed", rel)
-		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
+		return nil, &FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
+	return body, nil, nil
+}
+
+func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResult, error) {
+	res, err := s.omit(ctx, rel)
+	return nil, &res, err
+}
+
+func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResult, error) {
+	rel = slash(rel)
+	body, early, err := s.readSource(ctx, rel)
+	if early != nil {
+		return *early, err
+	}
+	full := filepath.Join(s.cfg.ProjectRoot, filepath.FromSlash(rel))
 	hash := ContentHash(body)
 	if oldHash != "" && oldHash == hash {
 		s.report("unchanged", rel)
@@ -608,128 +614,4 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 		}
 	}
 	return out, nil
-}
-
-func walk(root string, include, exclude []string, ign *ignore.Set, want func(string) bool) ([]string, error) {
-	skip := map[string]bool{".onfly": true, ".git": true}
-	for _, name := range exclude {
-		if name != "" {
-			skip[name] = true
-		}
-	}
-	var files []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			target, evalErr := filepath.EvalSymlinks(path)
-			info, statErr := os.Stat(path)
-			if evalErr != nil || statErr != nil || info.IsDir() || !withinRoot(root, target) || !linkTargetOK(root, target, ign, exclude) {
-				if d.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = slash(rel)
-		if rel == "." {
-			return nil
-		}
-		if ign != nil && ign.Ignored(rel, d.IsDir()) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if hitSegment(rel, skip) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		ok, err := matchAny(rel, include)
-		if err != nil {
-			return err
-		}
-		if !ok || !want(rel) {
-			return nil
-		}
-		files = append(files, rel)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	sort.Strings(files)
-	return files, nil
-}
-
-func slash(p string) string {
-	return strings.ReplaceAll(filepath.ToSlash(p), `\`, "/")
-}
-
-func resolvedRoot(root string) string {
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		return resolved
-	}
-	return filepath.Clean(root)
-}
-
-func withinRoot(root, path string) bool {
-	root = resolvedRoot(root)
-	path = filepath.Clean(path)
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && !filepath.IsAbs(rel)
-}
-
-func linkTargetOK(root, target string, ign *ignore.Set, exclude []string) bool {
-	root = resolvedRoot(root)
-	rel, err := filepath.Rel(root, filepath.Clean(target))
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
-		return false
-	}
-	rel = slash(rel)
-	if ignore.Sensitive(rel) || (ign != nil && ign.Ignored(rel, false)) {
-		return false
-	}
-	skip := map[string]bool{".onfly": true, ".git": true}
-	for _, name := range exclude {
-		if name != "" {
-			skip[name] = true
-		}
-	}
-	return !hitSegment(rel, skip)
-}
-
-func hitSegment(rel string, skip map[string]bool) bool {
-	for _, part := range strings.Split(rel, "/") {
-		if skip[part] {
-			return true
-		}
-	}
-	return false
-}
-
-func matchAny(rel string, patterns []string) (bool, error) {
-	for _, pattern := range patterns {
-		ok, err := doublestar.PathMatch(pattern, rel)
-		if err != nil {
-			return false, fmt.Errorf("indexer include %q: %w", pattern, err)
-		}
-		if ok {
-			return true, nil
-		}
-	}
-	return false, nil
 }

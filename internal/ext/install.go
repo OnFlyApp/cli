@@ -23,6 +23,8 @@ type Options struct {
 	Stdin                   io.Reader
 	Stdout, Stderr          io.Writer
 	Client                  *http.Client
+	// SaveLock overrides how the lock file is written (tests); nil uses SaveLock.
+	SaveLock func(root string, lock map[string]Installed) error
 }
 
 type installRef struct {
@@ -47,6 +49,15 @@ func projectOf(opt Options) (cfgPath, root string, err error) {
 	return cfgPath, config.ProjectRoot(cfgPath), nil
 }
 
+// staged is a plugin file on disk in a temp location, ready to be committed.
+type staged struct {
+	ref                        installRef
+	cfgPath, root              string
+	version, sum, file, source string
+	relPath, temp              string
+	exts                       []string
+}
+
 func Install(ctx context.Context, opt Options, arg string) error {
 	ref, err := parseInstallArg(arg)
 	if err != nil {
@@ -59,150 +70,163 @@ func Install(ctx context.Context, opt Options, arg string) error {
 	if err != nil {
 		return err
 	}
-	var version, sum, file, source, temp string
-	var exts []string
-	if ref.Local {
-		if strings.TrimSpace(opt.Extensions) == "" {
-			return fmt.Errorf("ext: --extensions is required for a local wasm file")
-		}
-		exts, err = splitExtensions(opt.Extensions)
-		if err != nil {
-			return err
-		}
-		file, source = filepath.Base(ref.Path), "local"
-		temp, sum, err = stageLocal(ref.Path)
-	} else {
-		manifest, ferr := FetchManifest(ctx, opt.Client)
-		if ferr != nil {
-			return ferr
-		}
-		var rel Release
-		version, rel, err = Resolve(manifest, ref.Name, ref.Version)
-		if err != nil {
-			return err
-		}
-		exts, file, source = rel.Extensions, ref.Name+"-parser.wasm", "registry"
-		relPath := ".onfly/plugins/" + file
-		ok, cerr := alreadyCurrent(root, cfgPath, ref.Name, version, relPath, exts)
-		if cerr != nil {
-			return cerr
-		}
-		if ok {
-			fmt.Fprintf(opt.Stdout, "%s %s is current\n", ref.Name, version)
-			return nil
-		}
-		temp, sum, err = Download(ctx, opt.Client, rel.URL, rel.SHA256)
-	}
-	if err != nil {
+	p := &staged{ref: ref, cfgPath: cfgPath, root: root}
+	current, err := p.stage(ctx, opt)
+	if err != nil || current {
 		return err
 	}
 	defer func() {
-		if temp != "" {
-			os.Remove(temp)
+		if p.temp != "" {
+			os.Remove(p.temp)
 		}
 	}()
-	relPath := ".onfly/plugins/" + file
-	conflicts, err := config.ParserConflicts(cfgPath, config.WasmParser{Extensions: exts, Path: relPath})
+	want := config.WasmParser{Extensions: p.exts, Path: p.relPath}
+	conflicts, err := config.ParserConflicts(cfgPath, want)
 	if err != nil {
 		return err
 	}
 	accepted := false
 	if len(conflicts) > 0 {
-		var cerr error
-		accepted, cerr = confirmReplace(opt, conflicts)
-		if cerr != nil || !accepted {
-			if cerr != nil {
-				return cerr
-			}
+		accepted, err = confirmReplace(opt, conflicts)
+		if err != nil {
+			return err
+		}
+		if !accepted {
 			return fmt.Errorf("ext: install cancelled")
 		}
 	}
-	return withPluginLock(root, func() error {
-		now, cerr := config.ParserConflicts(cfgPath, config.WasmParser{Extensions: exts, Path: relPath})
-		if cerr != nil {
-			return cerr
-		}
-		if len(now) > 0 && !opt.Yes && (!accepted || !sameStringSet(now, conflicts)) {
-			return fmt.Errorf("parser for %q already exists; rerun with --yes", strings.Join(now, ", "))
-		}
-		lock, lerr := LoadLock(root)
-		if lerr != nil {
-			return lerr
-		}
-		prevFile := ""
-		if prev, ok := lock[ref.Name]; ok {
-			prevFile = prev.File
-		}
-		for other, item := range lock {
-			if other == ref.Name || item.File != file {
-				continue
-			}
-			if !opt.Yes {
-				return fmt.Errorf("ext: %s already provides %s; rerun with --yes", other, file)
-			}
-			delete(lock, other)
-		}
-		dest := filepath.Join(root, ".onfly", "plugins", file)
-		if err := MoveInto(temp, dest); err != nil {
-			return err
-		}
-		temp = ""
-		prevCfg, err := os.ReadFile(cfgPath)
-		if err != nil {
-			_ = RestoreBackup(dest)
-			return err
-		}
-		rolled := true
-		oldPath := ""
-		parked := ""
-		defer func() {
-			if !rolled {
-				if parked != "" {
-					_ = os.Remove(parked)
-				}
-				return
-			}
-			_ = writeAtomic(cfgPath, prevCfg)
-			_ = RestoreBackup(dest)
-			if parked != "" {
-				_ = os.Rename(parked, oldPath)
-			}
-		}()
-		if prevFile != "" && prevFile != file && pluginFileOK(prevFile) {
-			oldPath = filepath.Join(root, ".onfly", "plugins", prevFile)
-			parked = oldPath + ".removing"
-			if err := os.Rename(oldPath, parked); err != nil {
-				if os.IsNotExist(err) {
-					parked = ""
-				} else {
-					return err
-				}
-			}
-			if err := config.RemoveWasmParser(cfgPath, ".onfly/plugins/"+prevFile); err != nil {
-				return err
-			}
-		}
-		if err := config.UpsertWasmParser(cfgPath, config.WasmParser{Extensions: exts, Path: relPath}); err != nil {
-			return err
-		}
-		lock[ref.Name] = Installed{Version: version, File: file, SHA256: sum, Source: source, Extensions: exts}
-		if err := lockSaver(root, lock); err != nil {
-			return err
-		}
-		rolled = false
-		if err := DiscardBackup(dest); err != nil {
-			return err
-		}
-		label := version
-		if source == "local" {
-			label = "local"
-		}
-		fmt.Fprintf(opt.Stdout, "installed %s %s\n", ref.Name, label)
-		return nil
-	})
+	return withPluginLock(root, func() error { return p.commit(opt, conflicts, accepted) })
 }
 
-var lockSaver = SaveLock
+// stage resolves the plugin and puts its bytes in a temp file. current is true
+// when the registry version is already installed and intact.
+func (p *staged) stage(ctx context.Context, opt Options) (current bool, err error) {
+	if p.ref.Local {
+		if strings.TrimSpace(opt.Extensions) == "" {
+			return false, fmt.Errorf("ext: --extensions is required for a local wasm file")
+		}
+		if p.exts, err = splitExtensions(opt.Extensions); err != nil {
+			return false, err
+		}
+		p.file, p.source = filepath.Base(p.ref.Path), "local"
+		p.relPath = ".onfly/plugins/" + p.file
+		p.temp, p.sum, err = stageLocal(p.ref.Path)
+		return false, err
+	}
+	manifest, err := FetchManifest(ctx, opt.Client)
+	if err != nil {
+		return false, err
+	}
+	version, rel, err := Resolve(manifest, p.ref.Name, p.ref.Version)
+	if err != nil {
+		return false, err
+	}
+	p.version, p.exts, p.source = version, rel.Extensions, "registry"
+	p.file = p.ref.Name + "-parser.wasm"
+	p.relPath = ".onfly/plugins/" + p.file
+	ok, err := alreadyCurrent(p.root, p.cfgPath, p.ref.Name, version, p.relPath, p.exts)
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		fmt.Fprintf(opt.Stdout, "%s %s is current\n", p.ref.Name, version)
+		return true, nil
+	}
+	p.temp, p.sum, err = Download(ctx, opt.Client, rel.URL, rel.SHA256)
+	return false, err
+}
+
+// commit moves the plugin in, edits the config and the lock, and undoes all of
+// it if any step fails. It runs under the plugin lock.
+func (p *staged) commit(opt Options, conflicts []string, accepted bool) error {
+	want := config.WasmParser{Extensions: p.exts, Path: p.relPath}
+	now, err := config.ParserConflicts(p.cfgPath, want)
+	if err != nil {
+		return err
+	}
+	if len(now) > 0 && !opt.Yes && (!accepted || !sameStringSet(now, conflicts)) {
+		return fmt.Errorf("parser for %q already exists; rerun with --yes", strings.Join(now, ", "))
+	}
+	lock, err := LoadLock(p.root)
+	if err != nil {
+		return err
+	}
+	prevFile := ""
+	if prev, ok := lock[p.ref.Name]; ok {
+		prevFile = prev.File
+	}
+	for other, item := range lock {
+		if other == p.ref.Name || item.File != p.file {
+			continue
+		}
+		if !opt.Yes {
+			return fmt.Errorf("ext: %s already provides %s; rerun with --yes", other, p.file)
+		}
+		delete(lock, other)
+	}
+	dest := filepath.Join(p.root, ".onfly", "plugins", p.file)
+	if err := MoveInto(p.temp, dest); err != nil {
+		return err
+	}
+	p.temp = ""
+	prevCfg, err := os.ReadFile(p.cfgPath)
+	if err != nil {
+		_ = RestoreBackup(dest)
+		return err
+	}
+	rolled := true
+	oldPath, parked := "", ""
+	defer func() {
+		if !rolled {
+			if parked != "" {
+				_ = os.Remove(parked)
+			}
+			return
+		}
+		_ = writeAtomic(p.cfgPath, prevCfg)
+		_ = RestoreBackup(dest)
+		if parked != "" {
+			_ = os.Rename(parked, oldPath)
+		}
+	}()
+	if prevFile != "" && prevFile != p.file && pluginFileOK(prevFile) {
+		oldPath = filepath.Join(p.root, ".onfly", "plugins", prevFile)
+		parked = oldPath + ".removing"
+		if err := os.Rename(oldPath, parked); err != nil {
+			if !os.IsNotExist(err) {
+				return err
+			}
+			parked = ""
+		}
+		if err := config.RemoveWasmParser(p.cfgPath, ".onfly/plugins/"+prevFile); err != nil {
+			return err
+		}
+	}
+	if err := config.UpsertWasmParser(p.cfgPath, want); err != nil {
+		return err
+	}
+	lock[p.ref.Name] = Installed{Version: p.version, File: p.file, SHA256: p.sum, Source: p.source, Extensions: p.exts}
+	if err := opt.saveLock(p.root, lock); err != nil {
+		return err
+	}
+	rolled = false
+	if err := DiscardBackup(dest); err != nil {
+		return err
+	}
+	label := p.version
+	if p.source == "local" {
+		label = "local"
+	}
+	fmt.Fprintf(opt.Stdout, "installed %s %s\n", p.ref.Name, label)
+	return nil
+}
+
+func (o Options) saveLock(root string, lock map[string]Installed) error {
+	if o.SaveLock != nil {
+		return o.SaveLock(root, lock)
+	}
+	return SaveLock(root, lock)
+}
 
 func Update(ctx context.Context, opt Options, name string) error {
 	_, root, err := projectOf(opt)
@@ -309,7 +333,7 @@ func Remove(opt Options, name string) error {
 				delete(lock, other)
 			}
 		}
-		if err := lockSaver(root, lock); err != nil {
+		if err := opt.saveLock(root, lock); err != nil {
 			return err
 		}
 		rolled = false

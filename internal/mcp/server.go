@@ -116,8 +116,7 @@ type tools struct {
 	workspace string
 	maxTokens int
 	engine    *rules.Engine
-	ign       *ignore.Set
-	exclude   []string
+	filter    *ignore.Filter
 	logger    *slog.Logger
 	trace     io.Writer
 	traceMu   sync.Mutex
@@ -136,12 +135,11 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		workspace: cfg.Workspace, maxTokens: maxTokens, logger: logger,
 		engine: rules.Load(cfg),
 	}
-	if ign, err := ignore.Load(cfg.ProjectRoot); err != nil {
+	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
 	} else {
-		h.ign = ign
+		h.filter = filter
 	}
-	h.exclude = cfg.Indexer.Exclude
 	if err := h.engine.ReadError(); err != nil {
 		logger.Warn("rules", "err", err)
 	}
@@ -225,24 +223,29 @@ func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) 
 
 func (h *tools) search(ctx context.Context, req *sdkmcp.CallToolRequest, in semanticIn) (*sdkmcp.CallToolResult, hitList, error) {
 	start := time.Now()
-	if strings.TrimSpace(in.Query) == "" {
+	res, out, err := h.runSearch(ctx, req, in, start)
+	if err != nil {
 		h.record("search", in, start, nil, 0)
+	}
+	return res, out, err
+}
+
+// runSearch records only successful calls; search records every failure.
+func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in semanticIn, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
+	if strings.TrimSpace(in.Query) == "" {
 		return nil, hitList{}, fmt.Errorf("query is required")
 	}
 	if in.Workspace == "" {
 		ws, asked, err := workspaceChoice(req)
 		if err != nil {
-			h.record("search", in, start, nil, 0)
 			return nil, hitList{}, err
 		}
 		if asked {
 			names, err := h.store.WorkspacesForName(ctx, in.Query)
 			if err != nil {
-				h.record("search", in, start, nil, 0)
 				return nil, hitList{}, err
 			}
 			if !slices.Contains(names, ws) {
-				h.record("search", in, start, nil, 0)
 				return nil, hitList{}, fmt.Errorf("workspace %q is not in the index", ws)
 			}
 			return h.finishSearch(ctx, in, ws, start)
@@ -250,7 +253,6 @@ func (h *tools) search(ctx context.Context, req *sdkmcp.CallToolRequest, in sema
 		if componentName.MatchString(in.Query) {
 			names, err := h.store.WorkspacesForName(ctx, in.Query)
 			if err != nil {
-				h.record("search", in, start, nil, 0)
 				return nil, hitList{}, err
 			}
 			if len(names) >= 2 {
@@ -277,13 +279,11 @@ func (h *tools) search(ctx context.Context, req *sdkmcp.CallToolRequest, in sema
 func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
 	vec, err := h.emb.Embed(ctx, in.Query)
 	if err != nil {
-		h.record("search", in, start, nil, 0)
 		return nil, hitList{}, err
 	}
 	pool := candidatePool(in.Limit)
 	semantic, err := h.store.SearchSemantic(ctx, vec, pool, workspace)
 	if err != nil {
-		h.record("search", in, start, nil, 0)
 		return nil, hitList{}, err
 	}
 	keyword, err := h.store.SearchKeyword(ctx, in.Query, pool, workspace)
@@ -298,6 +298,9 @@ func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace strin
 	}
 	budget, text := h.fitBudget(chunkQuery(fused))
 	hits, err := fitHits(fused, budget)
+	if err != nil {
+		return nil, hitList{}, err
+	}
 	logged := in
 	logged.Workspace = workspace
 	h.record("search", logged, start, hits, len(hits))
@@ -305,7 +308,7 @@ func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace strin
 	if out.Hits == nil {
 		out.Hits = []hitDTO{}
 	}
-	return contentWithRules(text, out), out, err
+	return contentWithRules(text, out), out, nil
 }
 
 func workspaceChoice(req *sdkmcp.CallToolRequest) (string, bool, error) {
@@ -402,15 +405,8 @@ func (h *tools) rejectSensitive(full string, isDir bool) error {
 		return err
 	}
 	rel = filepath.ToSlash(rel)
-	if ignore.Sensitive(rel) || (h.ign != nil && h.ign.Ignored(rel, isDir)) {
+	if ignore.Sensitive(rel) || h.filter.Skip(rel, isDir) {
 		return fmt.Errorf("path is not readable")
-	}
-	for _, part := range strings.Split(rel, "/") {
-		for _, name := range h.exclude {
-			if name != "" && part == name {
-				return fmt.Errorf("path is not readable")
-			}
-		}
 	}
 	return nil
 }
@@ -829,16 +825,11 @@ func fuseChunks(lists ...[]parser.Chunk) []parser.Chunk {
 	return out
 }
 
+// chunkKey identifies a chunk across the semantic and keyword result lists.
+// Path, type, name, part, first line and content together are unique per row.
 func chunkKey(c parser.Chunk) string {
-	meta, err := json.Marshal(c.Metadata)
-	if err != nil {
-		meta = []byte("null")
-	}
-	out, err := json.Marshal(c.Outbound)
-	if err != nil {
-		out = []byte("null")
-	}
-	return c.FilePath + "\x00" + c.Type + "\x00" + c.Content + "\x00" + string(meta) + "\x00" + string(out)
+	m := c.Metadata
+	return c.FilePath + "\x00" + c.Type + "\x00" + m["name"] + "\x00" + m["part"] + "\x00" + m["start_line"] + "\x00" + c.Content
 }
 
 func logLevel(name string) slog.Level {

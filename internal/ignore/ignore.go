@@ -153,3 +153,46 @@ func blocked(rel string) bool {
 	}
 	return false
 }
+
+// Filter is the single answer to "is this project-relative path out of scope?".
+// It combines .gitignore rules, the sensitive-name list, .git/.onfly and the
+// configured exclude names. A nil Filter skips nothing.
+type Filter struct {
+	set   *Set
+	names map[string]bool
+}
+
+func NewFilter(set *Set, exclude []string) *Filter {
+	names := map[string]bool{".onfly": true, ".git": true}
+	for _, name := range exclude {
+		if name != "" {
+			names[name] = true
+		}
+	}
+	return &Filter{set: set, names: names}
+}
+
+// LoadFilter reads every .gitignore under root.
+func LoadFilter(root string, exclude []string) (*Filter, error) {
+	set, err := Load(root)
+	if err != nil {
+		return nil, err
+	}
+	return NewFilter(set, exclude), nil
+}
+
+// Skip reports whether rel (slash separated) must not be indexed, watched or served.
+func (f *Filter) Skip(rel string, isDir bool) bool {
+	if f == nil {
+		return false
+	}
+	if f.set.Ignored(rel, isDir) {
+		return true
+	}
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if f.names[part] {
+			return true
+		}
+	}
+	return false
+}

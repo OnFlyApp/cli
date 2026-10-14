@@ -25,7 +25,6 @@ type StoredChunk struct {
 
 type Store interface {
 	Init(ctx context.Context, dimensions int) error
-	SaveChunks(ctx context.Context, chunks []EmbeddedChunk) error
 	CommitFile(ctx context.Context, path, hash string, chunks []EmbeddedChunk) error
 	DeleteFiles(ctx context.Context, filePaths []string) error
 	ListFiles(ctx context.Context) ([]string, error)

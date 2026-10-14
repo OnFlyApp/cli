@@ -47,7 +47,7 @@ func TestSQLiteDeleteBatches(t *testing.T) {
 			Workspace: "w",
 		})
 	}
-	if err := st.SaveChunks(ctx, chunks); err != nil {
+	if err := saveChunks(ctx, st, chunks); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.DeleteFiles(ctx, paths); err != nil {
@@ -146,7 +146,7 @@ func TestComponentJoinsParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	vec := []float32{1, 0, 0, 0}
-	err = st.SaveChunks(ctx, []EmbeddedChunk{
+	err = saveChunks(ctx, st, []EmbeddedChunk{
 		{Chunk: parser.Chunk{
 			FilePath: "a.go", Type: "function", Content: "aaaaaaBB",
 			Metadata: map[string]string{"name": "User", "part": "1/2", "start_line": "1", "end_line": "2"},
@@ -188,7 +188,7 @@ func TestSQLiteOptimizeKeepsRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func A() {}", Metadata: map[string]string{"name": "A"}}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{{Chunk: ch, Vector: []float32{1, 0, 0, 0}}}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: ch, Vector: []float32{1, 0, 0, 0}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Optimize(ctx); err != nil {
@@ -236,7 +236,7 @@ func TestSQLiteWorkspacesForName(t *testing.T) {
 	if err := st.Init(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
-	err = st.SaveChunks(ctx, []EmbeddedChunk{
+	err = saveChunks(ctx, st, []EmbeddedChunk{
 		{Chunk: parser.Chunk{FilePath: "a.go", Type: "function", Content: "a", Metadata: map[string]string{"name": "User"}}, Vector: []float32{1, 0, 0, 0}, Workspace: "frontend"},
 		{Chunk: parser.Chunk{FilePath: "b.go", Type: "function", Content: "b", Metadata: map[string]string{"name": "User"}}, Vector: []float32{0, 1, 0, 0}, Workspace: "backend"},
 		{Chunk: parser.Chunk{FilePath: "c.go", Type: "function", Content: "c", Metadata: map[string]string{"name": "User"}}, Vector: []float32{0, 0, 1, 0}, Workspace: ""},
@@ -272,7 +272,7 @@ func TestSQLiteSemanticWorkspaceIsNotHidden(t *testing.T) {
 			Workspace: "other",
 		})
 	}
-	if err := st.SaveChunks(ctx, batch); err != nil {
+	if err := saveChunks(ctx, st, batch); err != nil {
 		t.Fatal(err)
 	}
 	mine := EmbeddedChunk{
@@ -280,7 +280,7 @@ func TestSQLiteSemanticWorkspaceIsNotHidden(t *testing.T) {
 		Vector:    []float32{0.9, 0.1, 0, 0},
 		Workspace: "mine",
 	}
-	if err := st.SaveChunks(ctx, []EmbeddedChunk{mine}); err != nil {
+	if err := saveChunks(ctx, st, []EmbeddedChunk{mine}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := st.SearchSemantic(ctx, []float32{1, 0, 0, 0}, 3, "mine")
@@ -304,7 +304,7 @@ func TestSQLiteCosineDistance(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertCosineSchema(t, st)
-		if err := st.SaveChunks(ctx, []EmbeddedChunk{
+		if err := saveChunks(ctx, st, []EmbeddedChunk{
 			{Chunk: parser.Chunk{FilePath: "scaled.go", Type: "function", Content: "scaled", Metadata: map[string]string{"name": "Scaled"}}, Vector: []float32{3, 0, 0, 0}},
 			{Chunk: parser.Chunk{FilePath: "ortho.go", Type: "function", Content: "ortho", Metadata: map[string]string{"name": "Ortho"}}, Vector: []float32{0, 1, 0, 0}},
 		}); err != nil {
@@ -382,5 +382,48 @@ func assertScaledFirst(t *testing.T, st *SQLite) {
 	}
 	if len(got) != 2 || got[0].FilePath != "scaled.go" || got[1].FilePath != "ortho.go" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestKeywordSearchIsSubstringAndUpgradesOldFTS(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v.db")
+	st, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the FTS table the way an older build did: default tokenizer.
+	for _, q := range []string{
+		`DROP TABLE chunk_fts`,
+		`CREATE VIRTUAL TABLE chunk_fts USING fts5(content, file_path, content='chunk_meta', content_rowid='rowid')`,
+	} {
+		if _, err := st.db.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ch := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func GetUserId() {}", Metadata: map[string]string{"name": "GetUserId"}}
+	if err := st.CommitFile(ctx, "a.go", "h", []EmbeddedChunk{{Chunk: ch, Vector: []float32{1, 0, 0, 0}}}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st, err = OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	for _, kw := range []string{"serid", "GETUSER", "Id", "func GetUserId"} {
+		got, err := st.SearchKeyword(ctx, kw, 10, "")
+		if err != nil || len(got) != 1 {
+			t.Fatalf("%q: %+v %v", kw, got, err)
+		}
+	}
+	if got, err := st.SearchKeyword(ctx, "absent", 10, ""); err != nil || len(got) != 0 {
+		t.Fatalf("absent: %+v %v", got, err)
 	}
 }

@@ -29,7 +29,7 @@ func TestFrontmatterOrderAndTemplate(t *testing.T) {
 	}
 	eng := Load(cfg)
 	got := eng.Inject(Query{}, 10000)
-	if strings.Index(got, "FIRST") > strings.Index(got, "SECOND") || strings.Index(got, "FIRST") < 0 {
+	if strings.Index(got, "FIRST") > strings.Index(got, "SECOND") || !strings.Contains(got, "FIRST") {
 		t.Fatalf("order:\n%s", got)
 	}
 	for _, needle := range []string{"github.com/acme/demo", runtime.GOOS, `["go","php"]`} {
