@@ -232,3 +232,23 @@ func TestWordMatchesRanksByHowManyWordsMatch(t *testing.T) {
 		t.Fatal("one word is left to the whole-query keyword search")
 	}
 }
+
+func TestSearchFiltersByTypeAndPath(t *testing.T) {
+	s := newSearcher(t) // a.go and b.go, both type function
+	ctx := context.Background()
+	got, err := s.Run(ctx, Request{Query: "getUserId", Limit: 5, Type: "FUNCTION"})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("type is case-insensitive and matches both: %+v %v", got, err)
+	}
+	got, err = s.Run(ctx, Request{Query: "getUserId", Limit: 5, Type: "section"})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("no sections: %+v %v", got, err)
+	}
+	got, err = s.Run(ctx, Request{Query: "getUserId", Limit: 5, Path: "b.*"})
+	if err != nil || len(got) != 1 || got[0].FilePath != "b.go" {
+		t.Fatalf("path glob: %+v %v", got, err)
+	}
+	if _, err := s.Run(ctx, Request{Query: "x", Path: "["}); err == nil {
+		t.Fatal("a bad glob must be an error")
+	}
+}

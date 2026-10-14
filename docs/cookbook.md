@@ -144,6 +144,18 @@ onfly search "error handling" --changed-since main
 
 The assistant gets the same option through the `changed_since` argument of `search`. Handy for reviews.
 
+## Search only code, or only docs
+
+Docs headings can outrank code for broad questions. Narrow by chunk type or path:
+
+```sh
+onfly search "how are secrets handled" --type function     # code only (also: method, struct)
+onfly search "how are secrets handled" --type section      # Markdown only
+onfly search "retry policy" --path 'internal/**'
+```
+
+The assistant gets the same options as the `type` and `path` arguments of `search`.
+
 ## Favour recent work
 
 ```yaml

@@ -18,6 +18,7 @@ import (
 	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 const (
@@ -80,6 +81,10 @@ type Request struct {
 	Limit        int
 	Workspace    string
 	ChangedSince string
+	// Type keeps one chunk type (function, method, struct, section, ...).
+	Type string
+	// Path keeps files matching a doublestar glob, relative to the project root.
+	Path string
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -105,6 +110,9 @@ func orOne(w float64) float64 {
 func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 	var only map[string]bool
 	pool := CandidatePool(r.Limit)
+	if r.Path != "" && !doublestar.ValidatePattern(r.Path) {
+		return nil, fmt.Errorf("invalid path pattern %q", r.Path)
+	}
 	if r.ChangedSince != "" {
 		if s.Root == "" {
 			return nil, fmt.Errorf("changed_since needs a project root")
@@ -120,7 +128,24 @@ func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 		for _, f := range files {
 			only[f] = true
 		}
-		pool = MaxLimit // the filter runs after retrieval, so look wide
+	}
+	keep := func(c parser.Chunk) bool {
+		if only != nil && !only[c.FilePath] {
+			return false
+		}
+		if r.Type != "" && !strings.EqualFold(c.Type, r.Type) {
+			return false
+		}
+		if r.Path != "" {
+			if ok, _ := doublestar.PathMatch(r.Path, c.FilePath); !ok {
+				return false
+			}
+		}
+		return true
+	}
+	filtered := only != nil || r.Type != "" || r.Path != ""
+	if filtered {
+		pool = MaxLimit // filters run after retrieval, so look wide
 	}
 	var semantic []parser.Chunk
 	vec, embedErr := s.Emb.Embed(ctx, r.Query)
@@ -144,8 +169,8 @@ func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 		s.logger().Warn("embedder unavailable, using keyword results only", "err", embedErr)
 	}
 	words := s.wordMatches(ctx, r.Query, pool, r.Workspace)
-	if only != nil {
-		semantic, keyword, words = keepFiles(semantic, only), keepFiles(keyword, only), keepFiles(words, only)
+	if filtered {
+		semantic, keyword, words = filterChunks(semantic, keep), filterChunks(keyword, keep), filterChunks(words, keep)
 	}
 	lists := [][]parser.Chunk{semantic, keyword, words}
 	weights := []float64{orOne(s.SemanticWeight), orOne(s.KeywordWeight), wordListWeight * orOne(s.KeywordWeight)}
@@ -241,10 +266,10 @@ func (s *Searcher) wordMatches(ctx context.Context, q string, pool int, workspac
 	return out
 }
 
-func keepFiles(in []parser.Chunk, only map[string]bool) []parser.Chunk {
+func filterChunks(in []parser.Chunk, keep func(parser.Chunk) bool) []parser.Chunk {
 	var out []parser.Chunk
 	for _, c := range in {
-		if only[c.FilePath] {
+		if keep(c) {
 			out = append(out, c)
 		}
 	}

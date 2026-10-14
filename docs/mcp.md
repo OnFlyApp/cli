@@ -62,7 +62,9 @@ Finds code by what it does. Embeds `query` once, runs semantic search and keywor
 | `query` | yes | Sent to the configured embedder and to keyword search. |
 | `limit` | no | Default 10. Values below 1 become 10. Values above 50 become 50. |
 | `workspace` | no | Empty uses the config value. `*` searches every workspace. Any other value matches that workspace. |
-| `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. The filter runs on the top 50 candidates of each list. A ref starting with `-` is rejected. |
+| `type` | no | Keep one chunk type, case-insensitive: `function`, `method`, `struct`, `section` (Markdown), and so on. Use `section` to search docs only, or any code type to leave docs out. |
+| `path` | no | Keep files matching a glob relative to the project root, such as `internal/**` or `docs/**`. An invalid glob is a tool error. |
+| `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. `type`, `path` and `changed_since` filter the top 50 candidates of each list, so a narrow filter can return fewer than `limit` hits. A ref starting with `-` is rejected. |
 
 If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights and the recency list come from `search` in [configuration.md](configuration.md#search-fusion).
 

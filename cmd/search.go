@@ -17,6 +17,8 @@ var (
 	searchWorkspace string
 	searchJSON      bool
 	searchChanged   string
+	searchType      string
+	searchPath      string
 )
 
 var searchCmd = &cobra.Command{
@@ -35,7 +37,7 @@ var searchCmd = &cobra.Command{
 		defer closeStore()
 		chunks, err := s.Run(cmd.Context(), query.Request{
 			Query: strings.Join(args, " "), Limit: searchLimit,
-			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged,
+			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged, Type: searchType, Path: searchPath,
 		})
 		if err != nil {
 			return err
@@ -51,6 +53,8 @@ func init() {
 	searchCmd.Flags().IntVar(&searchLimit, "limit", query.DefaultLimit, "maximum results, from 1 to 50")
 	searchCmd.Flags().StringVar(&searchWorkspace, "workspace", "", "workspace name, or * for every workspace")
 	searchCmd.Flags().StringVar(&searchChanged, "changed-since", "", "git ref; keep only files that differ from it")
+	searchCmd.Flags().StringVar(&searchType, "type", "", "keep one chunk type: function, method, struct, section (docs), ...")
+	searchCmd.Flags().StringVar(&searchPath, "path", "", "keep files matching a glob, for example 'internal/**'")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "print JSON with chunk content")
 }
 
