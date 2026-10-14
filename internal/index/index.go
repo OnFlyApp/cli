@@ -99,7 +99,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 	var chat embedder.Chat
 	if !opt.DryRun {
 		var err error
-		if chat, err = embedder.NewChat(cfg.Indexer.Summaries); err != nil {
+		if chat, err = embedder.NewChat(cfg.Indexer.Summaries.LLM); err != nil {
 			return nil, fmt.Errorf("indexer.summaries: %w", err)
 		}
 		reportOpt(opt, "opening database")
@@ -521,6 +521,14 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		}
 		return FileResult{Chunks: len(chunks), Tokens: n}, nil
 	}
+	if s.cfg.Indexer.EmbedNeighbours {
+		addNeighbours(chunks)
+	}
+	if s.chat != nil && s.cfg.Indexer.Summaries.Files {
+		if fc, ok := fileChunk(rel, chunks); ok {
+			chunks = append(chunks, fc)
+		}
+	}
 	var embedded []vectorstore.EmbeddedChunk
 	reused := 0
 	if len(chunks) > 0 {
@@ -679,7 +687,7 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 // path and symbol, so a query naming a file or function can match the vector.
 func embedText(c parser.Chunk, withContext bool) string {
 	summary := c.Metadata["summary"]
-	if !withContext && summary == "" {
+	if !withContext && summary == "" && c.Metadata["neighbours"] == "" {
 		return c.Content
 	}
 	var b strings.Builder
@@ -692,6 +700,9 @@ func embedText(c parser.Chunk, withContext bool) string {
 			}
 			b.WriteString("symbol: " + sym + "\n")
 		}
+	}
+	if n := c.Metadata["neighbours"]; n != "" {
+		b.WriteString("also defined here: " + n + "\n")
 	}
 	if summary != "" {
 		b.WriteString("summary: " + summary + "\n")

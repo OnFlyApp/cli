@@ -43,6 +43,8 @@ search:                          # optional; how the result lists are fused (val
   dedupe: false                  # drop a chunk whose text repeats a higher hit
   recency_weight: 0              # >0 adds a list of files changed in the last recency_days (git), newest first
   recency_days: 30
+  graph_weight: 0                # >0 adds a list of hits that call or are called by other hits
+  usage_weight: 0                # >0 adds a list of chunks an assistant opened after earlier searches
   # expand: {provider: ollama, model: qwen2.5-coder:7b, timeout_ms: 3000}   # query expansion, see below
 
 rules:
@@ -67,6 +69,7 @@ indexer:
   parse_timeout_ms: 5000         # per parser call; default 5000
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
   # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
+  embed_neighbours: false        # add the names of nearby symbols to each embedded chunk
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]
@@ -88,6 +91,7 @@ server:
   max_tokens: 8192               # search result budget; serve --max-tokens overrides when > 0
   watch: false                   # reindex changed files while serving; same as serve --watch
   # trace_file: .onfly/mcp_trace.jsonl   # off by default; appends one JSON line per tool call
+  # usage_file: .onfly/usage.jsonl       # off by default; records which hit an assistant opens after a search
 ```
 
 If a `.git` directory or file sits at or above the start directory, Onfly loads every `.onfly/config.yaml` from the git root down to that directory and merges them. A set child scalar replaces the parent. Child `include` patterns are prefixed with the child path relative to the git root. The project root becomes the git root, and `workspace` is stored on each chunk. `--config` loads one file and does not merge. With no git root, only the nearest config is used.
@@ -174,10 +178,25 @@ indexer:
     provider: ollama             # only ollama is supported
     model: qwen2.5-coder:7b
     # endpoint: http://localhost:11434
-    # timeout_ms: 60000          # one summary; default 60000
+    # timeout_ms: 60000          # one call; default 60000
+    # batch: 4                   # chunks of one file per call; 0 or 1 is one call per chunk
+    # files: true                # also write one summarised "file" chunk per file
 ```
 
+`batch` sends several chunks of a file in one prompt. On this repository it was about 28% faster and cost 0.03 MRR (0.751 to 0.722), so the default is one call per chunk. `files: true` adds a chunk of type `file` per file, listing the names it defines, with its own summary; it found no gain here (MRR 0.717 against 0.722 without) and is meant for large packages where the question is about a directory or file, not a symbol. A smaller model is the better way to cut index time: `qwen2.5-coder:3b` indexed this repository in 8 minutes against 12 for the 7B (both with `batch: 4`) and scored MRR 0.718 against 0.722.
+
 Summaries are written during indexing, one model call per new or changed chunk. A chunk whose text did not change keeps its stored summary, so a reindex calls the model only for what changed. The first index of a project is slower: on this repository (about 730 chunks) it took 16 minutes with a 7B model on a laptop instead of under a minute; it raised MRR from 0.663 to 0.751 in the [measurement](evaluation.md#measured-effect). If the model is unreachable, indexing logs a warning, skips the rest of that file's summaries and still completes. Turning summaries on does not touch chunks that are already indexed until their file changes; delete the database and reindex to apply them everywhere.
+
+### Neighbour context
+
+`indexer.embed_neighbours: true` adds the names of the symbols next to a chunk in its file (up to 8 within six positions) to the text that is embedded, as `also defined here: A, B`. The names are stored in the chunk's `neighbours` metadata. A chunk whose own text is unchanged keeps its vector when a neighbour changes, so reindex from scratch to refresh them. Measured gain on this repository: +0.010 MRR (0.722 to 0.732), larger on the hand-written cases (0.584 to 0.662).
+
+### Call-graph and usage lists
+
+Both are off by default. They add one more list to the fusion.
+
+- `search.graph_weight` ranks the top 20 hits by how many of the others they call or are called by. On this repository it lifted the 45 hand-written cases (MRR 0.641 to 0.764 at weight 0.25) and lowered the generated ones (0.760 to 0.728), whose targets are leaf functions. `onfly eval tune` never picked it. Turn it on if your questions are usually about flows (a handler and what it calls), and measure.
+- `search.usage_weight` ranks hits that an assistant opened after an earlier search, most often first. It needs `server.usage_file`: with it set, the MCP server appends one JSON line (`ts`, `query`, `file`, `symbol`, `rank`) whenever a tool opens a chunk that the most recent `search` returned, within ten minutes of it. Nothing is recorded without it, and the file holds your questions in plain text, so keep it out of git. Read the file counts back as a prior with `usage_weight`, or turn it into eval cases with [`onfly eval mine`](evaluation.md#real-questions).
 
 ### Query expansion
 

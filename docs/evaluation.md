@@ -46,6 +46,16 @@ onfly eval --json > after.json
 
 Compare `recall` and `mrr`, then look at the per-case `rank` for what moved.
 
+## Real questions
+
+Generated cases are written from the code, so they favour retrieval. Real questions are better. Set `server.usage_file` (see [configuration](configuration.md#call-graph-and-usage-lists)), work with your assistant for a while, then:
+
+```
+onfly eval mine [--usage FILE] [--out .onfly/eval-mined.yaml]
+```
+
+Each recorded question becomes a case whose expected hit is the chunk the assistant opened next (up to three per question). The result is an ordinary cases file: pass it to `onfly eval --cases` or `onfly eval tune` beside your hand-written one. A question the assistant answered from the first hit gives an easy case, and one it opened the third hit for gives a hard one, so the file shows where ranking falls short.
+
 ## Tuning
 
 `onfly eval tune` finds fusion weights for your code. It retrieves every case once, then tries a grid of `semantic_weight`, `keyword_weight`, `word_weight`, `field_weight` and `rrf_k` by re-fusing the saved lists, so the whole grid takes seconds after the retrieval. It picks the best setting by MRR on the even-numbered cases, scores that setting and your current one on the odd-numbered cases, and prints the YAML to adopt only when the odd half gains at least 0.01 MRR. Use at least a few hundred cases; with 20 the check half is noise.
@@ -72,3 +82,16 @@ Measured on this repository with `qwen3-embedding:0.6b`, 573 cases (45 hand-writ
 `group_by: file` pays off only when the question is about a file; a question about a symbol loses its second candidate in the same file. It is off by default.
 
 Summaries are the largest single gain (MRR 0.663 to 0.751; on the 45 hand-written cases alone 0.522 to 0.639) and cost one model call per chunk at index time: 16 minutes for 733 chunks with a 7B model on a laptop, then only changed chunks. Query expansion gains about 0.016 MRR and adds roughly 3 seconds to every new query, so it stays opt-in.
+
+Second round, on an index with summaries (738 to 845 chunks, same cases):
+
+| Change | R@1 | R@5 | R@10 | MRR |
+| --- | --- | --- | --- | --- |
+| Summaries, one call per chunk | 0.63 | 0.92 | 0.95 | 0.750 |
+| Summaries, `batch: 4` | 0.61 | 0.88 | 0.94 | 0.722 |
+| `batch: 4` + `embed_neighbours` | 0.60 | 0.91 | 0.95 | 0.732 |
+| `batch: 4` + `files: true` | 0.60 | 0.87 | 0.93 | 0.717 |
+| `batch: 4` with `qwen2.5-coder:3b` | 0.60 | 0.89 | 0.95 | 0.718 |
+| One call per chunk + `graph_weight: 0.25` | 0.60 | 0.92 | 0.95 | 0.731 |
+
+With summaries on, `onfly eval tune` found no setting that beat the defaults by 0.01 MRR on the check half.

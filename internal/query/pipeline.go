@@ -3,10 +3,12 @@ package query
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/usage"
 	"github.com/bmatcuk/doublestar/v4"
 )
 
@@ -26,8 +28,8 @@ const (
 // Params are the numbers that turn gathered candidate lists into one ranking.
 // Tuning varies them without touching the store or the embedder again.
 type Params struct {
-	Semantic, Keyword, Word, Field, Recency, Expand float64
-	RRFK                                            int
+	Semantic, Keyword, Word, Field, Recency, Expand, Graph float64
+	RRFK                                                   int
 }
 
 // Params returns the searcher's effective fusion numbers.
@@ -39,6 +41,7 @@ func (s *Searcher) Params() Params {
 		Field:    defaultFieldWeight,
 		Recency:  s.RecencyWeight,
 		Expand:   defaultExpandWeight,
+		Graph:    s.GraphWeight,
 		RRFK:     s.RRFK,
 	}
 	if s.WordWeight != nil {
@@ -186,6 +189,11 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	if len(g.ExpandSemantic) > 0 {
 		lists, weights = append(lists, g.ExpandSemantic), append(weights, p.Expand)
 	}
+	if s.UsageWeight > 0 && s.Usage != nil {
+		if u := usedChunks(s.Usage.Counts(), union(g.Semantic, g.Keyword, g.Words)); len(u) > 0 {
+			lists, weights = append(lists, u), append(weights, s.UsageWeight)
+		}
+	}
 	if len(g.ExpandWords) > 0 {
 		lists, weights = append(lists, g.ExpandWords), append(weights, p.Expand*p.Word)
 	}
@@ -193,6 +201,17 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 		lists, weights = append(lists, g.Recent), append(weights, p.Recency)
 	}
 	ranked := fuseScored(p.RRFK, weights, lists...)
+	if p.Graph > 0 {
+		// Second pass: hits that call or are called by other top hits gain a list.
+		head := chunksOf(ranked)
+		if len(head) > graphPool {
+			head = head[:graphPool]
+		}
+		if gl := graphLinked(head); len(gl) > 0 {
+			lists, weights = append(lists, gl), append(weights, p.Graph)
+			ranked = fuseScored(p.RRFK, weights, lists...)
+		}
+	}
 	group := s.GroupBy
 	if g.req.GroupBy != "" {
 		group = g.req.GroupBy
@@ -263,5 +282,69 @@ func groupByFile(in []scored) []scored {
 	}
 	// order is already by best score; the bonus can only reorder close files
 	sortScored(out)
+	return out
+}
+
+// graphPool is how many top hits are checked for call links to each other.
+const graphPool = 20
+
+// graphLinked returns the chunks of head that are linked to another chunk of
+// head by a call (either direction), most links first. A function the user's
+// question is really about tends to sit beside its caller or callee.
+func graphLinked(head []parser.Chunk) []parser.Chunk {
+	names := map[string][]int{}
+	for i, c := range head {
+		if n := c.Metadata["name"]; n != "" {
+			names[n] = append(names[n], i)
+		}
+	}
+	links := make([]int, len(head))
+	for i, c := range head {
+		seen := map[int]bool{}
+		for _, callee := range c.Outbound {
+			for _, j := range names[callee] {
+				if j != i && !seen[j] {
+					seen[j] = true
+					links[i]++
+					links[j]++
+				}
+			}
+		}
+	}
+	type item struct{ idx, n int }
+	var items []item
+	for i, n := range links {
+		if n > 0 {
+			items = append(items, item{i, n})
+		}
+	}
+	sort.SliceStable(items, func(a, b int) bool { return items[a].n > items[b].n })
+	out := make([]parser.Chunk, len(items))
+	for i, it := range items {
+		out[i] = head[it.idx]
+	}
+	return out
+}
+
+// usedChunks orders candidates that were opened before by how often.
+func usedChunks(counts map[string]int, cands []parser.Chunk) []parser.Chunk {
+	if len(counts) == 0 {
+		return nil
+	}
+	type item struct {
+		c parser.Chunk
+		n int
+	}
+	var items []item
+	for _, c := range cands {
+		if n := counts[usage.Key(c.FilePath, c.Metadata["name"])]; n > 0 {
+			items = append(items, item{c, n})
+		}
+	}
+	sort.SliceStable(items, func(a, b int) bool { return items[a].n > items[b].n })
+	out := make([]parser.Chunk, len(items))
+	for i, it := range items {
+		out[i] = it.c
+	}
 	return out
 }

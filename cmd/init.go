@@ -50,7 +50,8 @@ indexer:
   # embed_context: true            # embed "path: / symbol:" with each chunk; reindex after changing
   # summaries:                     # one-sentence description per chunk, embedded with the code (slower index)
   #   provider: ollama
-  #   model: qwen2.5-coder:7b
+  #   model: qwen2.5-coder:7b     # qwen2.5-coder:3b indexes faster for a small loss
+  # embed_neighbours: true         # add nearby symbol names to each embedded chunk
 
 rules:
   - .onfly/rules/project.md
@@ -63,6 +64,8 @@ rules:
 #   field_weight: 0.5              # symbol-name / path / comment list; 0 turns it off
 #   group_by: chunk                # file: one result per file
 #   recency_weight: 0              # >0 favours files changed in the last recency_days (git)
+#   graph_weight: 0                # >0 favours hits that call or are called by other hits
+#   usage_weight: 0                # >0 favours chunks an assistant opened after earlier searches (needs server.usage_file)
 #   expand:                        # ask a chat model for extra keywords before searching
 #     provider: ollama
 #     model: qwen2.5-coder:7b
@@ -77,6 +80,7 @@ server:
   log_file: .onfly/server.log
   # max_tokens: 8192               # budget for search results and rules
   # watch: true                    # reindex changed files while serving
+  # usage_file: .onfly/usage.jsonl # record which hit an assistant opens; "onfly eval mine" turns it into eval cases
 `
 
 const projectRule = `---

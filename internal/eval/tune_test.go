@@ -1,9 +1,13 @@
 package eval
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/usage"
 )
 
 func TestSplitAndLoadAll(t *testing.T) {
@@ -63,5 +67,27 @@ func TestTunePicksBestAndChecksHeldOut(t *testing.T) {
 	}
 	if _, err := Tune(Tuner{}, 6, 5); err == nil {
 		t.Fatal("empty tuner must fail")
+	}
+}
+
+func TestMineGroupsOpensByQuery(t *testing.T) {
+	ev := []usage.Event{
+		{Query: "q1", File: "a.go", Symbol: "A"},
+		{Query: "q2", File: "b.go"},
+		{Query: "q1", File: "a.go", Symbol: "A"}, // repeat
+		{Query: "q1", File: "c.go", Symbol: "C"},
+	}
+	got := Mine(ev)
+	if len(got) != 2 || got[0].Query != "q1" || len(got[0].Expect) != 2 || got[1].Expect[0].File != "b.go" {
+		t.Fatalf("%+v", got)
+	}
+	raw, err := MarshalCases(got)
+	if err != nil || !strings.Contains(string(raw), "query: q1") {
+		t.Fatalf("%s %v", raw, err)
+	}
+	path := filepath.Join(t.TempDir(), "m.yaml")
+	os.WriteFile(path, raw, 0o644)
+	if back, err := Load(path); err != nil || len(back) != 2 {
+		t.Fatalf("mined file must load as a cases file: %v %v", back, err)
 	}
 }

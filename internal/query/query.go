@@ -17,6 +17,7 @@ import (
 	"github.com/axitdev/onfly/internal/embedder"
 	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/usage"
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
@@ -80,6 +81,11 @@ type Searcher struct {
 	Expand        embedder.Chat
 	ExpandWeight  float64
 	ExpandTimeout time.Duration
+	// GraphWeight and UsageWeight scale two extra lists (0 is off): hits that
+	// call or are called by other hits, and chunks an assistant opened after
+	// earlier searches (Usage supplies the counts).
+	GraphWeight, UsageWeight float64
+	Usage                    *usage.Counter
 	// Root is the project root, used for git-based recency and changed-since filters.
 	Root string
 
@@ -269,15 +275,26 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, fmt.Errorf("search.expand: %w", err)
 	}
-	return &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
+	return NewSearcher(cfg, store, emb, rr, chat, slog.New(slog.NewTextHandler(os.Stderr, nil))), store.Close, nil
+}
+
+// NewSearcher wires a Searcher from the project config; the command line and
+// the MCP server both build theirs here so every search setting applies to both.
+func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, chat embedder.Chat, logger *slog.Logger) *Searcher {
+	s := &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
 		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
 		WordWeight: cfg.Search.WordWeight, FieldWeight: cfg.Search.FieldWeight, RRFK: cfg.Search.RRFK,
 		GroupBy: cfg.Search.GroupBy, Dedupe: cfg.Search.Dedupe,
+		GraphWeight: cfg.Search.GraphWeight, UsageWeight: cfg.Search.UsageWeight,
 		Expand: chat, ExpandTimeout: cfg.Search.Expand.Timeout(),
 		Root:   cfg.ProjectRoot,
-		Logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}, store.Close, nil
+		Logger: logger}
+	if cfg.Server.UsageFile != "" && cfg.Search.UsageWeight > 0 {
+		s.Usage = &usage.Counter{Path: cfg.Server.UsageFile}
+	}
+	return s
 }
 
 // Fuse merges ranked lists by reciprocal rank. A chunk in several lists

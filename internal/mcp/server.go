@@ -25,6 +25,7 @@ import (
 	"github.com/axitdev/onfly/internal/query"
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/tokens"
+	"github.com/axitdev/onfly/internal/usage"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	"github.com/axitdev/onfly/internal/watch"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -142,6 +143,7 @@ type tools struct {
 	logger    *slog.Logger
 	searcher  *query.Searcher
 	trace     io.Writer
+	usage     *usage.Log
 	traceMu   sync.Mutex
 }
 
@@ -163,12 +165,13 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		logger.Warn("reranker disabled", "err", err)
 		rr = nil
 	}
-	h.searcher = &query.Searcher{Store: store, Emb: embedder.Cached(emb, query.EmbedCacheSize), Logger: logger, Rerank: rr,
-		Candidates:     cfg.Reranker.Candidates,
-		RerankTimeout:  cfg.Reranker.Timeout(),
-		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
-		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
-		Root: cfg.ProjectRoot}
+	chat, err := embedder.NewChat(cfg.Search.Expand)
+	if err != nil {
+		logger.Warn("query expansion disabled", "err", err)
+		chat = nil
+	}
+	h.searcher = query.NewSearcher(cfg, store, emb, rr, chat, logger)
+	h.usage = usage.New(cfg.Server.UsageFile)
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
 	} else {
@@ -676,7 +679,39 @@ func fit(chunks []parser.Chunk, maxTokens int) ([]chunkDTO, error) {
 	return append(toDTO(chunks[:k]), toDTO([]parser.Chunk{truncation(n - k)})...), nil
 }
 
+// trackUsage feeds the usage log: a search remembers its hits, and a later
+// open of one of them is recorded with the query that found it.
+func (h *tools) trackUsage(tool string, args, result any) {
+	if h.usage == nil {
+		return
+	}
+	switch in := args.(type) {
+	case semanticIn:
+		hits, _ := result.([]hitDTO)
+		var seen []usage.Hit
+		for _, x := range hits {
+			if x.FilePath != "" {
+				seen = append(seen, usage.Hit{File: x.FilePath, Symbol: x.Symbol})
+			}
+		}
+		h.usage.Search(in.Query, seen)
+	case nameIn:
+		_ = h.usage.Open("", in.Name)
+	case componentIn:
+		_ = h.usage.Open("", in.Name)
+	case calleesIn:
+		_ = h.usage.Open(in.FilePath, in.Name)
+	case impactIn:
+		_ = h.usage.Open(in.FilePath, in.Name)
+	case pathIn:
+		_ = h.usage.Open(in.Path, "")
+	case outlineIn:
+		_ = h.usage.Open(in.FilePath, "")
+	}
+}
+
 func (h *tools) record(tool string, args any, start time.Time, result any, chunks int) {
+	h.trackUsage(tool, args, result)
 	if h.trace == nil {
 		return
 	}

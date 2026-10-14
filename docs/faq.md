@@ -18,6 +18,14 @@ Yes, with a chat model: `reranker.provider: ollama`. Ollama has no rerank endpoi
 
 In order of effort: (1) keep the defaults, which weigh the semantic list above the keyword list and add a symbol-name list; (2) run `onfly eval tune` on your own cases and adopt its numbers if the check half improves; (3) set `search.group_by: file` if you mostly ask about files; (4) turn on [chunk summaries](configuration.md#chunk-summaries) for questions that use none of the code's words. Query expansion and a reranker trade latency for recall; measure them with `onfly eval` first.
 
+### Should I add a reranker on top of summaries?
+
+Measure it. With a local chat model (`reranker.provider: ollama`) it raised recall@5 but lowered rank 1 and added seconds per search in the earlier measurement. A hosted cross-encoder (Voyage, Cohere, Jina) is the better candidate and is already supported; it was not measured here because it needs an API key. Run `onfly eval` with and without it on your own cases.
+
+### Which summary model should I use?
+
+`qwen2.5-coder:7b` gave the best scores; `qwen2.5-coder:3b` was within 0.004 MRR and indexed about a third faster. Both are local through Ollama. See [Chunk summaries](configuration.md#chunk-summaries).
+
 ### What does it cost?
 
 Onfly is free. Ollama is free. Hosted embedders charge per token, and you pay mostly on the first index, because unchanged files are never embedded again.

@@ -18,6 +18,7 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. Also prints the `stats` hints. |
 | `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). `--cases A,B` combines files, `--split even|odd`, `--file-level`. See [Evaluation](evaluation.md). |
 | `onfly eval tune` | Grid-search the fusion weights on half the cases and check them on the other half. |
+| `onfly eval mine` | Turn the recorded usage file (`server.usage_file`) into eval cases. |
 | `onfly stats` | Print file and chunk counts, with breakdowns by chunk type, workspace, and extension. Prints `hint:` lines when data or generated files (`.json`, `.lock`, `.svg` and similar) take 15% or more of the indexed text. |
 | `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |

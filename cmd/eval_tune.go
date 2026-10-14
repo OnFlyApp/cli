@@ -74,7 +74,7 @@ type tuneSetting struct {
 // tuneGrid lists the settings to try; the first is the current configuration.
 func tuneGrid(cur query.Params) []tuneSetting {
 	mk := func(p query.Params) tuneSetting {
-		return tuneSetting{p, fmt.Sprintf("semantic=%g keyword=%g word=%g field=%g rrf_k=%d", p.Semantic, p.Keyword, p.Word, p.Field, p.RRFK)}
+		return tuneSetting{p, fmt.Sprintf("semantic=%g keyword=%g word=%g field=%g graph=%g rrf_k=%d", p.Semantic, p.Keyword, p.Word, p.Field, p.Graph, p.RRFK)}
 	}
 	out := []tuneSetting{mk(cur)}
 	for _, sem := range []float64{0.5, 1, 1.5, 2} {
@@ -82,9 +82,11 @@ func tuneGrid(cur query.Params) []tuneSetting {
 			for _, word := range []float64{0, 0.1, 0.25, 0.5} {
 				for _, field := range []float64{0, 0.5, 1, 2} {
 					for _, k := range []int{20, 60} {
-						p := cur
-						p.Semantic, p.Keyword, p.Word, p.Field, p.RRFK = sem, kw, word, field, k
-						out = append(out, mk(p))
+						for _, graph := range []float64{0, 0.1, 0.25} {
+							p := cur
+							p.Semantic, p.Keyword, p.Word, p.Field, p.Graph, p.RRFK = sem, kw, word, field, graph, k
+							out = append(out, mk(p))
+						}
 					}
 				}
 			}
@@ -107,8 +109,8 @@ func printTune(out io.Writer, r eval.Result, best query.Params, n, k int) {
 		fmt.Fprintf(out, "\nno setting beats the current one on the check half by 0.01 MRR (%+.3f); keep your configuration.\n", gain)
 		return
 	}
-	fmt.Fprintf(out, "\nbest setting gains %+.3f MRR on the check half. To adopt it:\n\nsearch:\n  semantic_weight: %g\n  keyword_weight: %g\n  word_weight: %g\n  field_weight: %g\n  rrf_k: %d\n",
-		gain, best.Semantic, best.Keyword, best.Word, best.Field, best.RRFK)
+	fmt.Fprintf(out, "\nbest setting gains %+.3f MRR on the check half. To adopt it:\n\nsearch:\n  semantic_weight: %g\n  keyword_weight: %g\n  word_weight: %g\n  field_weight: %g\n  graph_weight: %g\n  rrf_k: %d\n",
+		gain, best.Semantic, best.Keyword, best.Word, best.Field, best.Graph, best.RRFK)
 }
 
 func init() {

@@ -73,6 +73,11 @@ type Search struct {
 	Dedupe bool `yaml:"dedupe"`
 	// Expand asks a chat model for extra keywords and a hypothetical answer before searching.
 	Expand LLM `yaml:"expand"`
+	// UsageWeight adds a list of chunks an assistant opened after earlier
+	// searches (needs server.usage_file); GraphWeight adds a list of hits that
+	// call or are called by other hits. Both are off at 0.
+	UsageWeight float64 `yaml:"usage_weight"`
+	GraphWeight float64 `yaml:"graph_weight"`
 }
 
 // LLM names a chat model used for a side task (index summaries, query expansion).
@@ -118,7 +123,21 @@ type Indexer struct {
 	ParseTimeoutMS int `yaml:"parse_timeout_ms"`
 	// Summaries has a chat model write a one-sentence description of each named
 	// chunk; it is embedded and searched with the code. Off when provider is empty.
-	Summaries LLM `yaml:"summaries"`
+	Summaries Summaries `yaml:"summaries"`
+	// EmbedNeighbours adds the names of the other symbols in the same file to
+	// each embedded chunk, so a chunk carries a little of its surroundings.
+	EmbedNeighbours bool `yaml:"embed_neighbours"`
+}
+
+// Summaries is an LLM plus how it is used while indexing.
+type Summaries struct {
+	LLM `yaml:",inline"`
+	// Files also writes one chunk per file (type "file") that lists its symbols
+	// and carries a summary, so a question about a package finds the file.
+	Files bool `yaml:"files"`
+	// Batch is how many chunks of one file go in a single model call; 0 or 1
+	// means one call per chunk.
+	Batch int `yaml:"batch"`
 }
 
 type ParserConfig struct {
@@ -139,6 +158,9 @@ type Server struct {
 	LogFile   string `yaml:"log_file"`
 	MaxTokens int    `yaml:"max_tokens"`
 	TraceFile string `yaml:"trace_file"`
+	// UsageFile, when set, appends one JSON line each time an assistant opens a
+	// chunk that the latest search returned. `onfly eval mine` turns it into eval cases.
+	UsageFile string `yaml:"usage_file"`
 	Watch     bool   `yaml:"watch"`
 }
 
@@ -347,6 +369,24 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Server.Watch {
 		out.Server.Watch = true
+	}
+	if child.Server.UsageFile != "" {
+		out.Server.UsageFile = child.Server.UsageFile
+	}
+	if child.Search.UsageWeight != 0 {
+		out.Search.UsageWeight = child.Search.UsageWeight
+	}
+	if child.Search.GraphWeight != 0 {
+		out.Search.GraphWeight = child.Search.GraphWeight
+	}
+	if child.Indexer.EmbedNeighbours {
+		out.Indexer.EmbedNeighbours = true
+	}
+	if child.Indexer.Summaries.Files {
+		out.Indexer.Summaries.Files = true
+	}
+	if child.Indexer.Summaries.Batch != 0 {
+		out.Indexer.Summaries.Batch = child.Indexer.Summaries.Batch
 	}
 	if child.Server.TraceFile != "" {
 		out.Server.TraceFile = child.Server.TraceFile
@@ -586,6 +626,7 @@ func resolve(cfg *Config) {
 	}
 	cfg.Server.LogFile = resolvePath(root, cfg.Server.LogFile)
 	cfg.Server.TraceFile = resolvePath(root, cfg.Server.TraceFile)
+	cfg.Server.UsageFile = resolvePath(root, cfg.Server.UsageFile)
 	for i, rule := range cfg.Rules {
 		cfg.Rules[i] = resolvePath(root, rule)
 	}
@@ -637,7 +678,7 @@ func (c Config) validate() error {
 	if g := c.Search.GroupBy; g != "" && g != "file" && g != "chunk" {
 		return fmt.Errorf("search.group_by must be file or chunk, got %q", g)
 	}
-	for name, l := range map[string]LLM{"search.expand": c.Search.Expand, "indexer.summaries": c.Indexer.Summaries} {
+	for name, l := range map[string]LLM{"search.expand": c.Search.Expand, "indexer.summaries": c.Indexer.Summaries.LLM} {
 		if l.TimeoutMS < 0 {
 			return fmt.Errorf("%s.timeout_ms must be >= 0", name)
 		}
@@ -647,6 +688,9 @@ func (c Config) validate() error {
 		if l.Provider != "" && l.Model == "" {
 			return fmt.Errorf("%s.model is required when a provider is set", name)
 		}
+	}
+	if c.Search.UsageWeight < 0 || c.Search.GraphWeight < 0 || c.Indexer.Summaries.Batch < 0 || c.Indexer.Summaries.Batch > 20 {
+		return fmt.Errorf("search.usage_weight and search.graph_weight must be >= 0, indexer.summaries.batch from 0 to 20")
 	}
 	if c.Reranker.TimeoutMS < 0 {
 		return fmt.Errorf("reranker.timeout_ms must be >= 0")

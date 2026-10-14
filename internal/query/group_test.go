@@ -96,3 +96,55 @@ func TestFuseWithParamsChangesRanking(t *testing.T) {
 		t.Fatalf("a high field weight must lead with the named chunk: base %+v boosted %+v", base, boosted)
 	}
 }
+
+func TestGraphLinkedOrdersByLinks(t *testing.T) {
+	a := parser.Chunk{FilePath: "a.go", Metadata: map[string]string{"name": "A"}, Outbound: []string{"B", "C"}}
+	b := parser.Chunk{FilePath: "b.go", Metadata: map[string]string{"name": "B"}}
+	c := parser.Chunk{FilePath: "c.go", Metadata: map[string]string{"name": "C"}, Outbound: []string{"B"}}
+	d := parser.Chunk{FilePath: "d.go", Metadata: map[string]string{"name": "D"}}
+	got := graphLinked([]parser.Chunk{d, a, b, c})
+	if len(got) != 3 || got[0].Metadata["name"] != "A" && got[0].Metadata["name"] != "B" {
+		t.Fatalf("%+v", got)
+	}
+	for _, x := range got {
+		if x.Metadata["name"] == "D" {
+			t.Fatal("an unlinked hit must not join the graph list")
+		}
+	}
+}
+
+func TestGraphWeightLiftsLinkedHit(t *testing.T) {
+	caller := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func Handle() { widget; run() }", Metadata: map[string]string{"name": "Handle"}, Outbound: []string{"run"}}
+	callee := parser.Chunk{FilePath: "z.go", Type: "function", Content: "func run() { widget }", Metadata: map[string]string{"name": "run"}}
+	lone := parser.Chunk{FilePath: "b.go", Type: "function", Content: "func lone() { widget widget widget }", Metadata: map[string]string{"name": "lone"}}
+	s := searcherWith(t, lone, callee, caller)
+	zero := 0.0
+	s.FieldWeight, s.WordWeight = &zero, &zero
+	s.GraphWeight = 0
+	base, _ := s.Search(context.Background(), "widget", 5, "")
+	s.GraphWeight = 50
+	got, _ := s.Search(context.Background(), "widget", 5, "")
+	if len(got) != 3 || got[2].Metadata["name"] != "lone" {
+		t.Fatalf("linked hits must outrank the unlinked one: base=%v got=%v", names(base), names(got))
+	}
+}
+
+func names(cs []parser.Chunk) []string {
+	var out []string
+	for _, c := range cs {
+		out = append(out, c.Metadata["name"])
+	}
+	return out
+}
+
+func TestUsedChunksOrdersByCount(t *testing.T) {
+	a := parser.Chunk{FilePath: "a.go", Metadata: map[string]string{"name": "A"}}
+	b := parser.Chunk{FilePath: "b.go", Metadata: map[string]string{"name": "B"}}
+	got := usedChunks(map[string]int{"b.go\x00B": 3, "a.go\x00A": 1}, []parser.Chunk{a, b, {FilePath: "c.go"}})
+	if len(got) != 2 || got[0].FilePath != "b.go" {
+		t.Fatalf("%+v", got)
+	}
+	if usedChunks(nil, []parser.Chunk{a}) != nil {
+		t.Fatal("no counts, no list")
+	}
+}

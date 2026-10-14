@@ -47,6 +47,8 @@ Global rules are in the server instructions, so the model sees them before it ca
 
 When `server.trace_file` is set, each tool call appends one JSON object to it (off by default): `ts`, `tool`, `args`, `duration_ms`, `tokens`, `chunks`. The line stores arguments, not file bodies.
 
+When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `get_references`, `get_callees`, `get_impact`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#call-graph-and-usage-lists).
+
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
 Tool failures are tool results with `isError` set. They are not protocol errors. The model can read the message and try again.
