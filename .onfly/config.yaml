@@ -31,9 +31,11 @@ rules:
 # Optional, off by default. Measure each with "onfly eval" before keeping it.
 # search:
 #   recency_weight: 0.5            # favour files changed in the last recency_days (git)
-# reranker:
+# reranker:                        # measured here: recall@5 0.80 -> 0.84, MRR 0.467 -> 0.564, +1.5-8 s per search
 #   provider: ollama               # voyage, cohere, jina, or ollama (a chat model)
 #   model: qwen2.5-coder:7b
+#   candidates: 20
+#   timeout_ms: 30000
 # indexer:
 #   embed_context: true            # embed "path: / symbol:" with each chunk; reindex after changing
 
