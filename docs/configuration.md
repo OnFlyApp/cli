@@ -26,9 +26,10 @@ embedder:
   # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY; voyage to VOYAGE_API_KEY
 
 reranker:                        # optional, off by default (empty provider)
-  provider: voyage               # only voyage
+  provider: voyage               # voyage, cohere, or jina
   model: rerank-2
-  api_key: ${VOYAGE_API_KEY}     # falls back to VOYAGE_API_KEY
+  # endpoint: http://localhost:8080   # optional; a self-hosted server, no key needed
+  api_key: ${VOYAGE_API_KEY}     # falls back to VOYAGE_API_KEY, COHERE_API_KEY or JINA_API_KEY
   candidates: 30                 # fused hits sent to the reranker; default 30
   timeout_ms: 5000               # one rerank call; on timeout the fused order is used
 
@@ -149,7 +150,17 @@ If the embedder is unreachable, `search` logs a warning and answers from keyword
 
 ## Reranker
 
-The reranker is off by default. When `reranker.provider` is `voyage`, each search sends the top fused hits to `POST {endpoint}/v1/rerank` (default endpoint `https://api.voyageai.com`) and reorders them. This adds one HTTP call per search. If the call fails, search logs a warning and keeps the fused order. If the reranker is misconfigured (for example the API key is missing), the MCP server logs a warning and runs without it; `onfly doctor` prints `reranker: <error>` and fails. `onfly search` still returns the error.
+The reranker is off by default. When `reranker.provider` is set, each search sends the top fused hits to a rerank endpoint and reorders them. This adds one HTTP call per search. If the call fails or times out, search logs a warning and keeps the fused order. If the reranker is misconfigured (for example the API key is missing), the MCP server logs a warning and runs without it; `onfly doctor` prints `reranker: <error>` and fails. `onfly search` still returns the error.
+
+| Provider | Default endpoint | Path | Key variable |
+| --- | --- | --- | --- |
+| `voyage` | `https://api.voyageai.com` | `/v1/rerank` | `VOYAGE_API_KEY` |
+| `cohere` | `https://api.cohere.com` | `/v2/rerank` | `COHERE_API_KEY` |
+| `jina` | `https://api.jina.ai` | `/v1/rerank` | `JINA_API_KEY` |
+
+A hosted endpoint needs a key. With a custom `endpoint` the key is optional, so a self-hosted server works unauthenticated. Servers that copy the Cohere or Jina request shape (vLLM, llama.cpp with `--reranking`, Infinity, LiteLLM) can be used this way. Pick `cohere` or `jina` to match the path the server exposes.
+
+Ollama is not a rerank provider: as far as we know it has no rerank endpoint, only embeddings and generation. To rerank locally, run a rerank-capable server as above and point `endpoint` at it.
 
 ## Embedders
 

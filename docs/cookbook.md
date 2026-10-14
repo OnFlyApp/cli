@@ -158,13 +158,22 @@ Files changed in the last 14 days (from git) get a boost.
 
 ```yaml
 reranker:
-  provider: voyage
+  provider: voyage            # or cohere, jina
   model: rerank-2
   api_key: ${VOYAGE_API_KEY}
   timeout_ms: 3000
 ```
 
 It reorders the top results with a stronger model. It costs one extra request per search; if it fails or times out, you get the normal order.
+
+To rerank locally, run a rerank server (for example llama.cpp with `--reranking`, or vLLM) and point at it. No key is needed:
+
+```yaml
+reranker:
+  provider: jina              # the request shape the server speaks
+  model: bge-reranker-v2-m3
+  endpoint: http://localhost:8081
+```
 
 ## Tell if a change helped
 

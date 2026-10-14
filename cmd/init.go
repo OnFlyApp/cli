@@ -59,7 +59,7 @@ rules:
 #   recency_weight: 0              # >0 favours files changed in the last recency_days (git)
 
 # reranker:                        # optional second pass over the top results
-#   provider: voyage
+#   provider: voyage              # voyage, cohere, or jina; endpoint: for a self-hosted server
 #   model: rerank-2
 
 server:

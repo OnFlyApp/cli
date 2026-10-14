@@ -37,3 +37,38 @@ func TestNewRerankerDisabled(t *testing.T) {
 		t.Fatalf("%v %v", rr, err)
 	}
 }
+
+func TestCohereAndJinaRerank(t *testing.T) {
+	for provider, wantPath := range map[string]string{"cohere": "/v2/rerank", "jina": "/v1/rerank"} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var in map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if r.URL.Path != wantPath || in["top_n"] != float64(2) || in["top_k"] != nil {
+				t.Errorf("%s: path %s body %v", provider, r.URL.Path, in)
+			}
+			if r.Header.Get("Authorization") != "" {
+				t.Errorf("%s: a custom endpoint without a key must send no Authorization header", provider)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{{"index": 1}, {"index": 0}}})
+		}))
+		rr, err := NewReranker(config.Reranker{Provider: provider, Endpoint: srv.URL, Model: "m"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := rr.Rerank(context.Background(), "q", []string{"a", "b"}, 2)
+		srv.Close()
+		if err != nil || len(got) != 2 || got[0] != 1 {
+			t.Fatalf("%s: %v %v", provider, got, err)
+		}
+	}
+}
+
+func TestHostedRerankerNeedsKey(t *testing.T) {
+	t.Setenv("COHERE_API_KEY", "")
+	if _, err := NewReranker(config.Reranker{Provider: "cohere", Model: "m"}); err == nil {
+		t.Fatal("hosted endpoint without key must fail")
+	}
+	if _, err := NewReranker(config.Reranker{Provider: "ollama", Model: "m"}); err == nil {
+		t.Fatal("unknown provider must fail")
+	}
+}

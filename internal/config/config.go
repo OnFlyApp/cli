@@ -536,9 +536,9 @@ func resolvePath(root, p string) string {
 
 func (c Config) validate() error {
 	switch c.Reranker.Provider {
-	case "", "voyage":
+	case "", "voyage", "cohere", "jina":
 	default:
-		return fmt.Errorf("reranker.provider %q is not available", c.Reranker.Provider)
+		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, or jina)", c.Reranker.Provider)
 	}
 	if strings.TrimSpace(c.Embedder.Model) == "" {
 		return fmt.Errorf("embedder.model is required")

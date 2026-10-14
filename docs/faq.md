@@ -8,7 +8,11 @@ A local search index for your code that AI assistants can query over MCP, so the
 
 ### Does my code leave my machine?
 
-Only to the embedder you choose. With **Ollama**, nothing leaves. With **OpenAI** or **Voyage**, the text of each chunk is sent to that provider to be embedded. The optional **reranker** (Voyage) also sends the top search results. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc` and similar) are never indexed or served.
+Only to the embedder you choose. With **Ollama**, nothing leaves. With **OpenAI** or **Voyage**, the text of each chunk is sent to that provider to be embedded. The optional **reranker** (Voyage, Cohere or Jina) also sends the top search results, unless you point it at your own server. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc` and similar) are never indexed or served.
+
+### Can I rerank with Ollama?
+
+Not directly. Ollama has embeddings and text generation but, as far as we know, no rerank endpoint. Reranking works with Voyage, Cohere, Jina, or any self-hosted server that speaks their request format (vLLM, llama.cpp `--reranking`, Infinity). See [Reranker](configuration.md#reranker).
 
 ### What does it cost?
 
