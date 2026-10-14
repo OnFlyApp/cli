@@ -178,4 +178,5 @@ With no file in `.onfly/rules/` and an empty `rules` list, serve reads the first
 - [Parsers](docs/parsers.md)
 - [Indexing](docs/indexing.md)
 - [MCP server](docs/mcp.md)
+- [Evaluation](docs/evaluation.md)
 - [Development](docs/development.md)
