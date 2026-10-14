@@ -19,6 +19,8 @@ Postgres tests skip unless `ONFLY_TEST_POSTGRES_DSN` points at a disposable data
 
 `TestGoParserWASM` and `TestE2EGoParser` clone `OnFlyApp/ext-parser-go` with `gh` and build a WASI module.
 
+`onfly search` uses the same pipeline as the MCP `search` tool, through `internal/query`.
+
 ## Layout
 
 ```text

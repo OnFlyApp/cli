@@ -102,6 +102,13 @@ onfly serve
 
 `onfly index` prints the current step on stderr, then a one-line summary. On a terminal that step stays on one line (`parsing`, `embedding`, `unchanged`, then `pruning` and `linking references`). It exits 1 if any file failed to parse. An unchanged file is not parsed again. `onfly serve` speaks JSON-RPC on stdout. Logs go to `.onfly/server.log`.
 
+Query the index from the terminal with `onfly search` (`--limit`, `--workspace`, `--json`):
+
+```sh
+onfly search "where is the file hash computed"
+# internal/index/index.go:62-64  ContentHash
+```
+
 Point the IDE at the project directory, or pass `--config` with the absolute path of `config.yaml`. The client config is in [docs/mcp.md](docs/mcp.md).
 
 ## Commands

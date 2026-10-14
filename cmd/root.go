@@ -25,7 +25,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config.yaml")
-	rootCmd.AddCommand(initCmd, indexCmd, serveCmd, watchCmd, doctorCmd, optimizeCmd, extCmd)
+	rootCmd.AddCommand(initCmd, indexCmd, serveCmd, watchCmd, doctorCmd, optimizeCmd, extCmd, searchCmd)
 }
 
 func loadConfig() (config.Config, error) {
