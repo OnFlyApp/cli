@@ -69,7 +69,8 @@ func TestHostedRerankerNeedsKey(t *testing.T) {
 	if _, err := NewReranker(config.Reranker{Provider: "cohere", Model: "m"}); err == nil {
 		t.Fatal("hosted endpoint without key must fail")
 	}
-	if _, err := NewReranker(config.Reranker{X		t.Fatal("unknown provider must fail")
+	if _, err := NewReranker(config.Reranker{Provider: "nope", Model: "m"}); err == nil {
+		t.Fatal("unknown provider must fail")
 	}
 }
 
