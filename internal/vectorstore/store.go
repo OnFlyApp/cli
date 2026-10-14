@@ -55,4 +55,13 @@ type IndexStats struct {
 	Unnamed    int
 	ByType     map[string]int
 	Workspaces map[string]int
+	// ByExt groups indexed text by file extension.
+	ByExt map[string]ExtStat
+}
+
+// ExtStat is the index footprint of one file extension.
+type ExtStat struct {
+	Files  int
+	Chunks int
+	Bytes  int
 }

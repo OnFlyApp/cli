@@ -690,6 +690,24 @@ func (p *Postgres) Stats(ctx context.Context) (IndexStats, error) {
 	for _, n := range out.ByType {
 		out.Chunks += n
 	}
+	out.ByExt = map[string]ExtStat{}
+	rows, err := p.pool.Query(ctx, `SELECT file_path, count(*), coalesce(sum(length(content)), 0) FROM chunks GROUP BY file_path`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var file string
+		var chunks, bytes int
+		if err := rows.Scan(&file, &chunks, &bytes); err != nil {
+			return out, err
+		}
+		addExt(out.ByExt, file, chunks, bytes)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
 	out.Unnamed, err = p.UnnamedChunks(ctx)
 	return out, err
 }

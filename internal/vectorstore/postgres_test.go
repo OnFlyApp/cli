@@ -150,6 +150,9 @@ func TestPostgresStatsAndVectors(t *testing.T) {
 	if got.Files != 2 || got.Chunks != 2 || got.Unnamed != 1 || got.ByType["function"] != 1 || got.Workspaces["backend"] != 2 {
 		t.Fatalf("%+v", got)
 	}
+	if e := got.ByExt[".go"]; e.Files != 2 || e.Chunks != 2 || e.Bytes != len(fn.Content)+len(blank.Content) {
+		t.Fatalf("ByExt %+v", got.ByExt)
+	}
 	if n, err := st.UnnamedChunks(ctx); err != nil || n != 1 {
 		t.Fatalf("unnamed %d %v", n, err)
 	}

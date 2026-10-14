@@ -479,4 +479,17 @@ func TestSQLiteStats(t *testing.T) {
 	if got.Files != 2 || got.Chunks != 2 || got.Unnamed != 1 || got.ByType["function"] != 1 || got.Workspaces["backend"] != 2 {
 		t.Fatalf("%+v", got)
 	}
+	if e := got.ByExt[".go"]; e.Files != 2 || e.Chunks != 2 || e.Bytes != len(fn.Content)+len(blank.Content) {
+		t.Fatalf("ByExt %+v", got.ByExt)
+	}
+}
+
+func TestExtOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"a/b.go": ".go", "x/app.min.js": ".min.js", "Makefile": "(none)", "t.blade.php": ".blade.php", ".gitignore": "(none)", "A.JSON": ".json",
+	} {
+		if got := extOf(in); got != want {
+			t.Errorf("extOf(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

@@ -117,6 +117,23 @@ Returns `{ "rules", "hits" }`. `hits` are the distinct chunks that call `name`, 
 | `receiver` | no |
 | `file_path` | no |
 
+### `get_file_outline`
+
+Returns `{ "rules", "symbols", "omitted" }` for one indexed file, in file order. Each symbol has `name`, `type`, `receiver`, `part`, `start_line`, and `end_line`; unnamed chunks have no `name`. At most 300 symbols; `omitted` counts the rest. It reads the index only, so it costs far fewer tokens than `read_file_raw` and shows what a file defines. A path that is not indexed, or that leaves the project, is a tool error.
+
+| Argument | Required |
+| --- | --- |
+| `file_path` | yes |
+
+### `find_symbols`
+
+Lists definitions by name, from the index. Matching is case-insensitive: a pattern with `*` or `?` is a wildcard match over the whole name, anything else is a prefix. Returns `{ "rules", "symbols", "omitted" }`, where each symbol also carries `file_path`. An exact name sorts first, then shorter names. Every definition of a matching name is listed, up to `limit` (default 20, at most 50); `omitted` counts the rest. Use it when `search_keyword` is too broad, or before `get_component_ast` to see whether a name is ambiguous.
+
+| Argument | Required |
+| --- | --- |
+| `pattern` | yes |
+| `limit` | no |
+
 ### `read_file_raw`
 
 Reads a file inside the project root. The path may be relative or absolute. `..` and a symlink that resolves outside the root are rejected. Secret names (`.env*`, `id_rsa*`, `id_ed25519`, `*.pem`, `*.key`, `*.p12`, `.npmrc`, `.netrc`, `.aws`, `.ssh`, `credentials.json`) are refused with case ignored, so `.ENV` is refused. Paths matched by a `.gitignore` or named in `indexer.exclude` are refused too, and `list_directory` omits them. `.gitignore` files are read when the server starts. Files larger than 1 MiB are rejected.
@@ -171,3 +188,14 @@ No arguments. Returns the rendered rules that apply to every request, highest pr
 ## Watching while serving
 
 `onfly serve --watch`, or `server.watch: true`, reindexes changed files while the server runs. It loads the parsers and the embedder in the serve process. Watcher errors go to the server log, never stdout, and do not stop the server.
+
+## Prompts
+
+The server offers two prompts that chain the tools above. Clients that support MCP prompts show them as commands.
+
+| Prompt | Argument | What it asks the model to do |
+| --- | --- | --- |
+| `explain-component` | `name` | Read the component with `get_component_ast`, its dependencies with `get_callees`, its users with `get_references`, then explain it with file and line citations. |
+| `review-impact` | `name` | Read the component, walk callers with `get_impact` at depth 3, group them by file, and say which tests to run. |
+
+A missing `name` is an error.

@@ -84,6 +84,11 @@ func checkDatabase(ctx context.Context, cfg config.Config, out io.Writer) error 
 	if n, err := st.UnnamedChunks(ctx); err == nil && n > 0 {
 		fmt.Fprintf(out, "chunks: %d without metadata.name\n", n)
 	}
+	if s, err := st.Stats(ctx); err == nil {
+		for _, h := range indexHints(s) {
+			fmt.Fprintf(out, "hint: %s\n", h)
+		}
+	}
 	return nil
 }
 

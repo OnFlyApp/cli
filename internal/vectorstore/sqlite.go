@@ -909,7 +909,24 @@ func (s *SQLite) Stats(ctx context.Context) (IndexStats, error) {
 	for _, n := range out.ByType {
 		out.Chunks += n
 	}
-	var err error
+	out.ByExt = map[string]ExtStat{}
+	rows, err := s.db.QueryContext(ctx, `SELECT file_path, count(*), sum(length(content)) FROM chunk_meta GROUP BY file_path`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var file string
+		var chunks, bytes int
+		if err := rows.Scan(&file, &chunks, &bytes); err != nil {
+			return out, err
+		}
+		addExt(out.ByExt, file, chunks, bytes)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
 	out.Unnamed, err = s.UnnamedChunks(ctx)
 	return out, err
 }

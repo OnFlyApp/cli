@@ -3,6 +3,7 @@ package vectorstore
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -261,4 +262,28 @@ func likePattern(keyword string) string {
 
 func ftsPhrase(keyword string) string {
 	return `"` + strings.ReplaceAll(keyword, `"`, `""`) + `"`
+}
+
+// extOf names a file's extension, treating compound ones like ".min.js" as one.
+func extOf(p string) string {
+	base := strings.ToLower(path.Base(slashPath(p)))
+	for _, compound := range []string{".min.js", ".min.css", ".d.ts", ".blade.php"} {
+		if strings.HasSuffix(base, compound) {
+			return compound
+		}
+	}
+	if e := path.Ext(base); e != "" && e != base {
+		return e
+	}
+	return "(none)"
+}
+
+// addExt folds one file's footprint into by.
+func addExt(by map[string]ExtStat, file string, chunks, bytes int) {
+	e := extOf(file)
+	st := by[e]
+	st.Files++
+	st.Chunks += chunks
+	st.Bytes += bytes
+	by[e] = st
 }
