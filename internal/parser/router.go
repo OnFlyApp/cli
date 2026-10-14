@@ -77,6 +77,8 @@ func openParser(cfg config.ParserConfig) (Parser, error) {
 			return nil, fmt.Errorf("stdio parser %q runs a shell command from the project config; set %s=1 to allow it", cfg.Command, AllowStdioEnv)
 		}
 		return newStdioParser(cfg.Command), nil
+	case "text":
+		return TextParser{}, nil
 	default:
 		return nil, fmt.Errorf("parser type %q is not available", cfg.Type)
 	}

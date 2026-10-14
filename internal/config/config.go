@@ -523,6 +523,7 @@ func (c Config) validate() error {
 			if p.Command == "" {
 				return fmt.Errorf("stdio parser command is required")
 			}
+		case "text":
 		default:
 			return fmt.Errorf("parser type %q is not available", p.Type)
 		}

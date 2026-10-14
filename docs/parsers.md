@@ -88,3 +88,18 @@ sh -c '<command> "$@"' sh <file path>
 The file path is `$1`. Stdin is the file bytes. Stdout and stderr follow the same rules as WASM. On Windows the host runs `cmd /c <command> <file path>`.
 
 A Markdown or Blade chunker can be a PHP script, a shell script, or the native Go parser binary (`make native` in that repo). The command is not prefixed with the project root. Use a path relative to the working directory, or an absolute path.
+
+## Text
+
+`type: text` is a built-in fallback for files with no language parser. It needs no plugin file:
+
+```yaml
+indexer:
+  parsers:
+    - type: text
+      extensions: [".md", ".yaml"]
+```
+
+Markdown (`.md`, `.markdown`, `.mdx`) is split on ATX headings (`#` to `######` followed by a space; headings inside code fences are ignored). Each section is a `section` chunk named `<file>#<heading>`, for example `README.md#Install`. Text before the first heading is named `<file>`. Every other extension is split into runs of blank-line-separated paragraphs of at least 30 lines, as `block` chunks named `<file>:<start line>`, for example `conf.yaml:1`. Both kinds carry `start_line` and `end_line`. Names use the base file name, so two `README.md` files do not share a bare heading name.
+
+The `include` globs must also cover these files, or they are never indexed.

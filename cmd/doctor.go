@@ -150,6 +150,8 @@ func checkPlugins(cfg config.Config, out io.Writer) error {
 					problems = append(problems, err.Error())
 				}
 			}
+		case "text":
+			parts = append(parts, "text")
 		default:
 			problems = append(problems, fmt.Sprintf("parser type %q is not available", p.Type))
 		}
