@@ -13,4 +13,4 @@ vendor/
 .vscode/
 /onfly
 .onfly/vector.db-*
-.onfly/install.lock
+.onfly/plugins/install.lock
