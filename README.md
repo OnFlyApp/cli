@@ -111,6 +111,14 @@ onfly search "where is the file hash computed"
 
 Point the IDE at the project directory, or pass `--config` with the absolute path of `config.yaml`. The client config is in [docs/mcp.md](docs/mcp.md).
 
+## Connect an IDE
+
+```bash
+onfly mcp-config cursor > .cursor/mcp.json
+```
+
+Clients: `claude-code` (`.mcp.json`), `cursor` (`.cursor/mcp.json`), `vscode` (`.vscode/mcp.json`). With `--config`, the absolute config path is written into the entry.
+
 ## Commands
 
 | Command | What it does |
@@ -126,6 +134,7 @@ Point the IDE at the project directory, or pass `--config` with the absolute pat
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. |
 | `onfly stats` | Print file and chunk counts, with breakdowns by chunk type and workspace. |
+| `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |
 | `onfly ext install go` | Download the published Go parser, check SHA-256, and add it to the config. |
 | `onfly ext install go@1.0.0` | Install that published version. |
