@@ -174,6 +174,8 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier you already know. For a description of behavior, call search."}, h.searchKeyword)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the chunk whose metadata name matches. Split parts of that symbol are joined."}, h.component)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_references", Description: "Return chunks whose outbound references include the name."}, h.references)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_callees", Description: "Return the chunks a symbol calls, for names defined in this index."}, h.getCallees)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first."}, h.getImpact)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)

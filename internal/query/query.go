@@ -119,7 +119,7 @@ func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 		seen := map[string]bool{}
 		rank := 0
 		for _, ch := range list {
-			key := chunkKey(ch)
+			key := ChunkKey(ch)
 			if seen[key] {
 				continue
 			}
@@ -139,7 +139,7 @@ func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 		out = append(out, by[key].chunk)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		si, sj := by[chunkKey(out[i])].score, by[chunkKey(out[j])].score
+		si, sj := by[ChunkKey(out[i])].score, by[ChunkKey(out[j])].score
 		if si != sj {
 			return si > sj
 		}
@@ -151,9 +151,9 @@ func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 	return out
 }
 
-// chunkKey identifies a chunk across result lists. Path, type, name, part,
+// ChunkKey identifies a chunk across result lists. Path, type, name, part,
 // first line and content together are unique per row.
-func chunkKey(c parser.Chunk) string {
+func ChunkKey(c parser.Chunk) string {
 	m := c.Metadata
 	return c.FilePath + "\x00" + c.Type + "\x00" + m["name"] + "\x00" + m["part"] + "\x00" + m["start_line"] + "\x00" + c.Content
 }

@@ -37,9 +37,9 @@ Global rules are in the server instructions, so the model sees them before it ca
 // [Truncated: N rules omitted due to context limits.]
 ```
 
-`search`, `search_keyword`, and `get_references` then fit their code results into the remaining tokens. Frontmatter, templates, and fallback files are described in [configuration.md](configuration.md).
+`search`, `search_keyword`, `get_references`, `get_callees`, and `get_impact` then fit their code results into the remaining tokens. Frontmatter, templates, and fallback files are described in [configuration.md](configuration.md).
 
-`onfly serve --max-tokens N` sets the search budget when `N` is greater than 0. Otherwise the budget is `server.max_tokens`, default 8192. The budget applies to `search`, `search_keyword`, and `get_references`. Rank order is kept. A chunk that does not fit beside the diagnostic line is dropped. If nothing fits, the only result is:
+`onfly serve --max-tokens N` sets the search budget when `N` is greater than 0. Otherwise the budget is `server.max_tokens`, default 8192. The budget applies to `search`, `search_keyword`, `get_references`, `get_callees`, and `get_impact`. Rank order is kept. A chunk that does not fit beside the diagnostic line is dropped. If nothing fits, the only result is:
 
 ```text
 // [Truncated: N matches omitted due to context limits.]
@@ -89,6 +89,23 @@ Returns `{ "rules", "chunks" }`. `chunks` are the rows whose `outbound` list con
 | Argument | Required |
 | --- | --- |
 | `name` | yes |
+
+### `get_callees`
+
+Returns `{ "rules", "hits" }`. `hits` are the chunks for each name in the component's `outbound` list that is defined in this index, at most 50. Library and builtin names are skipped. An unknown component is a tool error.
+
+| Argument | Required |
+| --- | --- |
+| `name` | yes |
+
+### `get_impact`
+
+Returns `{ "rules", "hits" }`. `hits` are the distinct chunks that call `name`, directly or through callers, nearest first, at most 100. `depth` is the number of caller levels, from 1 to 4, default 2. The walk follows names, so two functions with the same name share callers.
+
+| Argument | Required |
+| --- | --- |
+| `name` | yes |
+| `depth` | no |
 
 ### `read_file_raw`
 
