@@ -59,7 +59,7 @@ func checkDatabase(ctx context.Context, cfg config.Config, out io.Writer) error 
 	if cfg.Database.Driver == "sqlite" && cfg.Database.DSN != ":memory:" {
 		if _, err := os.Stat(cfg.Database.DSN); err != nil {
 			if os.IsNotExist(err) {
-				fmt.Fprintln(out, "database: database file missing")
+				fmt.Fprintln(out, "database: database file missing (run `onfly index` to create it)")
 				return err
 			}
 			fmt.Fprintf(out, "database: %s\n", err)

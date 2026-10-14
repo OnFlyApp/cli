@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/spf13/cobra"
 )
@@ -13,44 +14,72 @@ var (
 	initCI bool
 )
 
-const defaultConfig = `project: "E-commerce CRM"
+// configTemplate is the config `onfly init` writes. %s is the quoted project name.
+// Optional blocks are commented out; docs/configuration.md describes every key.
+const configTemplate = `project: %s
 
 database:
-  driver: "sqlite"
-  dsn: ".onfly/vector.db"
+  driver: sqlite                   # sqlite or postgres
+  dsn: .onfly/vector.db            # postgres: postgres://user:${ONFLY_DB_PASSWORD}@host:5432/onfly
 
 embedder:
-  provider: "ollama"
-  endpoint: "http://localhost:11434"
-  model: "qwen3-embedding:0.6b"
-  dimensions: 1024
-
-rules:
-  - ".onfly/rules/backend_style.md"
-  - ".onfly/rules/frontend_style.md"
-  - ".onfly/rules/architecture.md"
-
-rules_engine:
-  max_token_budget_percent: 15
-  auto_discovery:
-    enabled: true
-    fallback_order:
-      - ".cursorrules"
-      - "AGENTS.md"
-      - "CLAUDE.md"
-      - "AGENT.md"
-      - ".clinerules"
-      - ".github/copilot-instructions.md"
+  provider: ollama                 # ollama, openai, or voyage
+  endpoint: http://localhost:11434
+  model: qwen3-embedding:0.6b
+  dimensions: 1024                 # must match the model; changing it needs a fresh index
+  # api_key: ${OPENAI_API_KEY}     # openai and voyage also read OPENAI_API_KEY / VOYAGE_API_KEY
 
 indexer:
-  include: ["**/*.go", "src/**/*", "cmd/**/*", "internal/**/*", "pkg/**/*", "assets/**/*", "docs/**/*.md"]
-  exclude: ["vendor", "node_modules", "var", "public"]
-  parsers: []
+  # Which files are candidates. A file is indexed when it matches include, is not
+  # ignored (.gitignore and exclude) and a parser below handles its extension.
+  include: ["**/*"]
+  exclude: [vendor, node_modules, dist, build, target, .venv]
+  parsers:
+    # Built in, no download: Markdown and text, split into sections.
+    - extensions: [.md, .txt]
+      type: text
+    # Language parsers: run "onfly ext list", then for example "onfly ext install go".
+    # Each parser can be limited to part of the project:
+    # - extensions: [.go]
+    #   type: wasm
+    #   path: .onfly/plugins/go-parser.wasm
+    #   include: ["cmd/**", "internal/**"]
+    #   exclude: ["**/*_test.go"]
+  # concurrency: 4                 # files indexed in parallel
+  # embed_context: true            # embed "path: / symbol:" with each chunk; reindex after changing
+
+rules:
+  - .onfly/rules/project.md
+
+# workspace: backend               # label stored on each chunk, for monorepos with several configs
+
+# search:                          # how result lists are fused; measure changes with "onfly eval"
+#   keyword_weight: 1
+#   semantic_weight: 1
+#   recency_weight: 0              # >0 favours files changed in the last recency_days (git)
+
+# reranker:                        # optional second pass over the top results
+#   provider: voyage
+#   model: rerank-2
 
 server:
-  transport: "stdio"
-  log_level: "debug"
-  log_file: ".onfly/server.log"
+  transport: stdio
+  log_level: info
+  log_file: .onfly/server.log
+  # max_tokens: 8192               # budget for search results and rules
+  # watch: true                    # reindex changed files while serving
+`
+
+const projectRule = `---
+name: Project
+scope: ["*"]
+priority: 10
+---
+# {{ .Project.Name }}
+
+Describe what this repository is and the conventions an assistant must follow.
+Rules can be scoped to files, for example scope: ["**/*.go"], and each rule file
+is a separate Markdown file listed under ` + "`rules`" + ` in config.yaml.
 `
 
 var initCmd = &cobra.Command{
@@ -107,23 +136,28 @@ func runInit(dir string, overwrite, ci bool) error {
 	if err := os.MkdirAll(filepath.Join(onfly, "rules"), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(cfgPath, []byte(defaultConfig), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte(fmt.Sprintf(configTemplate, strconv.Quote(projectName(dir)))), 0o644); err != nil {
 		return err
 	}
-	rules := map[string]string{
-		"backend_style.md":  "---\nname: Backend\nscope: [\"**/*.go\", \"**/*.php\", \"**/*.rs\"]\nignore: [\"**/*_test.go\", \"vendor/**\"]\npriority: 50\n---\n# Backend\n\nReturn errors to the caller. Keep request handlers thin.\n",
-		"frontend_style.md": "---\nname: Frontend\nscope: [\"**/*.ts\", \"**/*.tsx\", \"**/*.js\"]\npriority: 40\n---\n# Frontend\n\nKeep components focused on one view.\n",
-		"architecture.md":   "---\nname: Architecture\nscope: [\"*\"]\npriority: 10\n---\n# Architecture\n\nIndex source with Onfly. Serve search over MCP stdio.\nYou are assisting in the {{ .Project.Name }} repository.\n",
-	}
-	for name, body := range rules {
-		if err := os.WriteFile(filepath.Join(onfly, "rules", name), []byte(body), 0o644); err != nil {
-			return err
-		}
+	if err := os.WriteFile(filepath.Join(onfly, "rules", "project.md"), []byte(projectRule), 0o644); err != nil {
+		return err
 	}
 	if ci {
 		return writeWorkflow(dir, overwrite)
 	}
 	return nil
+}
+
+// projectName is the directory name, which is what a person calls the project.
+func projectName(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	if name := filepath.Base(abs); name != "" && name != "." && name != string(filepath.Separator) {
+		return name
+	}
+	return "project"
 }
 
 func writeWorkflow(dir string, overwrite bool) error {

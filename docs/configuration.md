@@ -9,7 +9,7 @@ The project root is the parent of the `.onfly` directory that holds the file. Re
 ## File
 
 ```yaml
-project: "E-commerce CRM"
+project: "my-project"
 
 database:
   driver: sqlite                 # sqlite or postgres
@@ -39,9 +39,7 @@ search:                          # optional; how the result lists are fused
   recency_days: 30
 
 rules:
-  - .onfly/rules/backend_style.md
-  - .onfly/rules/frontend_style.md
-  - .onfly/rules/architecture.md
+  - .onfly/rules/project.md
 
 rules_engine:
   max_token_budget_percent: 15   # share of server.max_tokens used for injected rules
@@ -56,8 +54,8 @@ rules_engine:
       - .github/copilot-instructions.md
 
 indexer:
-  include: ["**/*.go", "src/**/*", "cmd/**/*", "internal/**/*", "pkg/**/*", "assets/**/*", "docs/**/*.md"]
-  exclude: ["vendor", "node_modules", "var", "public"]
+  include: ["**/*"]
+  exclude: [vendor, node_modules, dist, build, target, .venv]
   debounce_ms: 2000              # onfly watch; default 2000
   parse_timeout_ms: 5000         # per parser call; default 5000
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
@@ -66,6 +64,8 @@ indexer:
     - extensions: [".php", ".inc"]
       type: wasm
       path: .onfly/plugins/php-parser.wasm
+      include: ["app/**", "src/**"]    # optional; limits this parser to part of the project
+      exclude: ["**/*Test.php"]        # optional; skipped by this parser only
     - extensions: [".go"]
       type: wasm
       path: .onfly/plugins/go-parser.wasm
@@ -86,11 +86,32 @@ If a `.git` directory or file sits at or above the start directory, Onfly loads 
 
 These names are never read, even when `include` matches: any path segment that starts with `.env`, ends in `.pem`, or is `id_rsa`, `vendor`, `node_modules`, `.git`, or `.onfly`. The comparison ignores case, so `.ENV` and `.Onfly` are the same names. A `.gitignore` match is also skipped. `!` negation lines do not un-ignore a path. `read_file_raw` and `list_directory` refuse the same names.
 
-`onfly init` writes this shape with `parsers: []`. Add a parser with `onfly ext install`.
+`onfly init` writes a commented version of this file: `include: ["**/*"]`, a short `exclude` list, and the built-in `text` parser for `.md` and `.txt`. Language parsers are added with `onfly ext install`. Optional blocks (`workspace`, `search`, `reranker`, `concurrency`, `embed_context`) are present as comments.
 
 `onfly ext install go` reads `https://raw.githubusercontent.com/OnFlyApp/registry/main/registry.json` (`ONFLY_REGISTRY_URL` overrides it), checks SHA-256, and appends a wasm parsers item. Existing comments stay. `onfly --config path ext install go` edits that file.
 
 `indexer.include` must contain at least one pattern. Patterns use [doublestar](https://github.com/bmatcuk/doublestar) syntax: `src/**/*` matches `src/main.go` and `src/a/b.go`, and `docs/**/*.md` matches Markdown under `docs/`.
+
+### Per-parser scope
+
+Each parser may carry its own `include` and `exclude`. They are doublestar globs relative to the project root, applied after `indexer.include` and `indexer.exclude`:
+
+- No `include` means every file the parser's extensions match.
+- `exclude` removes files from this parser only.
+- A file is routed to the parser with the longest matching extension whose scope accepts it. A file that no scope accepts is not indexed.
+- Two parsers may share an extension when each has an `include`. Without one it is a configuration error.
+- An invalid pattern fails when parsers are opened (`index`, `serve`, `doctor`). In a nested config they are prefixed with the child path, like `indexer.include`.
+
+```yaml
+indexer:
+  parsers:
+    - extensions: [.go]
+      type: wasm
+      path: .onfly/plugins/go-parser.wasm
+      exclude: ["**/*_test.go", "**/testdata/**"]
+```
+
+### Exclude names
 
 `indexer.exclude` matches a path segment. `vendor` skips `vendor/lib/a.go` and `src/vendor/a.go`. `.onfly` and `.git` are always skipped.
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axitdev/onfly/internal/config"
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // AllowStdioEnv must be "1" for stdio parsers to run. A project config can
@@ -16,8 +17,33 @@ import (
 const AllowStdioEnv = "ONFLY_ALLOW_STDIO"
 
 type Router struct {
-	byExt   map[string]Parser
+	root    string
+	entries []entry
 	parsers []Parser
+}
+
+// entry is one parser with the extensions and path scope it serves.
+type entry struct {
+	p       Parser
+	ext     string
+	include []string
+	exclude []string
+}
+
+func (e entry) accepts(rel string) bool {
+	if len(e.include) > 0 && !globAny(e.include, rel) {
+		return false
+	}
+	return !globAny(e.exclude, rel)
+}
+
+func globAny(patterns []string, rel string) bool {
+	for _, pat := range patterns {
+		if ok, err := doublestar.PathMatch(pat, rel); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 type opener func(config.ParserConfig) (Parser, error)
@@ -27,7 +53,7 @@ func NewRouter(index config.Indexer, projectRoot string) (*Router, error) {
 }
 
 func newRouter(index config.Indexer, projectRoot string, open opener) (*Router, error) {
-	r := &Router{byExt: map[string]Parser{}}
+	r := &Router{root: projectRoot}
 	for _, cfg := range index.Parsers {
 		if cfg.Type == "wasm" && cfg.Path != "" && !filepath.IsAbs(cfg.Path) {
 			cfg.Path = filepath.Join(projectRoot, cfg.Path)
@@ -46,17 +72,26 @@ func newRouter(index config.Indexer, projectRoot string, open opener) (*Router, 
 			}
 		}
 		r.parsers = append(r.parsers, p)
+		for _, pat := range append(append([]string(nil), cfg.Include...), cfg.Exclude...) {
+			if !doublestar.ValidatePattern(pat) {
+				_ = r.Close()
+				return nil, fmt.Errorf("parser %v: invalid include/exclude pattern %q", cfg.Extensions, pat)
+			}
+		}
 		for _, ext := range cfg.Extensions {
 			ext = config.NormalizeExt(ext)
 			if ext == "." || ext == "" {
 				_ = r.Close()
 				return nil, fmt.Errorf("parser extension %q is invalid", ext)
 			}
-			if _, ok := r.byExt[ext]; ok {
-				_ = r.Close()
-				return nil, fmt.Errorf("duplicate parser extension %s", ext)
+			for _, other := range r.entries {
+				// Two parsers may share an extension only when each is scoped by include.
+				if other.ext == ext && (len(other.include) == 0 || len(cfg.Include) == 0) {
+					_ = r.Close()
+					return nil, fmt.Errorf("duplicate parser extension %s (give each parser an include scope to share it)", ext)
+				}
 			}
-			r.byExt[ext] = p
+			r.entries = append(r.entries, entry{p: p, ext: ext, include: cfg.Include, exclude: cfg.Exclude})
 		}
 	}
 	return r, nil
@@ -84,14 +119,27 @@ func openParser(cfg config.ParserConfig) (Parser, error) {
 	}
 }
 
+// rel turns a project path, absolute or relative, into a slash path under the root.
+func (r *Router) rel(path string) string {
+	if filepath.IsAbs(path) && r.root != "" {
+		if rel, err := filepath.Rel(r.root, path); err == nil {
+			path = rel
+		}
+	}
+	return filepath.ToSlash(path)
+}
+
+// match picks the parser with the longest extension whose scope accepts the
+// file; equal extensions go to the parser listed first.
 func (r *Router) match(path string) Parser {
-	low := strings.ToLower(path)
+	rel := r.rel(path)
+	low := strings.ToLower(rel)
 	var best Parser
 	bestLen := 0
-	for ext, p := range r.byExt {
-		if strings.HasSuffix(low, ext) && len(ext) > bestLen {
-			best = p
-			bestLen = len(ext)
+	for _, e := range r.entries {
+		if len(e.ext) > bestLen && strings.HasSuffix(low, e.ext) && e.accepts(rel) {
+			best = e.p
+			bestLen = len(e.ext)
 		}
 	}
 	return best

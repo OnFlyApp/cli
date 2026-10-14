@@ -387,3 +387,18 @@ func TestExpandOneEscapesDollar(t *testing.T) {
 		t.Fatalf("%q %v", got, err)
 	}
 }
+
+func TestMergeParsersKeepsScopesApart(t *testing.T) {
+	parent := []ParserConfig{
+		{Extensions: []string{".php"}, Type: "wasm", Path: "modern.wasm", Include: []string{"app/**"}},
+		{Extensions: []string{".php"}, Type: "wasm", Path: "legacy.wasm", Include: []string{"legacy/**"}},
+	}
+	child := []ParserConfig{{Extensions: []string{".php"}, Type: "wasm", Path: "legacy2.wasm", Include: []string{"legacy/**"}}}
+	got := mergeParsers(parent, child)
+	if len(got) != 2 || got[0].Path != "modern.wasm" || got[1].Path != "legacy2.wasm" {
+		t.Fatalf("%+v", got)
+	}
+	if got[0].Extensions[0] != ".php" || got[0].Include[0] != "app/**" {
+		t.Fatalf("scope or extension lost: %+v", got[0])
+	}
+}

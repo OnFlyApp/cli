@@ -2,7 +2,7 @@
 
 A parser turns one source file into a JSON array of chunks. Onfly loads it as WASM (WASI) or as a subprocess. The core has no PHP, JavaScript, or Go grammar of its own.
 
-The router picks a parser by file suffix. Matching is case-insensitive. The longest suffix wins, so `.blade.php` is chosen over `.php` when both are configured. The same extension on two parsers is a configuration error. A file whose suffix has no parser is not opened.
+The router picks a parser by file suffix. Matching is case-insensitive. The longest suffix wins, so `.blade.php` is chosen over `.php` when both are configured. The same extension on two parsers is a configuration error, unless every parser that claims it has an `include` scope; see [per-parser scope](configuration.md#per-parser-scope). A file whose suffix has no parser is not opened.
 
 Every configured parser is opened when indexing starts. A missing WASM file fails the run even if no file uses that extension.
 
@@ -75,7 +75,7 @@ From the project that contains `.onfly/config.yaml`:
 onfly ext install /path/to/ext-parser-go/bin/go-parser.wasm --extensions=".go"
 ```
 
-That copies the file into `.onfly/plugins/` and appends the wasm parser entry. `onfly init` leaves `parsers` empty. Indexing opens every configured parser.
+That copies the file into `.onfly/plugins/` and appends the wasm parser entry. `onfly init` configures only the built-in `text` parser. Indexing opens every configured parser.
 
 ## Stdio
 

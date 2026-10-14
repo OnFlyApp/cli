@@ -125,3 +125,49 @@ func contains(s, sub string) bool {
 		return false
 	})())
 }
+
+func TestRouterScopesParsersByPath(t *testing.T) {
+	modern := &fakeParser{chunks: []Chunk{{Type: "modern"}}}
+	legacy := &fakeParser{chunks: []Chunk{{Type: "legacy"}}}
+	root := t.TempDir()
+	r, err := newRouter(config.Indexer{Parsers: []config.ParserConfig{
+		{Extensions: []string{".php"}, Type: "stdio", Command: "legacy", Include: []string{"legacy/**"}},
+		{Extensions: []string{".php"}, Type: "stdio", Command: "modern", Include: []string{"app/**"}, Exclude: []string{"app/generated/**"}},
+	}}, root, func(cfg config.ParserConfig) (Parser, error) {
+		if cfg.Command == "legacy" {
+			return legacy, nil
+		}
+		return modern, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{"legacy/a.php": "legacy", "app/b.php": "modern", filepath.Join(root, "app", "c.php"): "modern"} {
+		got, err := r.Parse(context.Background(), path, nil)
+		if err != nil || got[0].Type != want {
+			t.Fatalf("%s: %+v %v", path, got, err)
+		}
+	}
+	for _, path := range []string{"other/d.php", "app/generated/e.php"} {
+		if r.HasParser(path) {
+			t.Fatalf("%s must be out of every parser's scope", path)
+		}
+	}
+}
+
+func TestRouterRejectsOverlapWithoutScopeAndBadPatterns(t *testing.T) {
+	open := func(config.ParserConfig) (Parser, error) { return &fakeParser{}, nil }
+	_, err := newRouter(config.Indexer{Parsers: []config.ParserConfig{
+		{Extensions: []string{".go"}, Type: "stdio", Command: "a", Include: []string{"a/**"}},
+		{Extensions: []string{".go"}, Type: "stdio", Command: "b"},
+	}}, t.TempDir(), open)
+	if err == nil || !contains(err.Error(), "duplicate") {
+		t.Fatalf("unscoped overlap: %v", err)
+	}
+	_, err = newRouter(config.Indexer{Parsers: []config.ParserConfig{
+		{Extensions: []string{".go"}, Type: "stdio", Command: "a", Include: []string{"[a"}},
+	}}, t.TempDir(), open)
+	if err == nil || !contains(err.Error(), "invalid") {
+		t.Fatalf("bad pattern: %v", err)
+	}
+}

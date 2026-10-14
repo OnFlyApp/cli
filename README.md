@@ -1,184 +1,106 @@
 # Onfly
 
-Onfly indexes a codebase and serves that index to an IDE over the Model Context Protocol (MCP) on stdin and stdout.
+**Give your AI coding assistant a searchable map of your codebase.**
 
-Parsers are separate programs. A WASM module (sandboxed) or a shell command (`type: stdio`, which must be enabled with `ONFLY_ALLOW_STDIO=1`) reads one source file and returns JSON chunks. Onfly embeds those chunks and stores them in SQLite (`sqlite-vec` and FTS5) or Postgres (`pgvector`). `onfly serve` answers search and file tools, and attaches project rules from `.onfly/rules/` to those results. It does not write logs to stdout.
+Onfly reads your project, splits it into meaningful pieces (functions, types, doc sections), and builds a local search index. Your IDE's assistant (Claude Code, Cursor, VS Code, anything that speaks [MCP](https://modelcontextprotocol.io)) then asks Onfly instead of guessing or reading whole files.
 
-Operator guides are under [docs/](docs/).
-
-## Requirements
-
-- Go 1.27 or newer
-- An embedder: [Ollama](https://ollama.com) running locally, an OpenAI API key, or a Voyage API key
-- A parser for each extension you index. This repo does not ship language parsers. The Go parser is [OnFlyApp/ext-parser-go](https://github.com/OnFlyApp/ext-parser-go). `onfly ext install go` installs a published release.
-
-## Build
-
-```sh
-make build
+```text
+You:        "Where do we validate the webhook signature?"
+Assistant:  asks Onfly → internal/billing/webhook.go:42-71  VerifySignature
+            reads just that function, answers with the right file and line.
 ```
 
-The binary is `bin/onfly`. The build sets `CGO_ENABLED=0` and stamps the version from `git describe`; `onfly --version` prints it.
+## Why use it
 
-## Index a Go project
+- **Finds code by meaning**, not only by exact words. "retry with backoff" finds the retry helper even if it never says "backoff".
+- **Cheap on tokens.** The assistant gets the 10 right chunks, not 40 files.
+- **Knows your conventions.** Short rule files you write are attached to results.
+- **Stays on your machine** if you use a local embedder such as Ollama.
+- **Understands relationships**: who calls this function, what does it call, what breaks if I change it.
 
-Install a 1024-dimension model if you use the sample settings:
+## Five-minute start
+
+You need Go 1.27+ to build Onfly and an embedder. The easiest is [Ollama](https://ollama.com) (free, local).
 
 ```sh
+# 1. Build Onfly (once)
+make build                              # produces bin/onfly; put it on your PATH
+
+# 2. Get an embedding model (once)
 ollama pull qwen3-embedding:0.6b
+
+# 3. In your project
+cd ~/code/my-project
+onfly init                              # creates .onfly/config.yaml
+onfly ext install go                    # a Go parser; skip if you only want docs
+onfly index                             # builds the index
+onfly search "where is the config loaded"
 ```
 
-In the target project:
+Not a Go project? `onfly init` already enables the built-in text parser, so Markdown and text files are searchable right away. For other languages see [Parsers](docs/parsers.md).
+
+Connect your IDE:
 
 ```sh
-onfly init
-onfly ext install go
+onfly mcp-config claude-code > .mcp.json      # or: cursor, vscode
 ```
 
-`onfly ext install go` downloads `go-parser.wasm` from [OnFlyApp/registry](https://github.com/OnFlyApp/registry), checks its SHA-256, and adds a `.go` parser. To build that parser yourself instead:
+Restart the IDE, and ask a question about your code. That's it.
 
-```sh
-git clone https://github.com/OnFlyApp/ext-parser-go.git
-cd ext-parser-go
-make wasm
-```
+New here? [Getting started](docs/getting-started.md) walks through each step and what you should see. Something odd? [FAQ and troubleshooting](docs/faq.md).
 
-`make wasm` writes `bin/go-parser.wasm`. From the project that contains `.onfly/config.yaml`:
+## What your assistant can do with it
 
-```sh
-onfly ext install /path/to/ext-parser-go/bin/go-parser.wasm --extensions=".go"
-```
-
-`onfly init` writes an empty `parsers` list. An existing config file is left in place. `onfly ext install go` adds the Go parser. A project that should index only Go can use:
-
-```yaml
-project: demo
-
-database:
-  driver: sqlite
-  dsn: .onfly/vector.db
-
-embedder:
-  provider: ollama
-  endpoint: http://localhost:11434
-  model: qwen3-embedding:0.6b
-  dimensions: 1024
-
-rules:
-  - .onfly/rules/architecture.md
-
-rules_engine:
-  max_token_budget_percent: 15
-  auto_discovery:
-    enabled: true
-    fallback_order:
-      - .cursorrules
-      - AGENTS.md
-      - CLAUDE.md
-      - AGENT.md
-      - .clinerules
-      - .github/copilot-instructions.md
-
-indexer:
-  include: ["**/*.go"]
-  exclude: ["vendor"]
-  parsers:
-    - extensions: [".go"]
-      type: wasm
-      path: .onfly/plugins/go-parser.wasm
-
-server:
-  transport: stdio
-  log_level: info
-  log_file: .onfly/server.log
-```
-
-Then:
-
-```sh
-onfly index
-onfly serve
-```
-
-`onfly index` prints the current step on stderr, then a one-line summary. On a terminal that step stays on one line (`parsing`, `embedding`, `unchanged`, then `pruning` and `linking references`). It exits 1 if any file failed to parse. An unchanged file is not parsed again. `onfly serve` speaks JSON-RPC on stdout. Logs go to `.onfly/server.log`.
-
-Query the index from the terminal with `onfly search` (`--limit`, `--workspace`, `--changed-since REF`, `--json`):
-
-```sh
-onfly search "where is the file hash computed"
-# internal/index/index.go:62-64  ContentHash
-```
-
-Point the IDE at the project directory, or pass `--config` with the absolute path of `config.yaml`. The client config is in [docs/mcp.md](docs/mcp.md).
-
-## Connect an IDE
-
-```bash
-onfly mcp-config cursor > .cursor/mcp.json
-```
-
-Clients: `claude-code` (`.mcp.json`), `cursor` (`.cursor/mcp.json`), `vscode` (`.vscode/mcp.json`). With `--config`, the absolute config path is written into the entry.
-
-## Commands
-
-| Command | What it does |
+| Tool | Use it to |
 | --- | --- |
-| `onfly init` | Create `.onfly/`, a sample config with `rules_engine`, and three rule files. |
-| `onfly init --force` | Overwrite that config and those rule files. |
-| `onfly init --ci` | Also write `.github/workflows/onfly-index.yml`. An existing config is left in place. `--force` overwrites the workflow. |
-| `onfly index` | Parse matching files, embed the chunks, and update the database. |
-| `onfly index --dry-run` | Parse and print file, chunk, and token counts. Does not open the database or call the embedder. |
-| `onfly index --ci` | Embed 128 chunks per request. The default batch is 32. |
-| `onfly watch` | Reindex changed files after `indexer.debounce_ms`. Reloads ignore rules when a `.gitignore` changes. |
-| `onfly serve` | Serve the MCP tools on stdio. |
-| `onfly serve --watch` | Serve and reindex changed files in the same process. Same as `server.watch: true`. |
-| `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
-| `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. Also prints the `stats` hints. |
-| `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). See [Evaluation](docs/evaluation.md). |
-| `onfly stats` | Print file and chunk counts, with breakdowns by chunk type, workspace, and extension. Prints `hint:` lines when data or generated files (`.json`, `.lock`, `.svg` and similar) take 15% or more of the indexed text. |
-| `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. |
-| `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |
-| `onfly ext install go` | Download the published Go parser, check SHA-256, and add it to the config. |
-| `onfly ext install go@1.0.0` | Install that published version. |
-| `onfly ext install ./parser.wasm --extensions=".twig,.html"` | Install a local wasm file without the registry. |
-| `onfly ext install ... --yes` | Replace a parser that already owns one of the extensions, without asking. |
-| `onfly ext update` | Upgrade installed registry parsers. |
-| `onfly ext remove go` | Remove the wasm file and its config entry. |
-| `onfly ext list` | Show name, version, and `active`, `outdated`, or `corrupted`. |
-| `--config path` | Use this config file instead of walking parent directories. |
-| `--version` | Print the build version. |
+| `search` | Find code by what it does. |
+| `search_keyword` | Find an exact identifier or string. |
+| `find_symbols` | List definitions by name: `Save*`, `parse`. |
+| `get_file_outline` | See what a file defines, without reading it. |
+| `get_component_ast` | Fetch one function or type with its full code. |
+| `get_references`, `get_callees`, `get_impact` | Follow calls: who uses it, what it uses, what breaks. |
+| `read_file_raw`, `list_directory` | Read a file or browse a folder. |
 
-`onfly ext` reads `https://raw.githubusercontent.com/OnFlyApp/registry/main/registry.json`, or the URL in `ONFLY_REGISTRY_URL`. The registry manifest is limited to 1 MiB, and a warning is printed when `ONFLY_REGISTRY_URL` overrides the default. A downloaded file is kept only when its SHA-256 matches the registry. A mismatch deletes the temp file and leaves the project unchanged. Installed plugins are recorded in `.onfly/plugins/installed.json`. `onfly ext list` waits at most three seconds for the registry, then prints the table. A failed fetch adds a `registry:` line.
+Two ready-made prompts, `explain-component` and `review-impact`, chain these for you. Details are in [MCP server](docs/mcp.md).
 
-## Rules
+## Everyday commands
 
-`onfly init` includes `**/*.go`, `src/**/*`, `cmd/**/*`, `internal/**/*`, `pkg/**/*`, `assets/**/*`, and `docs/**/*.md`. `parsers` stays empty until `onfly ext install`.
-
-`onfly init` writes `.onfly/rules/backend_style.md`, `frontend_style.md`, and `architecture.md`. A rule file can start with YAML frontmatter:
-
-```markdown
----
-name: Database Safety Rules
-scope: ["**/*.go", "interface"]
-ignore: ["**/*_test.go"]
-priority: 100
----
-Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers }}.
+```sh
+onfly index                  # update the index after changes
+onfly serve --watch          # serve your IDE and keep the index fresh
+onfly search "question"      # try a search from the terminal
+onfly doctor                 # something wrong? start here
+onfly stats                  # how big is the index, what's in it
 ```
 
-`scope` takes a doublestar glob, a language name (`go`, `php`, `rust`, `typescript`, `javascript`, `python`, `ruby`, `java`), or a chunk type such as `interface`. `*` applies to every MCP call. A file with no frontmatter does too. Higher `priority` is sent first. `ignore` uses the same glob syntax.
+Every command is listed in [Commands](docs/commands.md).
 
-`{{ .Project.Name }}` comes from `go.mod`, then `composer.json`, then `package.json`, then the `project` field. `{{ .Env.OS }}` and `{{ .Env.Arch }}` are the host system. `{{ .ActiveParsers }}` is a JSON list of languages taken from the configured parser extensions.
+## How it works, in one picture
 
-Injected rules use at most `rules_engine.max_token_budget_percent` (default 15) of `server.max_tokens`. Lower-priority rules are dropped. `onfly doctor` fails when frontmatter or a template cannot be read. When the rules are larger than that budget it prints `rules: [WARNING]` and exits 0 if the other checks passed.
+```text
+ your files ──► parser ──► chunks ──► embedder ──► index (SQLite or Postgres)
+ (.go, .md …)  (per language)  (functions,    (turns text       │
+                                sections)      into vectors)    ▼
+                                              IDE ◄── MCP ◄── onfly serve
+```
 
-With no file in `.onfly/rules/` and an empty `rules` list, serve reads the first existing path in `auto_discovery.fallback_order`. The default order starts `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, `AGENT.md`. Set `auto_discovery.enabled` to false to skip those files. Global rules are in the server instructions. Matching rules are also a `rules` field on the tool result. The field list is in [docs/configuration.md](docs/configuration.md).
+Parsers are small plugins, one per language. Onfly ships a text parser and installs others with `onfly ext install`. Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage).
 
 ## Guides
 
-- [Configuration](docs/configuration.md)
-- [Parsers](docs/parsers.md)
-- [Indexing](docs/indexing.md)
-- [MCP server](docs/mcp.md)
-- [Evaluation](docs/evaluation.md)
-- [Development](docs/development.md)
+Start here:
+
+- [Getting started](docs/getting-started.md): the first hour, step by step
+- [Cookbook](docs/cookbook.md): copy-paste recipes (monorepos, Postgres, CI, tuning)
+- [FAQ and troubleshooting](docs/faq.md)
+
+Reference:
+
+- [Configuration](docs/configuration.md): every config key
+- [Commands](docs/commands.md)
+- [Rules](docs/rules.md): conventions attached to results
+- [Parsers](docs/parsers.md): install, scope, or write one
+- [Indexing](docs/indexing.md): what gets indexed and when
+- [MCP server](docs/mcp.md): tools, arguments, results
+- [Evaluation](docs/evaluation.md): measure whether search got better
+- [Development](docs/development.md): build and test Onfly itself

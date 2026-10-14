@@ -80,6 +80,11 @@ type ParserConfig struct {
 	Type       string   `yaml:"type"`
 	Path       string   `yaml:"path"`
 	Command    string   `yaml:"command"`
+	// Include and Exclude narrow this parser to a part of the project, as
+	// doublestar globs relative to the project root. Empty Include means
+	// every file with a matching extension. A file must also pass indexer.include.
+	Include []string `yaml:"include"`
+	Exclude []string `yaml:"exclude"`
 }
 
 type Server struct {
@@ -316,7 +321,13 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 		out.Indexer.Include = prefixPatterns(child.Indexer.Include, gitRoot, childRoot)
 	}
 	out.Indexer.Exclude = unionStrings(parent.Indexer.Exclude, child.Indexer.Exclude)
-	out.Indexer.Parsers = mergeParsers(parent.Indexer.Parsers, child.Indexer.Parsers)
+	childParsers := make([]ParserConfig, len(child.Indexer.Parsers))
+	for i, p := range child.Indexer.Parsers {
+		p.Include = prefixPatterns(p.Include, gitRoot, childRoot)
+		p.Exclude = prefixPatterns(p.Exclude, gitRoot, childRoot)
+		childParsers[i] = p
+	}
+	out.Indexer.Parsers = mergeParsers(parent.Indexer.Parsers, childParsers)
 	if child.Indexer.EmbedContext {
 		out.Indexer.EmbedContext = true
 	}
@@ -386,11 +397,16 @@ func mergeParsers(parent, child []ParserConfig) []ParserConfig {
 				if key == "" || key == "." {
 					key = ext
 				}
+				// The same extension may appear once per distinct scope.
+				key += "\x00" + strings.Join(item.Include, "\x00")
 				if _, ok := byExt[key]; !ok {
 					order = append(order, key)
 				}
 				cp := item
-				cp.Extensions = []string{key}
+				cp.Extensions = []string{NormalizeExt(ext)}
+				if cp.Extensions[0] == "" || cp.Extensions[0] == "." {
+					cp.Extensions[0] = ext
+				}
 				byExt[key] = cp
 			}
 		}

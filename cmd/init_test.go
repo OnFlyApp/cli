@@ -27,17 +27,17 @@ func TestInitWritesSpecConfig(t *testing.T) {
 	if cfg.Database.Driver != "sqlite" {
 		t.Fatalf("%+v", cfg)
 	}
-	joined := strings.Join(cfg.Indexer.Include, " ")
-	for _, pattern := range []string{"**/*.go", "cmd/**/*", "internal/**/*", "pkg/**/*"} {
-		if !strings.Contains(joined, pattern) {
-			t.Fatalf("include %v", cfg.Indexer.Include)
-		}
+	if len(cfg.Indexer.Include) != 1 || cfg.Indexer.Include[0] != "**/*" {
+		t.Fatalf("include %v", cfg.Indexer.Include)
+	}
+	if cfg.Project != filepath.Base(dir) {
+		t.Fatalf("project %q, want the directory name", cfg.Project)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".onfly", "plugins")); err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile(filepath.Join(dir, ".onfly", "rules", "architecture.md"))
-	if err != nil || !strings.Contains(string(body), "Architecture") {
+	body, err := os.ReadFile(filepath.Join(dir, ".onfly", "rules", "project.md"))
+	if err != nil || !strings.Contains(string(body), "Project.Name") {
 		t.Fatalf("rules: %v %q", err, body)
 	}
 	if err := runInit(dir, true, false); err != nil {
@@ -45,7 +45,7 @@ func TestInitWritesSpecConfig(t *testing.T) {
 	}
 }
 
-func TestInitLeavesParsersEmpty(t *testing.T) {
+func TestInitConfiguresOnlyTheBuiltInTextParser(t *testing.T) {
 	dir := t.TempDir()
 	if err := runInit(dir, false, false); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestInitLeavesParsersEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Indexer.Parsers) != 0 {
+	if len(cfg.Indexer.Parsers) != 1 || cfg.Indexer.Parsers[0].Type != "text" {
 		t.Fatalf("parsers = %+v", cfg.Indexer.Parsers)
 	}
 }

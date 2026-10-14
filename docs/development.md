@@ -37,6 +37,7 @@ internal/index/         hash skip, embed, save, prune, incremental ref linking, 
 internal/watch/         fsnotify debounce, .gitignore reload
 internal/vectorstore/   sqlite and postgres, schema version 2 (storetest/: fixtures for tests)
 internal/mcp/           MCP tools, token budget, trace, index resource
+internal/gitx/          changed-since and recency lists from git
 internal/query/         one search: embed, semantic, keyword, rank fusion, optional rerank (5s bound)
 internal/eval/          eval cases file, recall@k and MRR scoring
 internal/rules/         rule frontmatter, templates, token budget, fallback files
