@@ -135,7 +135,11 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		workspace: cfg.Workspace, maxTokens: maxTokens, logger: logger,
 		engine: rules.Load(cfg),
 	}
-	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger}
+	rr, err := embedder.NewReranker(cfg.Reranker)
+	if err != nil {
+		return nil, nil, err
+	}
+	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger, Rerank: rr, Candidates: cfg.Reranker.Candidates}
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
 	} else {

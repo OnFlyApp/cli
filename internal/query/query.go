@@ -49,6 +49,9 @@ type Searcher struct {
 	Store  vectorstore.Store
 	Emb    embedder.Embedder
 	Logger *slog.Logger
+	// Rerank, when set, reorders the top Candidates fused hits.
+	Rerank     embedder.Reranker
+	Candidates int
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -73,7 +76,7 @@ func (s *Searcher) Search(ctx context.Context, q string, limit int, workspace st
 		s.logger().Warn("search keyword", "err", err)
 		keyword = nil
 	}
-	fused := Fuse(semantic, keyword)
+	fused := s.rerank(ctx, q, Fuse(semantic, keyword))
 	if n := ClampLimit(limit); len(fused) > n {
 		fused = fused[:n]
 	}
@@ -95,7 +98,12 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, err
 	}
-	return &Searcher{Store: store, Emb: emb}, store.Close, nil
+	rr, err := embedder.NewReranker(cfg.Reranker)
+	if err != nil {
+		store.Close()
+		return nil, nil, err
+	}
+	return &Searcher{Store: store, Emb: emb, Rerank: rr, Candidates: cfg.Reranker.Candidates}, store.Close, nil
 }
 
 // Fuse merges ranked lists by reciprocal rank. A chunk in several lists
@@ -148,4 +156,44 @@ func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 func chunkKey(c parser.Chunk) string {
 	m := c.Metadata
 	return c.FilePath + "\x00" + c.Type + "\x00" + m["name"] + "\x00" + m["part"] + "\x00" + m["start_line"] + "\x00" + c.Content
+}
+
+const defaultRerankPool = 30
+
+func (s *Searcher) rerank(ctx context.Context, q string, fused []parser.Chunk) []parser.Chunk {
+	if s.Rerank == nil || len(fused) < 2 {
+		return fused
+	}
+	pool := s.Candidates
+	if pool <= 0 {
+		pool = defaultRerankPool
+	}
+	head := fused
+	if len(head) > pool {
+		head = fused[:pool]
+	}
+	docs := make([]string, len(head))
+	for i, c := range head {
+		docs[i] = c.Content
+	}
+	order, err := s.Rerank.Rerank(ctx, q, docs, len(head))
+	if err != nil {
+		s.logger().Warn("rerank", "err", err)
+		return fused
+	}
+	used := make([]bool, len(head))
+	out := make([]parser.Chunk, 0, len(fused))
+	for _, i := range order {
+		if i < 0 || i >= len(head) || used[i] {
+			continue
+		}
+		used[i] = true
+		out = append(out, head[i])
+	}
+	for i, c := range head {
+		if !used[i] {
+			out = append(out, c)
+		}
+	}
+	return append(out, fused[len(head):]...)
 }

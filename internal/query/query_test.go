@@ -62,3 +62,39 @@ func TestScope(t *testing.T) {
 		t.Fatal("scope")
 	}
 }
+
+type stubRerank struct {
+	order []int
+	err   error
+}
+
+func (r stubRerank) Rerank(context.Context, string, []string, int) ([]int, error) {
+	return r.order, r.err
+}
+
+func TestRerankReordersFusedHits(t *testing.T) {
+	s := newSearcher(t)
+	s.Rerank = stubRerank{order: []int{1, 0}}
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestRerankErrorKeepsFusedOrder(t *testing.T) {
+	s := newSearcher(t)
+	s.Rerank = stubRerank{err: context.DeadlineExceeded}
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 2 || got[0].FilePath != "a.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestRerankIgnoresOutOfRangeAndDuplicateIndices(t *testing.T) {
+	s := newSearcher(t)
+	s.Rerank = stubRerank{order: []int{7, 1, 1, -1}}
+	got, err := s.Search(context.Background(), "getUserId", 5, "")
+	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" || got[1].FilePath != "a.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}

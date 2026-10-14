@@ -17,6 +17,7 @@ type Config struct {
 	Workspace   string      `yaml:"workspace"`
 	Database    Database    `yaml:"database"`
 	Embedder    Embedder    `yaml:"embedder"`
+	Reranker    Reranker    `yaml:"reranker"`
 	Rules       []string    `yaml:"rules"`
 	RulesEngine RulesEngine `yaml:"rules_engine"`
 	Indexer     Indexer     `yaml:"indexer"`
@@ -36,6 +37,14 @@ type Embedder struct {
 	Dimensions     int    `yaml:"dimensions"`
 	APIKey         string `yaml:"api_key"`
 	MaxInputTokens int    `yaml:"max_input_tokens"`
+}
+
+type Reranker struct {
+	Provider   string `yaml:"provider"`
+	Endpoint   string `yaml:"endpoint"`
+	Model      string `yaml:"model"`
+	APIKey     string `yaml:"api_key"`
+	Candidates int    `yaml:"candidates"`
 }
 
 type Indexer struct {
@@ -219,6 +228,21 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Database.DSN != "" {
 		out.Database.DSN = child.Database.DSN
 	}
+	if child.Reranker.Provider != "" {
+		out.Reranker.Provider = child.Reranker.Provider
+	}
+	if child.Reranker.Endpoint != "" {
+		out.Reranker.Endpoint = child.Reranker.Endpoint
+	}
+	if child.Reranker.Model != "" {
+		out.Reranker.Model = child.Reranker.Model
+	}
+	if child.Reranker.APIKey != "" {
+		out.Reranker.APIKey = child.Reranker.APIKey
+	}
+	if child.Reranker.Candidates != 0 {
+		out.Reranker.Candidates = child.Reranker.Candidates
+	}
 	if child.Embedder.Provider != "" {
 		out.Embedder.Provider = child.Embedder.Provider
 	}
@@ -380,6 +404,18 @@ func expand(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	cfg.Reranker.Endpoint, err = expandOne(cfg.Reranker.Endpoint)
+	if err != nil {
+		return err
+	}
+	cfg.Reranker.APIKey, err = expandOne(cfg.Reranker.APIKey)
+	if err != nil {
+		return err
+	}
+	cfg.Reranker.Model, err = expandOne(cfg.Reranker.Model)
+	if err != nil {
+		return err
+	}
 	cfg.Server.LogFile, err = expandOne(cfg.Server.LogFile)
 	if err != nil {
 		return err
@@ -444,6 +480,11 @@ func resolvePath(root, p string) string {
 }
 
 func (c Config) validate() error {
+	switch c.Reranker.Provider {
+	case "", "voyage":
+	default:
+		return fmt.Errorf("reranker.provider %q is not available", c.Reranker.Provider)
+	}
 	if strings.TrimSpace(c.Embedder.Model) == "" {
 		return fmt.Errorf("embedder.model is required")
 	}

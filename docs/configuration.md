@@ -25,6 +25,12 @@ embedder:
   max_input_tokens: 6000         # default 6000; split chunks above this
   # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY; voyage to VOYAGE_API_KEY
 
+reranker:                        # optional, off by default (empty provider)
+  provider: voyage               # only voyage
+  model: rerank-2
+  api_key: ${VOYAGE_API_KEY}     # falls back to VOYAGE_API_KEY
+  candidates: 30                 # fused hits sent to the reranker; default 30
+
 rules:
   - .onfly/rules/backend_style.md
   - .onfly/rules/frontend_style.md
@@ -102,6 +108,10 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 `auto_discovery.enabled` defaults to true. When `.onfly/rules/` and `rules` are both empty, Onfly reads the first existing file in `fallback_order` and stops. Set `enabled` to false to ignore those files. Fallback paths stay inside the project root.
 
 `onfly doctor` reads the same files. `rules: ok N tokens` means the rendered rules fit in the budget. A frontmatter or template error fails the check. When the rendered rules exceed the budget, doctor prints `rules: [WARNING]` and exits 0 if every other check passed. That warning names the files whose scopes overlap.
+
+## Reranker
+
+The reranker is off by default. When `reranker.provider` is `voyage`, each search sends the top fused hits to `POST {endpoint}/v1/rerank` (default endpoint `https://api.voyageai.com`) and reorders them. This adds one HTTP call per search. If the call fails, search logs a warning and keeps the fused order.
 
 ## Embedders
 
