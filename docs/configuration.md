@@ -70,6 +70,7 @@ server:
   log_level: debug               # debug, info, warn, error
   log_file: .onfly/server.log    # required; serve writes logs here
   max_tokens: 8192               # search result budget; serve --max-tokens overrides when > 0
+  watch: false                   # reindex changed files while serving; same as serve --watch
   # trace_file: .onfly/mcp_trace.jsonl   # off by default; appends one JSON line per tool call
 ```
 

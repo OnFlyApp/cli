@@ -131,8 +131,10 @@ Clients: `claude-code` (`.mcp.json`), `cursor` (`.cursor/mcp.json`), `vscode` (`
 | `onfly index --ci` | Embed 128 chunks per request. The default batch is 32. |
 | `onfly watch` | Reindex changed files after `indexer.debounce_ms`. Reloads ignore rules when a `.gitignore` changes. |
 | `onfly serve` | Serve the MCP tools on stdio. |
+| `onfly serve --watch` | Serve and reindex changed files in the same process. Same as `server.watch: true`. |
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. |
+| `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). See [Evaluation](docs/evaluation.md). |
 | `onfly stats` | Print file and chunk counts, with breakdowns by chunk type and workspace. |
 | `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |
