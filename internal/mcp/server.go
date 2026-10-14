@@ -155,7 +155,8 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	}
 	rr, err := embedder.NewReranker(cfg.Reranker)
 	if err != nil {
-		return nil, nil, err
+		logger.Warn("reranker disabled", "err", err)
+		rr = nil
 	}
 	h.searcher = &query.Searcher{Store: store, Emb: emb, Logger: logger, Rerank: rr, Candidates: cfg.Reranker.Candidates}
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {

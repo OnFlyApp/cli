@@ -40,6 +40,9 @@ func Doctor(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := checkEmbedder(ctx, cfg, out); err != nil {
 		failed = true
 	}
+	if err := checkReranker(cfg, out); err != nil {
+		failed = true
+	}
 	if err := checkPlugins(cfg, out); err != nil {
 		failed = true
 	}
@@ -101,6 +104,18 @@ func checkEmbedder(ctx context.Context, cfg config.Config, out io.Writer) error 
 		return err
 	}
 	fmt.Fprintln(out, "embedder: ok")
+	return nil
+}
+
+func checkReranker(cfg config.Config, out io.Writer) error {
+	if cfg.Reranker.Provider == "" {
+		return nil
+	}
+	if _, err := embedder.NewReranker(cfg.Reranker); err != nil {
+		fmt.Fprintf(out, "reranker: %s\n", err)
+		return err
+	}
+	fmt.Fprintln(out, "reranker: ok")
 	return nil
 }
 

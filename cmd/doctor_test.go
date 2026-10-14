@@ -156,3 +156,22 @@ func assertNoSchemaVersion(t *testing.T, path string) {
 		t.Fatalf("schema version = %s", value)
 	}
 }
+
+func TestCheckReranker(t *testing.T) {
+	t.Setenv("VOYAGE_API_KEY", "")
+	var cfg config.Config
+	var buf strings.Builder
+	if err := checkReranker(cfg, &buf); err != nil || buf.Len() != 0 {
+		t.Fatalf("%v %q", err, buf.String())
+	}
+	cfg.Reranker.Provider = "voyage"
+	cfg.Reranker.Model = "rerank-2"
+	if err := checkReranker(cfg, &buf); err == nil || !strings.HasPrefix(buf.String(), "reranker: ") || strings.Contains(buf.String(), "reranker: ok") {
+		t.Fatalf("%v %q", err, buf.String())
+	}
+	buf.Reset()
+	cfg.Reranker.APIKey = "k"
+	if err := checkReranker(cfg, &buf); err != nil || buf.String() != "reranker: ok\n" {
+		t.Fatalf("%v %q", err, buf.String())
+	}
+}

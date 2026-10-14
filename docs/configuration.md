@@ -112,7 +112,7 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 
 ## Reranker
 
-The reranker is off by default. When `reranker.provider` is `voyage`, each search sends the top fused hits to `POST {endpoint}/v1/rerank` (default endpoint `https://api.voyageai.com`) and reorders them. This adds one HTTP call per search. If the call fails, search logs a warning and keeps the fused order.
+The reranker is off by default. When `reranker.provider` is `voyage`, each search sends the top fused hits to `POST {endpoint}/v1/rerank` (default endpoint `https://api.voyageai.com`) and reorders them. This adds one HTTP call per search. If the call fails, search logs a warning and keeps the fused order. If the reranker is misconfigured (for example the API key is missing), the MCP server logs a warning and runs without it; `onfly doctor` prints `reranker: <error>` and fails. `onfly search` still returns the error.
 
 ## Embedders
 

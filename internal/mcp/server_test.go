@@ -1005,3 +1005,16 @@ func TestComponentAlternativesAreCapped(t *testing.T) {
 		t.Fatalf("alts=%d omitted=%d", len(dto.Alternatives), dto.AlternativesOmitted)
 	}
 }
+
+func TestNewServerDegradesWithoutRerankerKey(t *testing.T) {
+	t.Setenv("VOYAGE_API_KEY", "")
+	cfg := config.Config{}
+	cfg.Reranker.Provider = "voyage"
+	cfg.Reranker.Model = "rerank-2"
+	store := seedUsers(t)
+	_, cleanup, err := NewServer(cfg, store, fakeEmbedder{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup()
+}
