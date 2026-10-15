@@ -69,8 +69,10 @@ type hitDTO struct {
 }
 
 type hitList struct {
-	Rules string   `json:"rules,omitempty"`
-	Hits  []hitDTO `json:"hits"`
+	Rules   string    `json:"rules,omitempty"`
+	Hits    []hitDTO  `json:"hits"`
+	Callers []hitDTO  `json:"callers,omitempty"`
+	Tests   []testHit `json:"tests,omitempty"`
 }
 
 type dirList struct {

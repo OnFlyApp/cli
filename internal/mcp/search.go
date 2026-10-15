@@ -91,7 +91,37 @@ func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace strin
 	if out.Hits == nil {
 		out.Hits = []hitDTO{}
 	}
+	if len(fused) > 0 && len(hits) > 0 && !hits[0].Brief {
+		out.Callers, out.Tests = h.related(ctx, fused[0])
+	}
 	return contentWithRules(text, out), out, nil
+}
+
+const (
+	relatedCallers = 5
+	relatedTests   = 5
+)
+
+// related lists, for the best hit, who calls it and which tests mention it, so
+// a question like "what uses this" needs no second call. It is best effort:
+// a missing definition or an unreadable tree just leaves the lists empty.
+func (h *tools) related(ctx context.Context, top parser.Chunk) ([]hitDTO, []testHit) {
+	name := top.Metadata["name"]
+	if name == "" || top.Type == "section" {
+		return nil, nil
+	}
+	var callers []hitDTO
+	if refs, err := h.impact(ctx, impactIn{Name: name, Depth: 1, Receiver: top.Metadata["receiver"], FilePath: top.FilePath}); err == nil {
+		if len(refs) > relatedCallers {
+			refs = refs[:relatedCallers]
+		}
+		callers = shapeHits(refs, "brief")
+	}
+	tests, _, err := findTests(h.root, h.filter, name, "", relatedTests)
+	if err != nil {
+		tests = nil
+	}
+	return callers, tests
 }
 
 func workspaceChoice(req *sdkmcp.CallToolRequest) (string, bool, error) {

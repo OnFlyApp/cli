@@ -2,8 +2,11 @@ package mcp
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/axitdev/onfly/internal/ignore"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	"github.com/axitdev/onfly/internal/vectorstore/storetest"
@@ -162,5 +165,34 @@ func TestGraphReturnsSignaturesUnlessAskedForBodies(t *testing.T) {
 	}
 	if _, _, err := h.graph(ctx, nil, graphIn{Name: "B", Detail: "huge"}); err == nil {
 		t.Fatal("an unknown detail is a tool error")
+	}
+}
+
+func TestRelatedListsCallersAndTests(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	vec := []float32{1, 0, 0, 1}
+	top := parser.Chunk{FilePath: "c.go", Type: "function", Content: "func C() {}", Metadata: map[string]string{"name": "C"}}
+	if err := storetest.Save(ctx, st, []vectorstore.EmbeddedChunk{
+		{Chunk: parser.Chunk{FilePath: "a.go", Type: "function", Content: "func A() { C() }", Metadata: map[string]string{"name": "A"}, Outbound: []string{"C"}}, Vector: vec},
+		{Chunk: top, Vector: vec},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "c_test.go"), []byte("func TestC(t *testing.T) {\n\tC()\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	filter, err := ignore.LoadFilter(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &tools{store: st, root: root, filter: filter}
+	callers, tests := h.related(ctx, top)
+	if len(callers) != 1 || callers[0].Symbol != "A" || !callers[0].Brief {
+		t.Fatalf("callers %+v", callers)
+	}
+	if len(tests) != 1 || tests[0].File != "c_test.go" || tests[0].Line != 2 {
+		t.Fatalf("tests %+v", tests)
 	}
 }
