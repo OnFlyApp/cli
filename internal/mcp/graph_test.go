@@ -139,3 +139,28 @@ func TestReceiverMatchesShortAndQualifiedNames(t *testing.T) {
 		}
 	}
 }
+
+func TestGraphReturnsSignaturesUnlessAskedForBodies(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	vec := []float32{1, 0, 0, 1}
+	body := "func A() {\n\tB()\n\tmore()\n}"
+	if err := storetest.Save(ctx, st, []vectorstore.EmbeddedChunk{
+		{Chunk: parser.Chunk{FilePath: "a.go", Type: "function", Content: body, Metadata: map[string]string{"name": "A"}, Outbound: []string{"B"}}, Vector: vec},
+		{Chunk: parser.Chunk{FilePath: "b.go", Type: "function", Content: "func B() {}", Metadata: map[string]string{"name": "B"}}, Vector: vec},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := &tools{store: st, maxTokens: 8192}
+	_, out, err := h.graph(ctx, nil, graphIn{Name: "B", Direction: "callers"})
+	if err != nil || len(out.Hits) != 1 || !out.Hits[0].Brief || out.Hits[0].Lines != "func A() {" {
+		t.Fatalf("callers default to signatures: %+v %v", out.Hits, err)
+	}
+	_, out, err = h.graph(ctx, nil, graphIn{Name: "B", Direction: "callers", Detail: "full"})
+	if err != nil || len(out.Hits) != 1 || out.Hits[0].Brief || out.Hits[0].Lines != body {
+		t.Fatalf("detail full keeps the body: %+v %v", out.Hits, err)
+	}
+	if _, _, err := h.graph(ctx, nil, graphIn{Name: "B", Detail: "huge"}); err == nil {
+		t.Fatal("an unknown detail is a tool error")
+	}
+}

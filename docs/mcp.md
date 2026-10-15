@@ -134,6 +134,7 @@ Follows calls from a symbol. Returns `{ "hits" }`.
 | `name` | yes | |
 | `direction` | no | `callers`, `callees` or `references`. |
 | `depth` | no | Callers only. |
+| `detail` | no | `brief` (default): each hit's first line (the signature) and `brief: true`; `auto`: code for the top 3; `full`: every body. Use `get_component_ast` for one body. |
 | `receiver` | no | Picks one of several same-name definitions. |
 | `file_path` | no | Same. |
 

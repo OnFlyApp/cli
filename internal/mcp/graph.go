@@ -189,6 +189,7 @@ type graphIn struct {
 	Depth     int    `json:"depth,omitempty" jsonschema:"caller levels, 1 to 4; default 2"`
 	Receiver  string `json:"receiver,omitempty" jsonschema:"receiver or class, for same-name definitions"`
 	FilePath  string `json:"file_path,omitempty" jsonschema:"file of the definition, for same-name definitions"`
+	Detail    string `json:"detail,omitempty" jsonschema:"brief (default): signatures; auto: top 3 with code; full"`
 }
 
 func (h *tools) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, in graphIn) (*sdkmcp.CallToolResult, hitList, error) {
@@ -211,16 +212,24 @@ func (h *tools) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, in graphIn
 	default:
 		err = fmt.Errorf("direction must be callers, callees or references, got %q", in.Direction)
 	}
-	return h.finishGraph(ctx, "graph", in, start, chunks, err)
+	detail := in.Detail
+	switch detail {
+	case "":
+		detail = "brief"
+	case "auto", "full", "brief":
+	default:
+		return nil, hitList{}, fmt.Errorf("detail must be brief, auto or full, got %q", in.Detail)
+	}
+	return h.finishGraph(ctx, "graph", in, start, chunks, err, detail)
 }
 
-func (h *tools) finishGraph(ctx context.Context, tool string, in any, start time.Time, chunks []parser.Chunk, err error) (*sdkmcp.CallToolResult, hitList, error) {
+func (h *tools) finishGraph(ctx context.Context, tool string, in any, start time.Time, chunks []parser.Chunk, err error, detail string) (*sdkmcp.CallToolResult, hitList, error) {
 	if err != nil {
 		h.record(tool, in, start, nil, 0)
 		return nil, hitList{}, err
 	}
 	budget, text := h.fitBudget(chunkQuery(chunks))
-	hits, err := fitHits(chunks, budget, "full")
+	hits, err := fitHits(chunks, budget, detail)
 	h.markStale(ctx, hits)
 	h.record(tool, in, start, hits, len(hits))
 	out := hitList{Rules: text, Hits: hits}
