@@ -72,34 +72,20 @@ type Searcher struct {
 	WordWeight, FieldWeight *float64
 	// RRFK is the reciprocal-rank constant; 0 means the default (20).
 	RRFK int
-	// GroupBy "file" returns one chunk per file; Dedupe drops chunks whose text repeats a higher hit.
-	GroupBy string
-	Dedupe  bool
-	// Expand, when set, asks a chat model for extra keywords and a hypothetical
-	// answer before searching; ExpandWeight scales those lists (0 means 0.5),
-	// ExpandTimeout bounds the call (0 means 3s).
-	Expand        embedder.Chat
-	ExpandWeight  float64
-	ExpandTimeout time.Duration
-	// GraphWeight and UsageWeight scale two extra lists (0 is off): hits that
-	// call or are called by other hits, and chunks an assistant opened after
-	// earlier searches (Usage supplies the counts).
-	GraphWeight, UsageWeight float64
-	Usage                    *usage.Counter
-	// SummaryVector, SummaryKeyword and Alt turn on the lists fed by the
-	// "summary" vector slot, the summary keyword index and the "alt" vector
-	// slot (AltEmb embeds the query for it). The three weights scale them; nil
-	// takes the default and 0 turns the list off.
-	SummaryVector, SummaryKeyword bool
-	AltEmb                        embedder.Embedder
-	SummaryWeight, AltWeight      *float64
-	SummaryWordWeight             *float64
-	SectionWeight                 *float64
+	// UsageWeight scales a list of chunks an assistant opened after earlier
+	// searches (0 is off; Usage supplies the counts).
+	UsageWeight float64
+	Usage       *usage.Counter
+	// SummaryKeyword and Alt turn on the lists fed by the summary keyword
+	// index and the "alt" vector slot (AltEmb embeds the query for it). The
+	// weights scale them; nil takes the default and 0 turns the list off.
+	SummaryKeyword    bool
+	AltEmb            embedder.Embedder
+	AltWeight         *float64
+	SummaryWordWeight *float64
+	SectionWeight     *float64
 	// Root is the project root, used for git-based recency and changed-since filters.
 	Root string
-
-	expandOnce  sync.Once
-	expandCache *expandCache
 
 	recentMu   sync.Mutex
 	recentAt   time.Time
@@ -116,8 +102,6 @@ type Request struct {
 	Type string
 	// Path keeps files matching a doublestar glob, relative to the project root.
 	Path string
-	// GroupBy overrides the searcher's grouping: "file" or "chunk"; empty keeps the default.
-	GroupBy string
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -285,12 +269,7 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, err
 	}
-	chat, err := embedder.NewChat(cfg.Search.Expand)
-	if err != nil {
-		store.Close()
-		return nil, nil, fmt.Errorf("search.expand: %w", err)
-	}
-	s, err := NewSearcher(cfg, store, emb, rr, chat, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	s, err := NewSearcher(cfg, store, emb, rr, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if err != nil {
 		store.Close()
 		return nil, nil, err
@@ -300,24 +279,20 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 
 // NewSearcher wires a Searcher from the project config; the command line and
 // the MCP server both build theirs here so every search setting applies to both.
-func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, chat embedder.Chat, logger *slog.Logger) (*Searcher, error) {
+func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, logger *slog.Logger) (*Searcher, error) {
 	s := &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
 		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
 		WordWeight: cfg.Search.WordWeight, FieldWeight: cfg.Search.FieldWeight, RRFK: cfg.Search.RRFK,
-		GroupBy: cfg.Search.GroupBy, Dedupe: cfg.Search.Dedupe,
-		GraphWeight: cfg.Search.GraphWeight, UsageWeight: cfg.Search.UsageWeight,
-		Expand: chat, ExpandTimeout: cfg.Search.Expand.Timeout(),
-		Root:   cfg.ProjectRoot,
-		Logger: logger}
+		UsageWeight: cfg.Search.UsageWeight,
+		Root:        cfg.ProjectRoot,
+		Logger:      logger}
 	if cfg.Server.UsageFile != "" && cfg.Search.UsageWeight > 0 {
 		s.Usage = &usage.Counter{Path: cfg.Server.UsageFile}
 	}
-	slots := cfg.ExtraSlots()
-	_, s.SummaryVector = slots["summary"]
 	s.SummaryKeyword = cfg.Indexer.Summaries.Provider != ""
-	s.SummaryWeight, s.AltWeight, s.SummaryWordWeight = cfg.Search.SummaryWeight, cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
+	s.AltWeight, s.SummaryWordWeight = cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
 	s.SectionWeight = cfg.Search.SectionWeight
 	if cfg.Embedder.Alt != nil {
 		alt, err := embedder.New(*cfg.Embedder.Alt)

@@ -16,8 +16,7 @@ import (
 // generated), fitted on half and checked on the other half: MRR 0.605 -> 0.678
 // on the held-out half against the old semantic=1 keyword=1 field=off rrf_k=60.
 const (
-	slotSummary = "summary"
-	slotAlt     = "alt"
+	slotAlt = "alt"
 )
 
 const (
@@ -25,22 +24,17 @@ const (
 	defaultKeywordWeight  = 0.5
 	defaultFieldWeight    = 0.5
 	defaultRRFK           = 20
-	defaultExpandWeight   = 0.5
-	defaultSummaryWeight  = 1.0
 	defaultAltWeight      = 1.0
 	// defaultSummaryWordWeight is absolute (the per-word list is relative to the keyword weight).
 	defaultSummaryWordWeight = 0.125
-	// secondChunkBonus is how much a file's second-best chunk adds to its score when grouping.
-	secondChunkBonus = 0.1
 )
 
 // Params are the numbers that turn gathered candidate lists into one ranking.
 // Tuning varies them without touching the store or the embedder again.
 type Params struct {
-	Semantic, Keyword, Word, Field, Recency, Expand, Graph float64
-	// Summary, Alt and SummaryWord weigh the summary-vector, second-embedder
-	// and summary-keyword lists.
-	Summary, Alt, SummaryWord float64
+	Semantic, Keyword, Word, Field, Recency float64
+	// Alt and SummaryWord weigh the second-embedder and summary-keyword lists.
+	Alt, SummaryWord float64
 	// Section multiplies the score of documentation sections (1 is neutral).
 	Section float64
 	RRFK    int
@@ -54,9 +48,6 @@ func (s *Searcher) Params() Params {
 		Word:        defaultWordWeight,
 		Field:       defaultFieldWeight,
 		Recency:     s.RecencyWeight,
-		Expand:      defaultExpandWeight,
-		Graph:       s.GraphWeight,
-		Summary:     defaultSummaryWeight,
 		Alt:         defaultAltWeight,
 		SummaryWord: defaultSummaryWordWeight,
 		Section:     1,
@@ -68,14 +59,8 @@ func (s *Searcher) Params() Params {
 	if s.FieldWeight != nil {
 		p.Field = *s.FieldWeight
 	}
-	if s.ExpandWeight > 0 {
-		p.Expand = s.ExpandWeight
-	}
 	if s.SectionWeight != nil {
 		p.Section = *s.SectionWeight
-	}
-	if s.SummaryWeight != nil {
-		p.Summary = *s.SummaryWeight
 	}
 	if s.AltWeight != nil {
 		p.Alt = *s.AltWeight
@@ -97,18 +82,14 @@ type Gathered struct {
 	Semantic []parser.Chunk
 	Keyword  []parser.Chunk
 	Words    []parser.Chunk
-	// ExpandSemantic and ExpandWords come from query expansion; both are empty when it is off.
-	ExpandSemantic []parser.Chunk
-	ExpandWords    []parser.Chunk
-	Recent         []parser.Chunk
-	// SummaryVec, Alt and SummaryWords come from the summary slot, the second
-	// embedder and the summary keyword index; empty when those are not in use.
-	SummaryVec, Alt, SummaryWords []parser.Chunk
-	req                           Request
+	Recent   []parser.Chunk
+	// Alt and SummaryWords come from the second embedder and the summary
+	// keyword index; empty when those are not in use.
+	Alt, SummaryWords []parser.Chunk
+	req               Request
 }
 
-// Run embeds the query, merges semantic, keyword, name and expansion lists,
-// optionally groups by file, and reranks. When the embedder fails it answers
+// Run embeds the query, merges semantic, keyword and name lists and reranks. When the embedder fails it answers
 // from keyword results alone.
 func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 	g, err := s.Gather(ctx, r)
@@ -128,9 +109,6 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	pool := CandidatePool(r.Limit)
 	if r.Path != "" && !doublestar.ValidatePattern(r.Path) {
 		return nil, fmt.Errorf("invalid path pattern %q", r.Path)
-	}
-	if r.GroupBy != "" && r.GroupBy != "file" && r.GroupBy != "chunk" {
-		return nil, fmt.Errorf("group_by must be file or chunk, got %q", r.GroupBy)
 	}
 	if r.ChangedSince != "" {
 		if s.Root == "" {
@@ -168,10 +146,6 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	}
 	g := &Gathered{Query: r.Query, Terms: queryWords(r.Query), req: r}
 
-	var exp *expansion
-	if s.Expand != nil {
-		exp = s.expand(ctx, r.Query)
-	}
 	vec, embedErr := s.Emb.Embed(ctx, r.Query)
 	if embedErr == nil {
 		var err error
@@ -196,13 +170,6 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	if len(g.Terms) >= 2 { // a single word is already the whole-query keyword search
 		g.Words = s.wordMatches(ctx, g.Terms, pool, r.Workspace)
 	}
-	if embedErr == nil && s.SummaryVector {
-		if got, err := s.Store.SearchExtra(ctx, slotSummary, vec, pool, r.Workspace); err != nil {
-			s.logger().Warn("summary vectors", "err", err)
-		} else {
-			g.SummaryVec = got
-		}
-	}
 	if s.AltEmb != nil {
 		if av, err := s.AltEmb.Embed(ctx, r.Query); err != nil {
 			s.logger().Warn("alt embedder", "err", err)
@@ -215,13 +182,9 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	if s.SummaryKeyword && len(g.Terms) > 0 {
 		g.SummaryWords = s.wordMatchesWith(ctx, g.Terms, pool, r.Workspace, s.Store.SearchSummary)
 	}
-	if exp != nil {
-		g.ExpandSemantic, g.ExpandWords = s.expandLists(ctx, exp, pool, r.Workspace)
-	}
 	if filtered {
 		g.Semantic, g.Keyword, g.Words = filterChunks(g.Semantic, keep), filterChunks(g.Keyword, keep), filterChunks(g.Words, keep)
-		g.ExpandSemantic, g.ExpandWords = filterChunks(g.ExpandSemantic, keep), filterChunks(g.ExpandWords, keep)
-		g.SummaryVec, g.Alt, g.SummaryWords = filterChunks(g.SummaryVec, keep), filterChunks(g.Alt, keep), filterChunks(g.SummaryWords, keep)
+		g.Alt, g.SummaryWords = filterChunks(g.Alt, keep), filterChunks(g.SummaryWords, keep)
 	}
 	if s.RecencyWeight > 0 {
 		g.Recent = s.recentCandidates(ctx, g.Semantic, g.Keyword)
@@ -233,9 +196,6 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	lists := [][]parser.Chunk{g.Semantic, g.Keyword, g.Words}
 	weights := []float64{p.Semantic, p.Keyword, p.Word * p.Keyword}
-	if len(g.SummaryVec) > 0 && p.Summary > 0 {
-		lists, weights = append(lists, g.SummaryVec), append(weights, p.Summary)
-	}
 	if len(g.Alt) > 0 && p.Alt > 0 {
 		lists, weights = append(lists, g.Alt), append(weights, p.Alt)
 	}
@@ -243,41 +203,20 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 		lists, weights = append(lists, g.SummaryWords), append(weights, p.SummaryWord)
 	}
 	if p.Field > 0 {
-		cands := union(g.Semantic, g.Keyword, g.Words, g.ExpandSemantic, g.ExpandWords, g.SummaryVec, g.Alt, g.SummaryWords)
+		cands := union(g.Semantic, g.Keyword, g.Words, g.Alt, g.SummaryWords)
 		if f := fieldMatches(g.Terms, cands); len(f) > 0 {
 			lists, weights = append(lists, f), append(weights, p.Field*p.Keyword)
 		}
-	}
-	if len(g.ExpandSemantic) > 0 {
-		lists, weights = append(lists, g.ExpandSemantic), append(weights, p.Expand)
 	}
 	if s.UsageWeight > 0 && s.Usage != nil {
 		if u := usedChunks(s.Usage.Counts(), union(g.Semantic, g.Keyword, g.Words)); len(u) > 0 {
 			lists, weights = append(lists, u), append(weights, s.UsageWeight)
 		}
 	}
-	if len(g.ExpandWords) > 0 {
-		lists, weights = append(lists, g.ExpandWords), append(weights, p.Expand*p.Word)
-	}
 	if len(g.Recent) > 0 && p.Recency > 0 {
 		lists, weights = append(lists, g.Recent), append(weights, p.Recency)
 	}
 	ranked := fuseScored(p.RRFK, weights, lists...)
-	if p.Graph > 0 {
-		// Second pass: hits that call or are called by other top hits gain a list.
-		head := chunksOf(ranked)
-		if len(head) > graphPool {
-			head = head[:graphPool]
-		}
-		if gl := graphLinked(head); len(gl) > 0 {
-			lists, weights = append(lists, gl), append(weights, p.Graph)
-			ranked = fuseScored(p.RRFK, weights, lists...)
-		}
-	}
-	group := s.GroupBy
-	if g.req.GroupBy != "" {
-		group = g.req.GroupBy
-	}
 	if p.Section != 1 && p.Section > 0 {
 		for i := range ranked {
 			if ranked[i].chunk.Type == "section" {
@@ -285,12 +224,6 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 			}
 		}
 		sortScored(ranked)
-	}
-	if s.Dedupe {
-		ranked = dedupe(ranked)
-	}
-	if group == "file" {
-		ranked = groupByFile(ranked)
 	}
 	return chunksOf(ranked)
 }
@@ -306,92 +239,6 @@ func union(lists ...[]parser.Chunk) []parser.Chunk {
 				out = append(out, c)
 			}
 		}
-	}
-	return out
-}
-
-// dedupe drops a chunk whose type, name and text repeat a higher-ranked one.
-func dedupe(in []scored) []scored {
-	seen := map[string]bool{}
-	out := in[:0:0]
-	for _, x := range in {
-		k := x.chunk.Type + "\x00" + x.chunk.Metadata["name"] + "\x00" + x.chunk.Content
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		out = append(out, x)
-	}
-	return out
-}
-
-// groupByFile keeps the best chunk of each file and orders files by that
-// chunk's score plus a small bonus for the file's second-best chunk.
-func groupByFile(in []scored) []scored {
-	type fileAcc struct {
-		best   scored
-		second float64
-	}
-	by := map[string]*fileAcc{}
-	var order []string
-	for _, x := range in {
-		f := by[x.chunk.FilePath]
-		if f == nil {
-			by[x.chunk.FilePath] = &fileAcc{best: x}
-			order = append(order, x.chunk.FilePath)
-			continue
-		}
-		if f.second == 0 {
-			f.second = x.score
-		}
-	}
-	out := make([]scored, 0, len(order))
-	for _, p := range order {
-		f := by[p]
-		out = append(out, scored{chunk: f.best.chunk, score: f.best.score + secondChunkBonus*f.second})
-	}
-	// order is already by best score; the bonus can only reorder close files
-	sortScored(out)
-	return out
-}
-
-// graphPool is how many top hits are checked for call links to each other.
-const graphPool = 20
-
-// graphLinked returns the chunks of head that are linked to another chunk of
-// head by a call (either direction), most links first. A function the user's
-// question is really about tends to sit beside its caller or callee.
-func graphLinked(head []parser.Chunk) []parser.Chunk {
-	names := map[string][]int{}
-	for i, c := range head {
-		if n := c.Metadata["name"]; n != "" {
-			names[n] = append(names[n], i)
-		}
-	}
-	links := make([]int, len(head))
-	for i, c := range head {
-		seen := map[int]bool{}
-		for _, callee := range c.Outbound {
-			for _, j := range names[callee] {
-				if j != i && !seen[j] {
-					seen[j] = true
-					links[i]++
-					links[j]++
-				}
-			}
-		}
-	}
-	type item struct{ idx, n int }
-	var items []item
-	for i, n := range links {
-		if n > 0 {
-			items = append(items, item{i, n})
-		}
-	}
-	sort.SliceStable(items, func(a, b int) bool { return items[a].n > items[b].n })
-	out := make([]parser.Chunk, len(items))
-	for i, it := range items {
-		out[i] = head[it.idx]
 	}
 	return out
 }

@@ -133,7 +133,7 @@ func TestEmbedTextIncludesSummary(t *testing.T) {
 	}
 }
 
-func TestFileChunkAndNeighbours(t *testing.T) {
+func TestFileChunk(t *testing.T) {
 	chunks := []parser.Chunk{
 		{Metadata: map[string]string{"name": "A"}}, {Metadata: map[string]string{"name": "B"}},
 		{Metadata: map[string]string{"name": "C"}}, {Metadata: map[string]string{}},
@@ -145,44 +145,16 @@ func TestFileChunkAndNeighbours(t *testing.T) {
 	if _, ok := fileChunk("x.go", []parser.Chunk{{Metadata: map[string]string{}}}); ok {
 		t.Fatal("a file with no names gets no file chunk")
 	}
-	addNeighbours(chunks)
-	if chunks[1].Metadata["neighbours"] != "A, C" || chunks[3].Metadata["neighbours"] != "" {
-		t.Fatalf("%v", chunks[1].Metadata)
-	}
-	if got := embedText(chunks[1], false); got != "also defined here: A, C\n\n" {
-		t.Fatalf("%q", got)
-	}
 	if !summarizable(parser.Chunk{Type: "file", Content: fc.Content + " padding padding padding padding"}) {
 		t.Fatal("file chunks are summarised")
 	}
 }
 
-func TestParseBatch(t *testing.T) {
-	if got := parseBatch("```json\n{\"summaries\": [\"one\", \"two\"]}\n```", 2); len(got) != 2 || got[1] != "two" {
-		t.Fatalf("%v", got)
-	}
-	for _, bad := range []string{`{"summaries": ["one"]}`, `{"summaries": ["one", " "]}`, "text"} {
-		if parseBatch(bad, 2) != nil {
-			t.Errorf("%q must not parse", bad)
-		}
-	}
-}
-
-func TestBatchedSummariesAndFileChunk(t *testing.T) {
+func TestSummariesAndFileChunk(t *testing.T) {
 	var calls atomic.Int32
 	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		var in struct {
-			Messages []struct {
-				Content string `json:"content"`
-			} `json:"messages"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&in)
-		reply := "A single sentence."
-		if strings.Contains(in.Messages[0].Content, "numbered") {
-			reply = `{"summaries": ["First does a thing.", "Second does another.", "The file does it all."]}`
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": reply}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": map[string]string{"content": "A single sentence."}})
 	}))
 	defer chat.Close()
 	srv := fakeOllama(t)
@@ -200,8 +172,7 @@ func TestBatchedSummariesAndFileChunk(t *testing.T) {
 	}
 	cfg := mustLoad(t, dir)
 	cfg.Indexer.Summaries.Provider, cfg.Indexer.Summaries.Endpoint, cfg.Indexer.Summaries.Model = "ollama", chat.URL, "m"
-	cfg.Indexer.Summaries.Batch, cfg.Indexer.Summaries.Files = 4, true
-	cfg.Indexer.EmbedNeighbours = true
+	cfg.Indexer.Summaries.Files = true
 	if _, err := Run(context.Background(), cfg, nil, Options{}); err != nil {
 		t.Fatal(err)
 	}
@@ -218,16 +189,8 @@ func TestBatchedSummariesAndFileChunk(t *testing.T) {
 	for _, c := range got {
 		sums[c.Chunk.Type+":"+c.Chunk.Metadata["name"]] = c.Chunk.Metadata["summary"]
 	}
-	if sums["function:First"] != "First does a thing." || sums["function:Second"] != "Second does another." {
-		t.Fatalf("one batched call must fill all: %v", sums)
-	}
-	if calls.Load() != 1 || sums["file:"] != "The file does it all." {
-		t.Fatalf("all three chunks in one batched call, got %d calls, summaries %v", calls.Load(), sums)
-	}
-	for _, c := range got {
-		if c.Chunk.Metadata["name"] == "First" && c.Chunk.Metadata["neighbours"] != "Second" {
-			t.Fatalf("neighbours: %v", c.Chunk.Metadata)
-		}
+	if calls.Load() != 3 || sums["function:First"] == "" || sums["function:Second"] == "" || sums["file:"] == "" {
+		t.Fatalf("one call per chunk, got %d calls, summaries %v", calls.Load(), sums)
 	}
 }
 
@@ -259,20 +222,6 @@ func TestSummaryCacheSurvivesDeletingTheDatabase(t *testing.T) {
 	}
 }
 
-func TestParseGeneratedQuestions(t *testing.T) {
-	g := parseGenerated("```json\n{\"summary\": \"Retries a request.\", \"questions\": [\"how to retry\", \"  \", \"wait and try again\", \"third\"]}\n```", 2)
-	if g.Summary != "Retries a request." || len(g.Questions) != 2 || g.Questions[1] != "wait and try again" {
-		t.Fatalf("%+v", g)
-	}
-	if g := parseGenerated("Just a sentence.\nmore", 2); g.Summary != "Just a sentence." || len(g.Questions) != 0 {
-		t.Fatalf("a model that ignores the format still gives a summary: %+v", g)
-	}
-	c := parser.Chunk{Content: "x", Metadata: map[string]string{"questions": "a | b"}}
-	if got := embedText(c, false); got != "questions: a | b\n\nx" {
-		t.Fatalf("%q", got)
-	}
-}
-
 func TestContextForUsesOnlyTheFile(t *testing.T) {
 	mk := func(name string, calls ...string) parser.Chunk {
 		return parser.Chunk{Metadata: map[string]string{"name": name}, Outbound: calls}
@@ -293,10 +242,10 @@ func TestContextForUsesOnlyTheFile(t *testing.T) {
 	}
 	c := chunks[1]
 	c.Content = "func Gather() {}"
-	if summaryKey("m", 0, c, "") == summaryKey("m", 0, c, "Calls (same file): x\n") {
+	if summaryKey("m", c, "") == summaryKey("m", c, "Calls (same file): x\n") {
 		t.Fatal("the context must be part of the cache key")
 	}
-	if p := summaryPrompt(c, 0, "Calls (same file): x\n"); !strings.Contains(p, "Calls (same file): x") {
+	if p := summaryPrompt(c, "Calls (same file): x\n"); !strings.Contains(p, "Calls (same file): x") {
 		t.Fatalf("%q", p)
 	}
 }

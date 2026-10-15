@@ -47,7 +47,7 @@ Global rules are in the server instructions, so the model sees them before it ca
 
 When `server.trace_file` is set, each tool call appends one JSON object to it (off by default): `ts`, `tool`, `args`, `duration_ms`, `tokens`, `chunks`. The line stores arguments, not file bodies.
 
-When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `get_references`, `get_callees`, `get_impact`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#call-graph-and-usage-lists).
+When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `get_references`, `get_callees`, `get_impact`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
 
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
@@ -66,7 +66,6 @@ Finds code by what it does. Embeds `query` once and fuses semantic, keyword, per
 | `workspace` | no | Empty uses the config value. `*` searches every workspace. Any other value matches that workspace. |
 | `type` | no | Keep one chunk type, case-insensitive: `function`, `method`, `struct`, `section` (Markdown), and so on. Use `section` to search docs only, or any code type to leave docs out. |
 | `path` | no | Keep files matching a glob relative to the project root, such as `internal/**` or `docs/**`. An invalid glob is a tool error. |
-| `group_by` | no | `file` returns the best chunk of each file, `chunk` every chunk. Empty uses `search.group_by` (default `chunk`). |
 | `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. `type`, `path` and `changed_since` filter the top 50 candidates of each list, so a narrow filter can return fewer than `limit` hits. A ref starting with `-` is rejected. |
 
 If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights and the recency list come from `search` in [configuration.md](configuration.md#search-fusion).

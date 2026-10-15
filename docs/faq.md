@@ -20,7 +20,7 @@ They can be. Ollama's default window is 4096 tokens and longer input is cut sile
 
 ### The right file is found but ranked 2nd to 4th. How do I sharpen it?
 
-In order of effort: (1) keep the defaults, which weigh the semantic list above the keyword list and add a symbol-name list; (2) run `onfly eval tune` on your own cases and adopt its numbers if the check half improves; (3) set `search.group_by: file` if you mostly ask about files; (4) turn on [chunk summaries](configuration.md#chunk-summaries) for questions that use none of the code's words. Query expansion and a reranker trade latency for recall; measure them with `onfly eval` first.
+In order of effort: (1) keep the defaults, which weigh the semantic list above the keyword list and add a symbol-name list; (2) run `onfly eval tune` on your own cases and adopt its numbers if the check half improves; (3) turn on [chunk summaries](configuration.md#chunk-summaries) for questions that use none of the code's words. A reranker trades latency for recall; measure it with `onfly eval` first.
 
 ### Should I add a reranker on top of summaries?
 
@@ -28,7 +28,7 @@ Measure it. With a local chat model (`reranker.provider: ollama`) it raised reca
 
 ### Can I use vLLM, mlx_lm.server or LM Studio instead of Ollama?
 
-Yes, for every model role. Set `provider: openai` with the server's `endpoint` for embeddings, for `indexer.summaries` and for `search.expand`; use `reranker.provider: openai-score` or a rerank endpoint for reranking. See [Other inference engines](configuration.md#other-inference-engines). Raise `indexer.summaries.concurrency` for servers that batch requests.
+Yes, for every model role. Set `provider: openai` with the server's `endpoint` for embeddings, and for `indexer.summaries`; use `reranker.provider: openai-score` or a rerank endpoint for reranking. See [Other inference engines](configuration.md#other-inference-engines). Raise `indexer.summaries.concurrency` for servers that batch requests.
 
 ### Which embedding model should I use?
 

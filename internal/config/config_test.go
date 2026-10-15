@@ -410,9 +410,6 @@ search:
   word_weight: 0
   field_weight: 2
   rrf_k: 20
-  group_by: file
-  dedupe: true
-  expand: {provider: ollama, model: m, timeout_ms: 2000}
 `)
 	cfg, err := Load(dir, "")
 	if err != nil {
@@ -420,15 +417,13 @@ search:
 	}
 	s := cfg.Search
 	if s.WordWeight == nil || *s.WordWeight != 0 || s.FieldWeight == nil || *s.FieldWeight != 2 ||
-		s.RRFK != 20 || s.GroupBy != "file" || !s.Dedupe || s.Expand.Model != "m" || s.Expand.Timeout().Milliseconds() != 2000 ||
+		s.RRFK != 20 ||
 		cfg.Indexer.Summaries.Provider != "ollama" {
 		t.Fatalf("%+v %+v", s, cfg.Indexer.Summaries)
 	}
 	for name, extra := range map[string]string{
-		"group_by":       "search:\n  group_by: bogus\n",
-		"negative field": "search:\n  field_weight: -1\n",
-		"expand model":   "search:\n  expand: {provider: ollama}\n",
-		"expand vendor":  "search:\n  expand: {provider: bogus, model: m}\n",
+		"negative field":   "search:\n  field_weight: -1\n",
+		"summaries vendor": "indexer:\n  summaries: {provider: bogus, model: m}\n",
 	} {
 		d := t.TempDir()
 		writeConfig(t, d, validYAML()+extra)

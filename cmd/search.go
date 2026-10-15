@@ -19,7 +19,6 @@ var (
 	searchChanged   string
 	searchType      string
 	searchPath      string
-	searchGroupBy   string
 )
 
 var searchCmd = &cobra.Command{
@@ -38,7 +37,7 @@ var searchCmd = &cobra.Command{
 		defer closeStore()
 		chunks, err := s.Run(cmd.Context(), query.Request{
 			Query: strings.Join(args, " "), Limit: searchLimit,
-			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged, Type: searchType, Path: searchPath, GroupBy: searchGroupBy,
+			Workspace: query.Scope(cfg.Workspace, searchWorkspace), ChangedSince: searchChanged, Type: searchType, Path: searchPath,
 		})
 		if err != nil {
 			return err
@@ -56,7 +55,6 @@ func init() {
 	searchCmd.Flags().StringVar(&searchChanged, "changed-since", "", "git ref; keep only files that differ from it")
 	searchCmd.Flags().StringVar(&searchType, "type", "", "keep one chunk type: function, method, struct, section (docs), ...")
 	searchCmd.Flags().StringVar(&searchPath, "path", "", "keep files matching a glob, for example 'internal/**'")
-	searchCmd.Flags().StringVar(&searchGroupBy, "group-by", "", "file: one result per file; chunk: every chunk (default: search.group_by)")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "print JSON with chunk content")
 }
 

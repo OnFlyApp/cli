@@ -53,7 +53,7 @@ Compare `recall` and `mrr`, then look at the per-case `rank` for what moved.
 
 ## Real questions
 
-Generated cases are written from the code, so they favour retrieval. Real questions are better. Set `server.usage_file` (see [configuration](configuration.md#call-graph-and-usage-lists)), work with your assistant for a while, then:
+Generated cases are written from the code, so they favour retrieval. Real questions are better. Set `server.usage_file` (see [configuration](configuration.md#usage-list)), work with your assistant for a while, then:
 
 ```
 onfly eval mine [--usage FILE] [--out .onfly/eval-mined.yaml]
@@ -116,8 +116,8 @@ Same 573 cases, embeddinggemma-2 with `qwen2.5-coder:7b` summaries, fresh index 
 | Second embedder (qwen3-embedding:0.6b) | 0.716 | 0.928 | 0.972 | 0.809 | 0.737 |
 | Prompts + second embedder | **0.726** | **0.941** | 0.974 | **0.816** | 0.767 |
 | Prompts + second embedder with a Qwen instruct prefix | 0.714 | 0.939 | 0.974 | 0.811 | 0.759 |
-| Summary vector (`summary_vector`) | 0.702 | 0.908 | 0.955 | 0.789 | 0.717 |
-| Three questions per chunk (`questions: 3`) | 0.686 | 0.921 | 0.967 | 0.788 | 0.644 |
+| Summary vector (removed) | 0.702 | 0.908 | 0.955 | 0.789 | 0.717 |
+| Three questions per chunk (removed) | 0.686 | 0.921 | 0.967 | 0.788 | 0.644 |
 
 The `ollama-score` reranker (Qwen3-Reranker-4B, 20 candidates) was measured on the 45 hand-written cases only, because it took 18 s per search: MRR 0.768 against 0.767 without it, R@3 0.89 against 0.82, R@1 0.62 against 0.67. It reorders the top three but does not improve the first hit, and costs more than the rest of the pipeline put together, so it stays off.
 
@@ -139,3 +139,7 @@ Six models, summaries off, search defaults, same cases (index time from scratch)
 | mxbai-embed-large | 1024 | 34 s | 0.251 | 0.475 | 0.546 | 0.345 | 0.332 |
 
 The model matters more than anything else in the pipeline short of summaries. Run your own comparison with a config per model and `onfly eval`.
+
+## Removed options
+
+These were options in earlier builds. Each was measured above and none improved on the final configuration, so the code was deleted: `search.expand` (query expansion: +0.016 MRR for 3 s per new query), `search.group_by` and `search.dedupe` (no gain or a loss at symbol level), `search.graph_weight` (helped hand-written cases, hurt generated ones; `eval tune` never picked it), `indexer.summaries.batch` (28% faster, -0.03 MRR), `indexer.summaries.questions` and `indexer.summary_vector` (-0.009 MRR, 43 minutes of model time) and `indexer.embed_neighbours` (+0.010 MRR only with batching, nothing without). The tables above keep their rows for the record.

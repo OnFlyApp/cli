@@ -9,23 +9,7 @@ import (
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
-const (
-	slotSummary = "summary"
-	slotAlt     = "alt"
-)
-
-// summaryVectorText is what the summary slot embeds: the summary and the
-// questions, with no code. A chunk without either has no summary vector.
-func summaryVectorText(c vectorstore.EmbeddedChunk) string {
-	sum, q := c.Chunk.Metadata["summary"], c.Chunk.Metadata["questions"]
-	switch {
-	case sum != "" && q != "":
-		return sum + "\n" + strings.ReplaceAll(q, " | ", "\n")
-	case sum != "":
-		return sum
-	}
-	return strings.ReplaceAll(q, " | ", "\n")
-}
+const slotAlt = "alt"
 
 // addExtraVectors fills the optional vector slots of one file's chunks. A
 // slot vector is reused when the chunk's primary vector was reused (same text,
@@ -34,10 +18,6 @@ func summaryVectorText(c vectorstore.EmbeddedChunk) string {
 func (s *Session) addExtraVectors(ctx context.Context, rel string, chunks []vectorstore.EmbeddedChunk, prev map[string][]float32) error {
 	slots := map[string]func(vectorstore.EmbeddedChunk) string{}
 	embs := map[string]embedder.Embedder{}
-	if s.cfg.Indexer.SummaryVector && s.chat != nil {
-		slots[slotSummary] = summaryVectorText
-		embs[slotSummary] = s.emb
-	}
 	if s.alt != nil {
 		with := s.cfg.Indexer.EmbedContext
 		slots[slotAlt] = func(c vectorstore.EmbeddedChunk) string { return embedText(c.Chunk, with) }
@@ -51,9 +31,6 @@ func (s *Session) addExtraVectors(ctx context.Context, rel string, chunks []vect
 			old = nil
 		}
 		want := s.cfg.ExtraSlots()[slot]
-		if slot == slotSummary {
-			want = dims
-		}
 		var todo []int
 		var texts []string
 		for i := range chunks {

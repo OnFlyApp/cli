@@ -2,8 +2,6 @@ package index
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,23 +28,19 @@ func summarizable(c parser.Chunk) bool {
 
 // generated is what the model wrote for one chunk.
 type generated struct {
-	Summary   string
-	Questions []string
+	Summary string
 }
 
-func (g generated) empty() bool { return g.Summary == "" && len(g.Questions) == 0 }
+func (g generated) empty() bool { return g.Summary == "" }
 
 // apply stores g on the chunk's metadata.
 func (g generated) apply(c *parser.Chunk) {
 	if g.Summary != "" {
 		c.Metadata["summary"] = g.Summary
 	}
-	if len(g.Questions) > 0 {
-		c.Metadata["questions"] = strings.Join(g.Questions, " | ")
-	}
 }
 
-// addSummaries sets Metadata["summary"] (and ["questions"]) on the chunks of
+// addSummaries sets Metadata["summary"] on the chunks of
 // one file. A chunk is answered, in order, from what the file already stored,
 // from the summary cache, and only then from the model, so a reindex or an
 // embedder change calls the model only for chunks it has never seen. It
@@ -54,18 +48,13 @@ func (g generated) apply(c *parser.Chunk) {
 // embedded again. A model failure stops summarising this file and leaves the
 // rest as they are: indexing never fails because the summary model is down.
 func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.Chunk, prev map[string][]float32) map[string][]float32 {
-	wantQ := s.cfg.Indexer.Summaries.Questions
 	stored := map[string]generated{}
 	if old, err := s.store.ChunksByFiles(ctx, []string{rel}); err != nil {
 		s.logger.Warn("summaries: stored chunks", "path", rel, "err", err)
 	} else {
 		for _, o := range old {
-			g := generated{Summary: o.Chunk.Metadata["summary"]}
-			if q := o.Chunk.Metadata["questions"]; q != "" {
-				g.Questions = strings.Split(q, " | ")
-			}
-			if g.Summary != "" && (wantQ == 0 || len(g.Questions) > 0) {
-				stored[o.Chunk.Content] = g
+			if sum := o.Chunk.Metadata["summary"]; sum != "" {
+				stored[o.Chunk.Content] = generated{Summary: sum}
 			}
 		}
 	}
@@ -84,7 +73,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		}
 		return ctxOf(i)
 	}
-	key := func(i int) string { return summaryKey(model, wantQ, chunks[i], ctxAt(i)) }
+	key := func(i int) string { return summaryKey(model, chunks[i], ctxAt(i)) }
 	var todo []int
 	for i := range chunks {
 		c := &chunks[i]
@@ -102,10 +91,6 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 			continue
 		}
 		todo = append(todo, i)
-	}
-	batch := max(s.cfg.Indexer.Summaries.Batch, 1)
-	if wantQ > 0 {
-		batch = 1 // questions need the model's full attention on one chunk
 	}
 	var failed atomic.Bool
 	ask := func(prompt string) (string, bool) {
@@ -125,56 +110,29 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		i int
 		g generated
 	}
-	// job asks the model about one group of chunks and returns what it wrote.
-	job := func(group []int) []answer {
+	// job asks the model about one chunk and returns what it wrote.
+	job := func(i int) []answer {
 		if failed.Load() {
 			return nil
 		}
-		var res []answer
-		if len(group) > 1 {
-			parts := make([]parser.Chunk, len(group))
-			for j, i := range group {
-				parts[j] = chunks[i]
-			}
-			out, ok := ask(batchPrompt(parts))
-			if !ok {
-				return nil
-			}
-			if got := parseBatch(out, len(group)); got != nil {
-				for j, i := range group {
-					res = append(res, answer{i, generated{Summary: cleanSummary(got[j])}})
-				}
-				return res
-			}
-			// The model did not return one sentence per chunk: ask one by one.
+		if out, ok := ask(summaryPrompt(chunks[i], ctxAt(i))); ok {
+			return []answer{{i, generated{Summary: cleanSummary(out)}}}
 		}
-		for _, i := range group {
-			if failed.Load() {
-				break
-			}
-			if out, ok := ask(summaryPrompt(chunks[i], wantQ, ctxAt(i))); ok {
-				res = append(res, answer{i, parseGenerated(out, wantQ)})
-			}
-		}
-		return res
-	}
-	var groups [][]int
-	for start := 0; start < len(todo); start += batch {
-		groups = append(groups, todo[start:min(start+batch, len(todo))])
+		return nil
 	}
 	workers := max(s.cfg.Indexer.Summaries.Concurrency, 1)
 	results := make(chan []answer)
 	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 	go func() {
-		for _, g := range groups {
+		for _, i := range todo {
 			sem <- struct{}{}
 			wg.Add(1)
-			go func(g []int) {
+			go func(i int) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				results <- job(g)
-			}(g)
+				results <- job(i)
+			}(i)
 		}
 		wg.Wait()
 		close(results)
@@ -193,35 +151,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 	return prev
 }
 
-// parseGenerated reads one answer: JSON with "summary" and "questions" when
-// questions were asked for, otherwise (or when the model ignored the format)
-// the first line of the text is the summary.
-func parseGenerated(out string, wantQ int) generated {
-	if wantQ > 0 {
-		text := out
-		if i := strings.Index(text, "{"); i >= 0 {
-			if j := strings.LastIndex(text, "}"); j > i {
-				text = text[i : j+1]
-			}
-		}
-		var obj struct {
-			Summary   string   `json:"summary"`
-			Questions []string `json:"questions"`
-		}
-		if json.Unmarshal([]byte(text), &obj) == nil && strings.TrimSpace(obj.Summary) != "" {
-			g := generated{Summary: cleanSummary(obj.Summary)}
-			for _, q := range obj.Questions {
-				if q = strings.TrimSpace(q); q != "" && !strings.Contains(q, " | ") && len(g.Questions) < wantQ {
-					g.Questions = append(g.Questions, q)
-				}
-			}
-			return g
-		}
-	}
-	return generated{Summary: cleanSummary(out)}
-}
-
-func summaryPrompt(c parser.Chunk, questions int, context string) string {
+func summaryPrompt(c parser.Chunk, context string) string {
 	code := c.Content
 	if r := []rune(code); len(r) > summaryMaxInput {
 		code = string(r[:summaryMaxInput])
@@ -229,13 +159,7 @@ func summaryPrompt(c parser.Chunk, questions int, context string) string {
 	var b strings.Builder
 	b.WriteString("Describe in one plain sentence (at most 30 words) what this code does or documents, ")
 	b.WriteString("in everyday words a developer might type into a search box. Do not quote the code or repeat its name. ")
-	if questions > 0 {
-		fmt.Fprintf(&b, "Then write %d different short questions a developer might type into a search box that this code answers, "+
-			"in their own words, without the code's identifiers. ", questions)
-		b.WriteString("Answer with JSON only: {\"summary\": \"...\", \"questions\": [\"...\"]}\n\n")
-	} else {
-		b.WriteString("Answer with the sentence only.\n\n")
-	}
+	b.WriteString("Answer with the sentence only.\n\n")
 	b.WriteString("File: " + c.FilePath + "\n")
 	if n := c.Metadata["name"]; n != "" {
 		b.WriteString("Name: " + n + "\n")
@@ -264,55 +188,9 @@ func cleanSummary(out string) string {
 	return ""
 }
 
-const batchChunkRunes = 1200
-
-// batchPrompt asks for one sentence per numbered chunk, as a JSON array.
-func batchPrompt(parts []parser.Chunk) string {
-	var b strings.Builder
-	b.WriteString("Describe each numbered piece of code in one plain sentence (at most 30 words), ")
-	b.WriteString("in everyday words a developer might type into a search box. Do not quote the code or repeat its name. ")
-	b.WriteString("Answer with JSON only: {\"summaries\": [\"sentence for 1\", \"sentence for 2\", ...]} with exactly one sentence per piece, in order.\n\n")
-	for i, c := range parts {
-		code := c.Content
-		if r := []rune(code); len(r) > batchChunkRunes {
-			code = string(r[:batchChunkRunes])
-		}
-		fmt.Fprintf(&b, "[%d] File: %s\n", i+1, c.FilePath)
-		if n := c.Metadata["name"]; n != "" {
-			b.WriteString("Name: " + n + "\n")
-		}
-		b.WriteString(code + "\n\n")
-	}
-	return b.String()
-}
-
-// parseBatch returns n sentences from a batch answer, or nil when the answer
-// does not hold exactly n non-empty sentences.
-func parseBatch(out string, n int) []string {
-	if i := strings.Index(out, "{"); i >= 0 {
-		if j := strings.LastIndex(out, "}"); j > i {
-			out = out[i : j+1]
-		}
-	}
-	var obj struct {
-		Summaries []string `json:"summaries"`
-	}
-	if json.Unmarshal([]byte(out), &obj) != nil || len(obj.Summaries) != n {
-		return nil
-	}
-	for _, s := range obj.Summaries {
-		if strings.TrimSpace(s) == "" {
-			return nil
-		}
-	}
-	return obj.Summaries
-}
-
 const (
 	fileChunkType   = "file"
 	fileChunkSymbol = 40
-	neighbourCount  = 8
-	neighbourSpan   = 6
 )
 
 // fileChunk is one extra chunk per file: its path and the names it defines.
@@ -341,33 +219,6 @@ func fileChunk(rel string, chunks []parser.Chunk) (parser.Chunk, bool) {
 		Content:  "file: " + rel + "\ndefines: " + strings.Join(names, ", "),
 		Metadata: map[string]string{},
 	}, true
-}
-
-// addNeighbours records, on every named chunk, the names of the symbols that
-// sit next to it in the file, so the embedded text carries its surroundings.
-func addNeighbours(chunks []parser.Chunk) {
-	for i := range chunks {
-		own := chunks[i].Metadata["name"]
-		if own == "" {
-			continue
-		}
-		var near []string
-		seen := map[string]bool{own: true}
-		for d := 1; d <= neighbourSpan && len(near) < neighbourCount; d++ {
-			for _, j := range []int{i - d, i + d} {
-				if j < 0 || j >= len(chunks) || len(near) >= neighbourCount {
-					continue
-				}
-				if n := chunks[j].Metadata["name"]; n != "" && !seen[n] {
-					seen[n] = true
-					near = append(near, n)
-				}
-			}
-		}
-		if len(near) > 0 {
-			chunks[i].Metadata["neighbours"] = strings.Join(near, ", ")
-		}
-	}
 }
 
 const (

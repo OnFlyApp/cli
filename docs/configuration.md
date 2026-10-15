@@ -46,17 +46,12 @@ search:                          # optional; how the result lists are fused (val
   word_weight: 0.25              # per-word keyword list, relative to keyword_weight; 0 turns it off
   field_weight: 0.5              # symbol-name, path and comment list, relative to keyword_weight; 0 turns it off
   rrf_k: 20                      # reciprocal-rank constant; lower favours the top of each list
-  group_by: chunk                # file returns one chunk per file
-  dedupe: false                  # drop a chunk whose text repeats a higher hit
   recency_weight: 0              # >0 adds a list of files changed in the last recency_days (git), newest first
   recency_days: 30
-  graph_weight: 0                # >0 adds a list of hits that call or are called by other hits
   usage_weight: 0                # >0 adds a list of chunks an assistant opened after earlier searches
   section_weight: 1              # multiplier for documentation sections; below 1 demotes docs against code
-  summary_word_weight: 0.125     # keyword list over summaries and questions; 0 turns it off
-  summary_weight: 1              # list from the summary vectors (indexer.summary_vector)
+  summary_word_weight: 0.125     # keyword list over summaries; 0 turns it off
   alt_weight: 1                  # list from the second embedder (embedder.alt)
-  # expand: {provider: ollama, model: qwen2.5-coder:7b, timeout_ms: 3000}   # query expansion, see below
 
 rules:
   - .onfly/rules/project.md
@@ -80,8 +75,6 @@ indexer:
   parse_timeout_ms: 5000         # per parser call; default 5000
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
   # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
-  embed_neighbours: false        # add the names of nearby symbols to each embedded chunk
-  summary_vector: false          # embed each summary as a second vector (needs summaries; fresh index)
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]
@@ -165,13 +158,11 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 
 ## Search fusion
 
-`search` ranks candidates in four steps.
+`search` ranks candidates in three steps.
 
 1. **Retrieve.** Semantic (nearest vectors), keyword (the whole question as a substring) and a per-word keyword list (each content word of the question looked up on its own, chunks ranked by how many words they contain). The per-word list is what lets "retry on 429 from the embedder" find the chunk containing all three words.
 2. **Name list.** The retrieved chunks are scored again by where the question's words appear: the symbol name (strongest), the file name, the directories, then the leading comment and the [summary](#chunk-summaries). A chunk *named* for the question outranks one that merely mentions it. Words match across plurals and endings (`retries`, `retry`; `index`, `indexing`). This list adds no store query.
 3. **Fuse.** Every list scores `weight / (rrf_k + rank)` and the scores add up. Defaults: `semantic_weight` 2, `keyword_weight` 0.5, `word_weight` 0.25 and `field_weight` 0.5 (both relative to `keyword_weight`), `rrf_k` 20. A zero value takes the default, except `word_weight` and `field_weight`, where 0 turns the list off.
-4. **Shape.** `dedupe: true` drops a chunk whose type, name and text repeat a higher hit. `group_by: file` keeps one chunk per file, ordered by its best chunk plus a small bonus for the file's second-best. It is also a per-request argument (`group_by` on the MCP tool, `--group-by` on the CLI).
-
 `search.recency_weight` above 0 adds another list of candidates whose files were committed within `search.recency_days` (default 30), most recent first, read from `git log` in the project root and cached for 30 seconds. Outside a git repository the signal is skipped with a warning.
 
 The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half of 573 cases and checked on the other half, where MRR rose from 0.605 to 0.678. Your code may prefer other numbers: run `onfly eval tune` on your own cases before changing them.
@@ -222,57 +213,37 @@ indexer:
     # endpoint: http://localhost:11434
     # timeout_ms: 60000          # one call; default 60000
     # concurrency: 8             # chunks of one file in flight at once (default 1)
-    # batch: 4                   # chunks of one file per call; 0 or 1 is one call per chunk
     # files: true                # also write one summarised "file" chunk per file
     # context: true             # tell the model which symbols of the same file the chunk calls, is called by, sits next to
-    # questions: 3               # also ask for search-style questions per chunk (0 to 5; disables batching)
     # cache: .onfly/summaries.jsonl   # model answers kept across indexes; "none" turns it off
-  # summary_vector: true         # embed the summary as a second vector (see below)
 ```
 
-**Cache.** Every answer is also appended to `.onfly/summaries.jsonl`, keyed by the model, the prompt version, the chunk's type and name and its exact text. Deleting the database, changing the embedder or a prefix, or rebuilding on another machine that has the file therefore does not call the model again: a full reindex of this repository dropped from 17 minutes to about a minute and a half. A different summary model or `questions` value has different keys and asks again. Keep the file out of git like `vector.db`.
+**Cache.** Every answer is also appended to `.onfly/summaries.jsonl`, keyed by the model, the prompt version, the chunk's type and name and its exact text. Deleting the database, changing the embedder or a prefix, or rebuilding on another machine that has the file therefore does not call the model again: a full reindex of this repository dropped from 17 minutes to about a minute and a half. A different summary model has different keys and asks again. Keep the file out of git like `vector.db`.
 
 **Context.** `context: true` adds three lines to each prompt, built from the chunk's own file only: `Calls (same file)`, `Called by (same file)` and `Nearby`. A chunk's role often shows in who uses it, and the model otherwise sees only the body. The text is part of the cache key, so turning it on asks the model again for every chunk, and the cache entries made without it stay valid for when it is off. Cross-file callers are not used on purpose: they change as the index grows, which would invalidate summaries on every run. Measured on this repository it made no difference overall (MRR 0.810 against 0.816, within noise; hand-written cases 0.793 against 0.756) and took 20 minutes of model time, so it is off by default. Try it on a codebase whose files hold many small cooperating functions.
 
-**Questions and a summary vector.** `questions: 3` asks the model for three search-style questions per chunk and embeds them with the summary; `summary_vector: true` embeds the summary and questions as a second vector per chunk and adds a list from it. Both were measured and neither helped on this repository (MRR 0.788 and 0.789 against 0.797 without; `questions` also cost 43 minutes of model time), so both are off by default. They are there for codebases whose questions look unlike their code.
-
-`batch` sends several chunks of a file in one prompt. On this repository it was about 28% faster and cost 0.03 MRR (0.751 to 0.722), so the default is one call per chunk. `files: true` adds a chunk of type `file` per file, listing the names it defines, with its own summary; it found no gain here (MRR 0.717 against 0.722 without) and is meant for large packages where the question is about a directory or file, not a symbol. A smaller model is the better way to cut index time: `qwen2.5-coder:3b` indexed this repository in 8 minutes against 12 for the 7B (both with `batch: 4`) and scored MRR 0.718 against 0.722.
+`files: true` adds a chunk of type `file` per file, listing the names it defines, with its own summary; it found no gain here (MRR 0.717 against 0.722 without) and is meant for large packages where the question is about a directory or file, not a symbol. A smaller model is the way to cut index time: `qwen2.5-coder:3b` indexed this repository in about two thirds of the time of the 7B for a loss of 0.004 MRR.
 
 Summaries are written during indexing, one model call per new or changed chunk. A chunk whose text did not change keeps its stored summary, so a reindex calls the model only for what changed. The first index of a project is slower: on this repository (about 730 chunks) it took 16 minutes with a 7B model on a laptop instead of under a minute; it raised MRR from 0.663 to 0.751 in the [measurement](evaluation.md#measured-effect). If the model is unreachable, indexing logs a warning, skips the rest of that file's summaries and still completes. Turning summaries on does not touch chunks that are already indexed until their file changes; delete the database and reindex to apply them everywhere.
 
-### Neighbour context
+### Usage list
 
-`indexer.embed_neighbours: true` adds the names of the symbols next to a chunk in its file (up to 8 within six positions) to the text that is embedded, as `also defined here: A, B`. The names are stored in the chunk's `neighbours` metadata. A chunk whose own text is unchanged keeps its vector when a neighbour changes, so reindex from scratch to refresh them. Measured gain on this repository: +0.010 MRR (0.722 to 0.732), larger on the hand-written cases (0.584 to 0.662).
+Off by default. It adds one more list to the fusion.
 
-### Call-graph and usage lists
-
-Both are off by default. They add one more list to the fusion.
-
-- `search.graph_weight` ranks the top 20 hits by how many of the others they call or are called by. On this repository it lifted the 45 hand-written cases (MRR 0.641 to 0.764 at weight 0.25) and lowered the generated ones (0.760 to 0.728), whose targets are leaf functions. `onfly eval tune` never picked it. Turn it on if your questions are usually about flows (a handler and what it calls), and measure.
 - `search.usage_weight` ranks hits that an assistant opened after an earlier search, most often first. It needs `server.usage_file`: with it set, the MCP server appends one JSON line (`ts`, `query`, `file`, `symbol`, `rank`) whenever a tool opens a chunk that the most recent `search` returned, within ten minutes of it. Nothing is recorded without it, and the file holds your questions in plain text, so keep it out of git. Read the file counts back as a prior with `usage_weight`, or turn it into eval cases with [`onfly eval mine`](evaluation.md#real-questions).
 
-### Query expansion
+### Removed options
 
-`search.expand` sends the question to a chat model before searching. The model answers with a few identifier-style keywords and a two-sentence hypothetical answer. The keywords run through the per-word keyword list and the answer is embedded as a second semantic query; both are fused at half weight. It helps when the question and the code share no words.
-
-```yaml
-search:
-  expand:
-    provider: ollama
-    model: qwen2.5-coder:7b
-    timeout_ms: 3000             # default 3000; on timeout or error the plain query is used
-```
-
-Expansion adds one model call to every new query (repeated queries come from a 256-entry cache), so it costs about 3 seconds per new query for a gain of about 0.016 MRR; see [measured effect](evaluation.md#measured-effect) before turning it on.
+Earlier builds had `search.expand`, `search.group_by`, `search.dedupe`, `search.graph_weight`, `indexer.summaries.batch`, `indexer.summaries.questions`, `indexer.summary_vector` and `indexer.embed_neighbours`. Each was measured and none beat the defaults on the final configuration (see [evaluation](evaluation.md#removed-options)), so they were deleted. A config file that still names them loads; the keys are ignored.
 
 ## Other inference engines
 
-Onfly needs three things from a model server: embeddings, short chat answers (summaries, query expansion, judging), and optionally scores for a reranker. Ollama is the default for all three. Any server that speaks the **OpenAI API** can replace it, which covers vLLM, `mlx_lm.server`, LM Studio, llama.cpp's `llama-server`, Msty's local API and OpenAI itself. There is one setting per role and no engine-specific code:
+Onfly needs three things from a model server: embeddings, short chat answers (summaries, judging), and optionally scores for a reranker. Ollama is the default for all three. Any server that speaks the **OpenAI API** can replace it, which covers vLLM, `mlx_lm.server`, LM Studio, llama.cpp's `llama-server`, Msty's local API and OpenAI itself. There is one setting per role and no engine-specific code:
 
 | Role | Setting | Endpoint used |
 | --- | --- | --- |
 | Embeddings | `embedder.provider: openai` | `POST {endpoint}/v1/embeddings` |
-| Summaries, expansion, `eval --judge` | `provider: openai` under `indexer.summaries` / `search.expand` | `POST {endpoint}/v1/chat/completions` |
+| Summaries, `eval --judge` | `provider: openai` under `indexer.summaries` | `POST {endpoint}/v1/chat/completions` |
 | Scoring reranker | `reranker.provider: openai-score` | `POST {endpoint}/v1/completions` with `logprobs` |
 | Rerank endpoint (vLLM `/v1/rerank`) | `reranker.provider: cohere` or `jina` with `endpoint` | `POST {endpoint}/v2/rerank` or `/v1/rerank` |
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 
 	"github.com/axitdev/onfly/internal/parser"
@@ -14,11 +13,12 @@ import (
 // promptVersion is part of every cache key; bump it when the summary prompt changes.
 const promptVersion = "v1"
 
-// summaryKey identifies the model's answer for a chunk: the model, whether
-// questions were requested, the chunk type and name, its exact text, and the
-// context block when one is sent.
-func summaryKey(model string, questions int, c parser.Chunk, context string) string {
-	key := promptVersion + "\x00" + model + "\x00" + strconv.Itoa(questions) + "\x00" +
+// summaryKey identifies the model's answer for a chunk: the model, the chunk
+// type and name, its exact text, and the context block when one is sent. The
+// "0" is the number of generated questions (a removed option); keeping it
+// leaves the keys of existing cache files valid.
+func summaryKey(model string, c parser.Chunk, context string) string {
+	key := promptVersion + "\x00" + model + "\x00" + "0" + "\x00" +
 		c.Type + "\x00" + c.Metadata["name"] + "\x00" + c.Content
 	if context != "" {
 		key += "\x00" + context // only when used, so older cache lines stay valid
@@ -37,9 +37,8 @@ type summaryCache struct {
 }
 
 type cacheLine struct {
-	K string   `json:"k"`
-	S string   `json:"s"`
-	Q []string `json:"q,omitempty"`
+	K string `json:"k"`
+	S string `json:"s"`
 }
 
 // openSummaryCache loads path. An empty path or "none" disables the cache.
@@ -58,7 +57,7 @@ func openSummaryCache(path string) *summaryCache {
 	for sc.Scan() {
 		var l cacheLine
 		if json.Unmarshal(sc.Bytes(), &l) == nil && l.K != "" && l.S != "" {
-			c.m[l.K] = generated{Summary: l.S, Questions: l.Q}
+			c.m[l.K] = generated{Summary: l.S}
 		}
 	}
 	return c
@@ -84,7 +83,7 @@ func (c *summaryCache) put(key string, g generated) {
 		return
 	}
 	c.m[key] = g
-	raw, err := json.Marshal(cacheLine{K: key, S: g.Summary, Q: g.Questions})
+	raw, err := json.Marshal(cacheLine{K: key, S: g.Summary})
 	if err != nil {
 		return
 	}

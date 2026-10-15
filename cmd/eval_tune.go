@@ -80,7 +80,7 @@ type tuneSetting struct {
 // tuneGrid lists the settings to try; the first is the current configuration.
 func tuneGrid(cur query.Params) []tuneSetting {
 	mk := func(p query.Params) tuneSetting {
-		return tuneSetting{p, fmt.Sprintf("semantic=%g keyword=%g word=%g field=%g graph=%g rrf_k=%d", p.Semantic, p.Keyword, p.Word, p.Field, p.Graph, p.RRFK)}
+		return tuneSetting{p, fmt.Sprintf("semantic=%g keyword=%g word=%g field=%g rrf_k=%d", p.Semantic, p.Keyword, p.Word, p.Field, p.RRFK)}
 	}
 	out := []tuneSetting{mk(cur)}
 	for _, sem := range []float64{0.5, 1, 1.5, 2} {
@@ -88,11 +88,9 @@ func tuneGrid(cur query.Params) []tuneSetting {
 			for _, word := range []float64{0, 0.1, 0.25, 0.5} {
 				for _, field := range []float64{0, 0.5, 1, 2} {
 					for _, k := range []int{20, 60} {
-						for _, graph := range []float64{0, 0.1, 0.25} {
-							p := cur
-							p.Semantic, p.Keyword, p.Word, p.Field, p.Graph, p.RRFK = sem, kw, word, field, graph, k
-							out = append(out, mk(p))
-						}
+						p := cur
+						p.Semantic, p.Keyword, p.Word, p.Field, p.RRFK = sem, kw, word, field, k
+						out = append(out, mk(p))
 					}
 				}
 			}
@@ -115,13 +113,13 @@ func printTune(out io.Writer, r eval.Result, best query.Params, n, k int) {
 		fmt.Fprintf(out, "\nno setting beats the current one on the check half by 0.01 MRR (%+.3f); keep your configuration.\n", gain)
 		return
 	}
-	fmt.Fprintf(out, "\nbest setting gains %+.3f MRR on the check half. To adopt it:\n\nsearch:\n  semantic_weight: %g\n  keyword_weight: %g\n  word_weight: %g\n  field_weight: %g\n  graph_weight: %g\n  rrf_k: %d\n",
-		gain, best.Semantic, best.Keyword, best.Word, best.Field, best.Graph, best.RRFK)
+	fmt.Fprintf(out, "\nbest setting gains %+.3f MRR on the check half. To adopt it:\n\nsearch:\n  semantic_weight: %g\n  keyword_weight: %g\n  word_weight: %g\n  field_weight: %g\n  rrf_k: %d\n",
+		gain, best.Semantic, best.Keyword, best.Word, best.Field, best.RRFK)
 }
 
 func init() {
 	evalTuneCmd.Flags().IntVar(&evalTuneTop, "top", 5, "settings to list")
-	evalTuneCmd.Flags().BoolVar(&evalTuneLearn, "learn", false, "coordinate ascent over every weight (including summary, alt, graph and docs-section factors) instead of the fixed grid")
+	evalTuneCmd.Flags().BoolVar(&evalTuneLearn, "learn", false, "coordinate ascent over every weight (including alt, summary-keyword and docs-section factors) instead of the fixed grid")
 	evalTuneCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalTuneCmd.Flags().BoolVar(&evalFileLevel, "file-level", false, "count a hit when the file matches, whatever the symbol")
 	evalCmd.AddCommand(evalTuneCmd)
@@ -131,14 +129,14 @@ func init() {
 // cases and checks the result on the odd ones.
 func learnWeights(out io.Writer, s *query.Searcher, cases []eval.Case, gathered []*query.Gathered) error {
 	cur := s.Params()
-	names := []string{"semantic_weight", "keyword_weight", "word_weight", "field_weight", "summary_weight", "alt_weight", "summary_word_weight", "graph_weight", "section_weight", "rrf_k"}
+	names := []string{"semantic_weight", "keyword_weight", "word_weight", "field_weight", "alt_weight", "summary_word_weight", "section_weight", "rrf_k"}
 	vec := func(p query.Params) []float64 {
-		return []float64{p.Semantic, p.Keyword, p.Word, p.Field, p.Summary, p.Alt, p.SummaryWord, p.Graph, p.Section, float64(p.RRFK)}
+		return []float64{p.Semantic, p.Keyword, p.Word, p.Field, p.Alt, p.SummaryWord, p.Section, float64(p.RRFK)}
 	}
 	params := func(v []float64) query.Params {
 		p := cur
-		p.Semantic, p.Keyword, p.Word, p.Field, p.Summary, p.Alt, p.SummaryWord, p.Graph, p.Section = v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]
-		p.RRFK = int(v[9] + 0.5)
+		p.Semantic, p.Keyword, p.Word, p.Field, p.Alt, p.SummaryWord, p.Section = v[0], v[1], v[2], v[3], v[4], v[5], v[6]
+		p.RRFK = int(v[7] + 0.5)
 		return p
 	}
 	fit, check := eval.SplitIdx(len(cases))
@@ -152,9 +150,9 @@ func learnWeights(out io.Writer, s *query.Searcher, cases []eval.Case, gathered 
 	}
 	candidates := func(i int, v float64) []float64 {
 		switch i {
-		case 9: // rrf_k
+		case 7: // rrf_k
 			return []float64{10, 20, 30, 40, 60, 100}
-		case 8: // section factor
+		case 6: // section factor
 			return []float64{0.5, 0.7, 0.85, 1, 1.2, 1.5}
 		}
 		if v == 0 {
@@ -182,7 +180,7 @@ func learnWeights(out io.Writer, s *query.Searcher, cases []eval.Case, gathered 
 	}
 	fmt.Fprintf(out, "learned weights gain %+.3f MRR on the check half. To adopt them:\n\nsearch:\n", mc-m0c)
 	for i, n := range names {
-		if i < 9 && res.Values[i] != start[i] || i == 9 && res.Values[i] != start[i] {
+		if res.Values[i] != start[i] {
 			fmt.Fprintf(out, "  %s: %g\n", n, res.Values[i])
 		}
 	}

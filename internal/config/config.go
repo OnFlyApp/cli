@@ -83,42 +83,30 @@ type Search struct {
 	FieldWeight *float64 `yaml:"field_weight"`
 	// RRFK is the reciprocal-rank-fusion constant; 0 means 60.
 	RRFK int `yaml:"rrf_k"`
-	// GroupBy "file" returns one chunk per file ("chunk", the default, returns chunks).
-	GroupBy string `yaml:"group_by"`
-	// Dedupe drops a chunk whose type, name and text repeat a higher-ranked hit.
-	Dedupe bool `yaml:"dedupe"`
-	// Expand asks a chat model for extra keywords and a hypothetical answer before searching.
-	Expand LLM `yaml:"expand"`
 	// UsageWeight adds a list of chunks an assistant opened after earlier
-	// searches (needs server.usage_file); GraphWeight adds a list of hits that
-	// call or are called by other hits. Both are off at 0.
+	// searches (needs server.usage_file). It is off at 0.
 	UsageWeight float64 `yaml:"usage_weight"`
-	GraphWeight float64 `yaml:"graph_weight"`
-	// SummaryWeight, AltWeight and SummaryWordWeight scale the summary-vector
-	// list (indexer.summary_vector), the second-embedder list (embedder.alt) and
-	// the summary keyword list. Unset takes the default; 0 turns the list off.
+	// AltWeight and SummaryWordWeight scale the second-embedder list
+	// (embedder.alt) and the summary keyword list. Unset takes the default; 0
+	// turns the list off.
 	// SectionWeight multiplies the score of documentation sections: below 1
 	// demotes docs against code, above 1 promotes them. Unset or 1 is neutral.
 	SectionWeight     *float64 `yaml:"section_weight"`
-	SummaryWeight     *float64 `yaml:"summary_weight"`
 	AltWeight         *float64 `yaml:"alt_weight"`
 	SummaryWordWeight *float64 `yaml:"summary_word_weight"`
 }
 
 // ExtraSlots names the extra vector slots this configuration uses, with their
-// dimensions: "summary" for indexer.summary_vector and "alt" for embedder.alt.
+// dimensions: "alt" for embedder.alt.
 func (c Config) ExtraSlots() map[string]int {
 	out := map[string]int{}
-	if c.Indexer.SummaryVector && c.Indexer.Summaries.Provider != "" {
-		out["summary"] = c.Embedder.Dimensions
-	}
 	if c.Embedder.Alt != nil {
 		out["alt"] = c.Embedder.Alt.Dimensions
 	}
 	return out
 }
 
-// LLM names a chat model used for a side task (index summaries, query expansion).
+// LLM names a chat model used for a side task (index summaries).
 // An empty provider turns the feature off.
 type LLM struct {
 	// Provider is ollama or openai. openai means any server that speaks the
@@ -167,12 +155,6 @@ type Indexer struct {
 	// Summaries has a chat model write a one-sentence description of each named
 	// chunk; it is embedded and searched with the code. Off when provider is empty.
 	Summaries Summaries `yaml:"summaries"`
-	// SummaryVector embeds each chunk's summary (and questions) as a second
-	// vector, searched beside the code vector. Needs summaries; fresh index.
-	SummaryVector bool `yaml:"summary_vector"`
-	// EmbedNeighbours adds the names of the other symbols in the same file to
-	// each embedded chunk, so a chunk carries a little of its surroundings.
-	EmbedNeighbours bool `yaml:"embed_neighbours"`
 }
 
 // Summaries is an LLM plus how it is used while indexing.
@@ -181,12 +163,6 @@ type Summaries struct {
 	// Files also writes one chunk per file (type "file") that lists its symbols
 	// and carries a summary, so a question about a package finds the file.
 	Files bool `yaml:"files"`
-	// Batch is how many chunks of one file go in a single model call; 0 or 1
-	// means one call per chunk.
-	Batch int `yaml:"batch"`
-	// Questions asks for this many search-style questions per chunk besides the
-	// summary (0 to 5); they are embedded with it. It disables batching.
-	Questions int `yaml:"questions"`
 	// Context adds to each summary prompt which symbols of the same file the
 	// chunk calls, is called by, and sits next to. A different prompt means new
 	// cache keys, so turning it on asks the model again.
@@ -453,29 +429,17 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Search.SectionWeight != nil {
 		out.Search.SectionWeight = child.Search.SectionWeight
 	}
-	if child.Search.SummaryWeight != nil {
-		out.Search.SummaryWeight = child.Search.SummaryWeight
-	}
 	if child.Search.AltWeight != nil {
 		out.Search.AltWeight = child.Search.AltWeight
 	}
 	if child.Search.SummaryWordWeight != nil {
 		out.Search.SummaryWordWeight = child.Search.SummaryWordWeight
 	}
-	if child.Indexer.SummaryVector {
-		out.Indexer.SummaryVector = true
-	}
 	if child.Embedder.Alt != nil {
 		out.Embedder.Alt = child.Embedder.Alt
 	}
 	if child.Search.UsageWeight != 0 {
 		out.Search.UsageWeight = child.Search.UsageWeight
-	}
-	if child.Search.GraphWeight != 0 {
-		out.Search.GraphWeight = child.Search.GraphWeight
-	}
-	if child.Indexer.EmbedNeighbours {
-		out.Indexer.EmbedNeighbours = true
 	}
 	if child.Indexer.Summaries.Files {
 		out.Indexer.Summaries.Files = true
@@ -486,14 +450,8 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Indexer.Summaries.Context {
 		out.Indexer.Summaries.Context = true
 	}
-	if child.Indexer.Summaries.Questions != 0 {
-		out.Indexer.Summaries.Questions = child.Indexer.Summaries.Questions
-	}
 	if child.Indexer.Summaries.Cache != "" {
 		out.Indexer.Summaries.Cache = child.Indexer.Summaries.Cache
-	}
-	if child.Indexer.Summaries.Batch != 0 {
-		out.Indexer.Summaries.Batch = child.Indexer.Summaries.Batch
 	}
 	if child.Server.TraceFile != "" {
 		out.Server.TraceFile = child.Server.TraceFile
@@ -544,15 +502,6 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Search.RRFK != 0 {
 		out.Search.RRFK = child.Search.RRFK
-	}
-	if child.Search.GroupBy != "" {
-		out.Search.GroupBy = child.Search.GroupBy
-	}
-	if child.Search.Dedupe {
-		out.Search.Dedupe = true
-	}
-	if child.Search.Expand.Provider != "" {
-		out.Search.Expand = child.Search.Expand
 	}
 	if child.Indexer.Summaries.Provider != "" {
 		out.Indexer.Summaries = child.Indexer.Summaries
@@ -682,7 +631,7 @@ func expand(cfg *Config) error {
 		}
 		cfg.Embedder.Alt = &alt
 	}
-	for _, l := range []*LLM{&cfg.Search.Expand, &cfg.Indexer.Summaries.LLM} {
+	for _, l := range []*LLM{&cfg.Indexer.Summaries.LLM} {
 		for _, f := range []*string{&l.Endpoint, &l.APIKey, &l.Model} {
 			if *f, err = expandOne(*f); err != nil {
 				return err
@@ -798,10 +747,7 @@ func (c Config) validate() error {
 	if w := c.Search; (w.WordWeight != nil && *w.WordWeight < 0) || (w.FieldWeight != nil && *w.FieldWeight < 0) || w.RRFK < 0 {
 		return fmt.Errorf("search.word_weight, search.field_weight and search.rrf_k must be >= 0")
 	}
-	if g := c.Search.GroupBy; g != "" && g != "file" && g != "chunk" {
-		return fmt.Errorf("search.group_by must be file or chunk, got %q", g)
-	}
-	for name, l := range map[string]LLM{"search.expand": c.Search.Expand, "indexer.summaries": c.Indexer.Summaries.LLM} {
+	for name, l := range map[string]LLM{"indexer.summaries": c.Indexer.Summaries.LLM} {
 		if l.TimeoutMS < 0 {
 			return fmt.Errorf("%s.timeout_ms must be >= 0", name)
 		}
@@ -812,12 +758,10 @@ func (c Config) validate() error {
 			return fmt.Errorf("%s.model is required when a provider is set", name)
 		}
 	}
-	if c.Search.UsageWeight < 0 || c.Search.GraphWeight < 0 || c.Indexer.Summaries.Batch < 0 || c.Indexer.Summaries.Batch > 20 ||
-		c.Indexer.Summaries.Questions < 0 || c.Indexer.Summaries.Questions > 5 ||
-		c.Indexer.Summaries.Concurrency < 0 || c.Indexer.Summaries.Concurrency > 64 {
-		return fmt.Errorf("search.usage_weight and search.graph_weight must be >= 0, indexer.summaries.batch from 0 to 20, indexer.summaries.questions from 0 to 5, indexer.summaries.concurrency from 0 to 64")
+	if c.Search.UsageWeight < 0 || c.Indexer.Summaries.Concurrency < 0 || c.Indexer.Summaries.Concurrency > 64 {
+		return fmt.Errorf("search.usage_weight must be >= 0 and indexer.summaries.concurrency from 0 to 64")
 	}
-	for name, w := range map[string]*float64{"summary_weight": c.Search.SummaryWeight, "alt_weight": c.Search.AltWeight, "summary_word_weight": c.Search.SummaryWordWeight, "section_weight": c.Search.SectionWeight} {
+	for name, w := range map[string]*float64{"alt_weight": c.Search.AltWeight, "summary_word_weight": c.Search.SummaryWordWeight, "section_weight": c.Search.SectionWeight} {
 		if w != nil && *w < 0 {
 			return fmt.Errorf("search.%s must be >= 0", name)
 		}
@@ -829,9 +773,6 @@ func (c Config) validate() error {
 		if a.Alt != nil {
 			return fmt.Errorf("embedder.alt cannot have its own alt")
 		}
-	}
-	if c.Indexer.SummaryVector && c.Indexer.Summaries.Provider == "" {
-		return fmt.Errorf("indexer.summary_vector needs indexer.summaries")
 	}
 	if c.Reranker.TimeoutMS < 0 {
 		return fmt.Errorf("reranker.timeout_ms must be >= 0")

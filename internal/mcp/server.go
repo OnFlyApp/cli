@@ -94,7 +94,6 @@ type semanticIn struct {
 	ChangedSince string `json:"changed_since,omitempty" jsonschema:"git ref; keep only files that differ from it, untracked files included"`
 	Type         string `json:"type,omitempty" jsonschema:"keep one chunk type, for example function, method, struct or section (docs)"`
 	Path         string `json:"path,omitempty" jsonschema:"keep files matching a glob relative to the project root, for example internal/** or docs/**"`
-	GroupBy      string `json:"group_by,omitempty" jsonschema:"file returns one chunk per file, chunk returns every chunk; default comes from the project config"`
 }
 
 type keywordIn struct {
@@ -165,12 +164,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		logger.Warn("reranker disabled", "err", err)
 		rr = nil
 	}
-	chat, err := embedder.NewChat(cfg.Search.Expand)
-	if err != nil {
-		logger.Warn("query expansion disabled", "err", err)
-		chat = nil
-	}
-	h.searcher, err = query.NewSearcher(cfg, store, emb, rr, chat, logger)
+	h.searcher, err = query.NewSearcher(cfg, store, emb, rr, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -326,7 +320,7 @@ func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in s
 }
 
 func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
-	fused, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: in.Limit, Workspace: workspace, ChangedSince: in.ChangedSince, Type: in.Type, Path: in.Path, GroupBy: in.GroupBy})
+	fused, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: in.Limit, Workspace: workspace, ChangedSince: in.ChangedSince, Type: in.Type, Path: in.Path})
 	if err != nil {
 		return nil, hitList{}, err
 	}

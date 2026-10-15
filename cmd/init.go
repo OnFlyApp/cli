@@ -53,7 +53,6 @@ indexer:
   #   model: qwen2.5-coder:7b     # qwen2.5-coder:3b indexes faster for a small loss
   #   concurrency: 8              # chunks in flight at once; raise for servers that batch (vLLM, mlx_lm)
   #   context: true               # tell the model which symbols of the file a chunk calls and sits next to
-  # embed_neighbours: true         # add nearby symbol names to each embedded chunk
 
 rules:
   - .onfly/rules/project.md
@@ -70,13 +69,8 @@ rules:
 #   semantic_weight: 2             # defaults shown; "onfly eval tune" finds numbers for your code
 #   keyword_weight: 0.5
 #   field_weight: 0.5              # symbol-name / path / comment list; 0 turns it off
-#   group_by: chunk                # file: one result per file
 #   recency_weight: 0              # >0 favours files changed in the last recency_days (git)
-#   graph_weight: 0                # >0 favours hits that call or are called by other hits
 #   usage_weight: 0                # >0 favours chunks an assistant opened after earlier searches (needs server.usage_file)
-#   expand:                        # ask a chat model for extra keywords before searching
-#     provider: ollama
-#     model: qwen2.5-coder:7b
 
 # reranker:                        # optional second pass over the top results
 #   provider: voyage              # voyage, cohere, jina, or ollama (a chat model)
