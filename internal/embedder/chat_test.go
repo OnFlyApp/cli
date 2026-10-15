@@ -58,3 +58,47 @@ func TestOllamaChatEmptyAnswerIsAnError(t *testing.T) {
 		t.Fatal("empty answer must be an error")
 	}
 }
+
+func TestOpenAIChatToLocalServer(t *testing.T) {
+	var got map[string]any
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{
+			{"message": map[string]string{"content": "<think>hmm</think>\n  The answer.  "}},
+		}})
+	}))
+	defer srv.Close()
+	c, err := NewChat(config.LLM{Provider: "openai", Endpoint: srv.URL, Model: "Qwen/Qwen3-8B"})
+	if err != nil {
+		t.Fatalf("a custom endpoint needs no key: %v", err)
+	}
+	out, err := c.Complete(context.Background(), "hi")
+	if err != nil || out != "The answer." {
+		t.Fatalf("%q %v", out, err)
+	}
+	if auth != "" || got["model"] != "Qwen/Qwen3-8B" || got["temperature"] != float64(0) {
+		t.Fatalf("auth %q body %v", auth, got)
+	}
+	if kw, _ := got["chat_template_kwargs"].(map[string]any); kw["enable_thinking"] != false {
+		t.Fatalf("thinking must be switched off for local servers: %v", got)
+	}
+	c2, _ := NewChat(config.LLM{Provider: "openai", Endpoint: srv.URL, Model: "m", APIKey: "k"})
+	if _, err := c2.Complete(context.Background(), "hi"); err != nil || auth != "Bearer k" {
+		t.Fatalf("%q %v", auth, err)
+	}
+}
+
+func TestOpenAIChatHostedNeedsKey(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	if _, err := NewChat(config.LLM{Provider: "openai", Model: "gpt"}); err == nil {
+		t.Fatal("the hosted endpoint needs a key")
+	}
+	if _, err := NewChat(config.LLM{Provider: "openai", Endpoint: "http://x"}); err == nil {
+		t.Fatal("a model is required")
+	}
+}

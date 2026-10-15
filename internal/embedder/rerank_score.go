@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -12,26 +13,21 @@ import (
 	"github.com/axitdev/onfly/internal/config"
 )
 
-// ollamaScoreReranker scores each candidate on its own with a generative
-// reranking model (Qwen3-Reranker style): it asks "does the document answer
-// the query?" and reads the probability of "yes" against "no" from the next
-// token's log-probabilities. Unlike the listwise ollama reranker it needs one
-// short call per candidate, but each call is a single token and calls run in
-// parallel.
-type ollamaScoreReranker struct {
-	url, model string
-	client     interface {
-		do(ctx context.Context, url string, body []byte) ([]byte, error)
-	}
+// scoreReranker scores each candidate on its own with a generative reranking
+// model (Qwen3-Reranker style): it asks "does the document answer the query?"
+// and reads the probability of "yes" against "no" from the next token's
+// log-probabilities. Unlike the listwise reranker it needs one short call per
+// candidate, but each call is a single token and calls run in parallel.
+type scoreReranker struct {
+	// next returns the most likely next tokens for prompt with their
+	// log-probabilities.
+	next    func(ctx context.Context, prompt string) ([]tokenLogprob, error)
 	workers int
 }
 
-type httpPoster struct {
-	post func(ctx context.Context, url string, body []byte) ([]byte, error)
-}
-
-func (h httpPoster) do(ctx context.Context, url string, body []byte) ([]byte, error) {
-	return h.post(ctx, url, body)
+type tokenLogprob struct {
+	Token   string
+	Logprob float64
 }
 
 const (
@@ -49,13 +45,92 @@ func newOllamaScoreReranker(cfg config.Reranker) (Reranker, error) {
 	if endpoint == "" {
 		endpoint = "http://localhost:11434"
 	}
-	hc := newHTTP()
-	return &ollamaScoreReranker{
-		url: joinURL(endpoint, "/api/generate"), model: cfg.Model, workers: scoreWorkers,
-		client: httpPoster{post: func(ctx context.Context, url string, body []byte) ([]byte, error) {
-			return postJSON(ctx, hc, url, "", body)
-		}},
-	}, nil
+	url, model, hc := joinURL(endpoint, "/api/generate"), cfg.Model, newHTTP()
+	return &scoreReranker{workers: scoreWorkers, next: func(ctx context.Context, prompt string) ([]tokenLogprob, error) {
+		body, err := json.Marshal(map[string]any{
+			"model": model, "prompt": prompt, "raw": true, "stream": false,
+			"logprobs": true, "top_logprobs": 20,
+			"options": map[string]any{"num_predict": 1, "temperature": 0},
+		})
+		if err != nil {
+			return nil, err
+		}
+		raw, err := postJSON(ctx, hc, url, "", body)
+		if err != nil {
+			return nil, err
+		}
+		var resp struct {
+			Logprobs []struct {
+				TopLogprobs []struct {
+					Token   string  `json:"token"`
+					Logprob float64 `json:"logprob"`
+				} `json:"top_logprobs"`
+			} `json:"logprobs"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, fmt.Errorf("reranker: %w", err)
+		}
+		if len(resp.Logprobs) == 0 {
+			return nil, fmt.Errorf("reranker: the server returned no logprobs (needs an Ollama version with logprobs support)")
+		}
+		var out []tokenLogprob
+		for _, t := range resp.Logprobs[0].TopLogprobs {
+			out = append(out, tokenLogprob{t.Token, t.Logprob})
+		}
+		return out, nil
+	}}, nil
+}
+
+// newOpenAIScoreReranker is the same scoring over the OpenAI completions API
+// (vLLM, mlx_lm.server, llama.cpp, LM Studio), which returns log-probabilities
+// as a token-to-logprob map per position.
+func newOpenAIScoreReranker(cfg config.Reranker) (Reranker, error) {
+	if cfg.Model == "" {
+		return nil, fmt.Errorf("reranker.model is required (a Qwen3-Reranker model)")
+	}
+	endpoint := cfg.Endpoint
+	hosted := endpoint == ""
+	if hosted {
+		endpoint = "https://api.openai.com"
+	}
+	key := cfg.APIKey
+	if key == "" && hosted {
+		key = os.Getenv("OPENAI_API_KEY")
+	}
+	if key == "" && hosted {
+		return nil, fmt.Errorf("reranker: an api key is required for the hosted endpoint (reranker.api_key or OPENAI_API_KEY)")
+	}
+	url, model, hc := joinURL(endpoint, "/v1/completions"), cfg.Model, newHTTP()
+	return &scoreReranker{workers: scoreWorkers, next: func(ctx context.Context, prompt string) ([]tokenLogprob, error) {
+		body, err := json.Marshal(map[string]any{
+			"model": model, "prompt": prompt, "max_tokens": 1, "temperature": 0, "logprobs": 20,
+		})
+		if err != nil {
+			return nil, err
+		}
+		raw, err := postJSON(ctx, hc, url, key, body)
+		if err != nil {
+			return nil, err
+		}
+		var resp struct {
+			Choices []struct {
+				Logprobs struct {
+					TopLogprobs []map[string]float64 `json:"top_logprobs"`
+				} `json:"logprobs"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return nil, fmt.Errorf("reranker: %w", err)
+		}
+		if len(resp.Choices) == 0 || len(resp.Choices[0].Logprobs.TopLogprobs) == 0 {
+			return nil, fmt.Errorf("reranker: the server returned no logprobs (completions with logprobs are required)")
+		}
+		var out []tokenLogprob
+		for tok, lp := range resp.Choices[0].Logprobs.TopLogprobs[0] {
+			out = append(out, tokenLogprob{tok, lp})
+		}
+		return out, nil
+	}}, nil
 }
 
 func scorePrompt(query, doc string) string {
@@ -67,7 +142,7 @@ func scorePrompt(query, doc string) string {
 		"<|im_start|>assistant\n<think>\n\n</think>\n\n"
 }
 
-func (r *ollamaScoreReranker) Rerank(ctx context.Context, query string, docs []string, topN int) ([]int, error) {
+func (r *scoreReranker) Rerank(ctx context.Context, query string, docs []string, topN int) ([]int, error) {
 	scores := make([]float64, len(docs))
 	errs := make([]error, len(docs))
 	var wg sync.WaitGroup
@@ -98,35 +173,13 @@ func (r *ollamaScoreReranker) Rerank(ctx context.Context, query string, docs []s
 	return order, nil
 }
 
-func (r *ollamaScoreReranker) score(ctx context.Context, query, doc string) (float64, error) {
-	body, err := json.Marshal(map[string]any{
-		"model": r.model, "prompt": scorePrompt(query, doc), "raw": true, "stream": false,
-		"logprobs": true, "top_logprobs": 20,
-		"options": map[string]any{"num_predict": 1, "temperature": 0},
-	})
+func (r *scoreReranker) score(ctx context.Context, query, doc string) (float64, error) {
+	top, err := r.next(ctx, scorePrompt(query, doc))
 	if err != nil {
 		return 0, err
-	}
-	raw, err := r.client.do(ctx, r.url, body)
-	if err != nil {
-		return 0, err
-	}
-	var resp struct {
-		Logprobs []struct {
-			TopLogprobs []struct {
-				Token   string  `json:"token"`
-				Logprob float64 `json:"logprob"`
-			} `json:"top_logprobs"`
-		} `json:"logprobs"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return 0, fmt.Errorf("reranker: %w", err)
-	}
-	if len(resp.Logprobs) == 0 {
-		return 0, fmt.Errorf("reranker: the server returned no logprobs (needs an Ollama version with logprobs support)")
 	}
 	yes, no := math.Inf(-1), math.Inf(-1)
-	for _, t := range resp.Logprobs[0].TopLogprobs {
+	for _, t := range top {
 		switch strings.ToLower(strings.TrimSpace(t.Token)) {
 		case "yes":
 			yes = math.Max(yes, t.Logprob)

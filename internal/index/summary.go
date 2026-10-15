@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/axitdev/onfly/internal/parser"
@@ -105,30 +107,30 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 	if wantQ > 0 {
 		batch = 1 // questions need the model's full attention on one chunk
 	}
-	failed := false
-	set := func(i int, g generated) {
-		if g.empty() {
-			return
-		}
-		g.apply(&chunks[i])
-		s.sums.put(key(i), g)
-		delete(prev, chunks[i].Content)
-	}
+	var failed atomic.Bool
 	ask := func(prompt string) (string, bool) {
 		cctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		out, err := s.chat.Complete(cctx, prompt)
 		if err != nil {
-			if ctx.Err() == nil {
+			if ctx.Err() == nil && failed.CompareAndSwap(false, true) {
 				s.logger.Warn("summaries: model failed, skipping the rest of this file", "path", rel, "err", err)
 			}
-			failed = true
+			failed.Store(true)
 			return "", false
 		}
 		return out, true
 	}
-	for start := 0; start < len(todo) && !failed; start += batch {
-		group := todo[start:min(start+batch, len(todo))]
+	type answer struct {
+		i int
+		g generated
+	}
+	// job asks the model about one group of chunks and returns what it wrote.
+	job := func(group []int) []answer {
+		if failed.Load() {
+			return nil
+		}
+		var res []answer
 		if len(group) > 1 {
 			parts := make([]parser.Chunk, len(group))
 			for j, i := range group {
@@ -136,23 +138,56 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 			}
 			out, ok := ask(batchPrompt(parts))
 			if !ok {
-				break
+				return nil
 			}
 			if got := parseBatch(out, len(group)); got != nil {
 				for j, i := range group {
-					set(i, generated{Summary: cleanSummary(got[j])})
+					res = append(res, answer{i, generated{Summary: cleanSummary(got[j])}})
 				}
-				continue
+				return res
 			}
 			// The model did not return one sentence per chunk: ask one by one.
 		}
 		for _, i := range group {
-			if failed {
+			if failed.Load() {
 				break
 			}
 			if out, ok := ask(summaryPrompt(chunks[i], wantQ, ctxAt(i))); ok {
-				set(i, parseGenerated(out, wantQ))
+				res = append(res, answer{i, parseGenerated(out, wantQ)})
 			}
+		}
+		return res
+	}
+	var groups [][]int
+	for start := 0; start < len(todo); start += batch {
+		groups = append(groups, todo[start:min(start+batch, len(todo))])
+	}
+	workers := max(s.cfg.Indexer.Summaries.Concurrency, 1)
+	results := make(chan []answer)
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	go func() {
+		for _, g := range groups {
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(g []int) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				results <- job(g)
+			}(g)
+		}
+		wg.Wait()
+		close(results)
+	}()
+	// Answers are applied here, one at a time: prev and the cache are shared.
+	for res := range results {
+		for _, a := range res {
+			if a.g.empty() {
+				continue
+			}
+			a.g.apply(&chunks[a.i])
+			s.sums.put(key(a.i), a.g)
+			delete(prev, chunks[a.i].Content)
 		}
 	}
 	return prev

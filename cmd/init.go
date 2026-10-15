@@ -49,8 +49,9 @@ indexer:
   # concurrency: 4                 # files indexed in parallel
   # embed_context: true            # embed "path: / symbol:" with each chunk; reindex after changing
   # summaries:                     # one-sentence description per chunk, embedded with the code (slower index)
-  #   provider: ollama
+  #   provider: ollama            # or openai: vLLM, mlx_lm.server, LM Studio, llama.cpp (set endpoint)
   #   model: qwen2.5-coder:7b     # qwen2.5-coder:3b indexes faster for a small loss
+  #   concurrency: 8              # chunks in flight at once; raise for servers that batch (vLLM, mlx_lm)
   #   context: true               # tell the model which symbols of the file a chunk calls and sits next to
   # embed_neighbours: true         # add nearby symbol names to each embedded chunk
 

@@ -14,6 +14,21 @@ embedder:
 
 `dimensions` must match what the model returns. Switching models means a fresh index: delete `.onfly/vector.db` and run `onfly index`.
 
+## Use vLLM or mlx_lm.server for summaries
+
+Point the chat roles at any OpenAI-compatible server and let it batch:
+
+```yaml
+indexer:
+  summaries:
+    provider: openai
+    endpoint: http://localhost:8000
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+    concurrency: 16
+```
+
+Keep embeddings where they are, or add a second `openai` endpoint for them. Full recipes for vLLM and `mlx_lm.server` are in [Other inference engines](configuration.md#other-inference-engines).
+
 ## Only index part of the project
 
 Index just the backend and docs:

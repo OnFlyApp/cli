@@ -42,6 +42,8 @@ func NewReranker(cfg config.Reranker) (Reranker, error) {
 		return newOllamaReranker(cfg)
 	case "ollama-score":
 		return newOllamaScoreReranker(cfg)
+	case "openai-score":
+		return newOpenAIScoreReranker(cfg)
 	}
 	api, ok := rerankAPIs[cfg.Provider]
 	if !ok {

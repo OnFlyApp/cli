@@ -89,9 +89,10 @@ func TestOpenAIOrderAndFactory(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
+	ask := true // a custom endpoint only gets "dimensions" when asked to
 	emb, err := New(config.Embedder{
 		Provider: "openai", Endpoint: srv.URL, Model: "text-embedding-3-small",
-		Dimensions: 2, APIKey: "test-key",
+		Dimensions: 2, APIKey: "test-key", SendDimensions: &ask,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -408,5 +409,33 @@ func TestOllamaSendsContextWindowForLongInputs(t *testing.T) {
 	}
 	if _, err := e.Embed(context.Background(), "x"); err != nil || got["num_ctx"] != float64(6512) {
 		t.Fatalf("options %v err %v", got, err)
+	}
+}
+
+func TestOpenAIEmbedderLocalServerNeedsNoKeyAndNoDimensions(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"index": 0, "embedding": []float32{1, 2}}}})
+	}))
+	defer srv.Close()
+	e, err := New(config.Embedder{Provider: "openai", Endpoint: srv.URL, Model: "m", Dimensions: 2})
+	if err != nil {
+		t.Fatalf("a custom endpoint needs no key: %v", err)
+	}
+	if _, err := e.Embed(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	if _, sent := body["dimensions"]; sent {
+		t.Fatalf("dimensions must not be sent to a custom endpoint: %v", body)
+	}
+	yes := true
+	e, _ = New(config.Embedder{Provider: "openai", Endpoint: srv.URL, Model: "m", Dimensions: 2, SendDimensions: &yes})
+	if _, err := e.Embed(context.Background(), "x"); err != nil || body["dimensions"] != float64(2) {
+		t.Fatalf("send_dimensions must be honoured: %v %v", body, err)
+	}
+	if _, err := New(config.Embedder{Provider: "openai", Model: "m", Dimensions: 2}); err == nil {
+		t.Fatal("the hosted endpoint needs a key")
 	}
 }

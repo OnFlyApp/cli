@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/vectorstore"
@@ -296,5 +298,65 @@ func TestContextForUsesOnlyTheFile(t *testing.T) {
 	}
 	if p := summaryPrompt(c, 0, "Calls (same file): x\n"); !strings.Contains(p, "Calls (same file): x") {
 		t.Fatalf("%q", p)
+	}
+}
+
+func TestSummariesOverOpenAIChatWithConcurrency(t *testing.T) {
+	var calls, inflight, peak atomic.Int32
+	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		n := inflight.Add(1)
+		for {
+			p := peak.Load()
+			if n <= p || peak.CompareAndSwap(p, n) {
+				break
+			}
+		}
+		time.Sleep(60 * time.Millisecond) // let requests overlap
+		inflight.Add(-1)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]string{"content": "Does one thing."}}}})
+	}))
+	defer chat.Close()
+	srv := fakeOllama(t)
+	defer srv.Close()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "chunk.sh")
+	var items []string
+	for i := 0; i < 6; i++ {
+		items = append(items, fmt.Sprintf(`{"type":"function","content":"func F%d() { /* retry the request until the server answers or the budget runs out %d */ }","metadata":{"name":"F%d"}}`, i, i, i))
+	}
+	body := "#!/bin/sh\nprintf '%s\\n' '[" + strings.Join(items, ",") + "]'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, dir, srv.URL, script)
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustLoad(t, dir)
+	cfg.Indexer.Summaries.Provider, cfg.Indexer.Summaries.Endpoint, cfg.Indexer.Summaries.Model = "openai", chat.URL, "m"
+	cfg.Indexer.Summaries.Concurrency = 4
+	if _, err := Run(context.Background(), cfg, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := vectorstore.OpenSQLite(filepath.Join(dir, ".onfly", "vector.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	got, err := st.ChunksByFiles(context.Background(), []string{"a.go"})
+	if err != nil || len(got) != 6 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for _, c := range got {
+		if c.Chunk.Metadata["summary"] != "Does one thing." {
+			t.Fatalf("every chunk gets its summary: %+v", c.Chunk.Metadata)
+		}
+	}
+	if calls.Load() != 6 || peak.Load() < 2 || peak.Load() > 4 {
+		t.Fatalf("calls=%d peak concurrency=%d, want 6 calls overlapping up to 4", calls.Load(), peak.Load())
 	}
 }

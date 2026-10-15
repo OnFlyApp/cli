@@ -16,29 +16,38 @@ type openaiEmbedder struct {
 	model      string
 	key        string
 	dimensions int
+	ask        bool // send dimensions with the request
 	client     *http.Client
 }
 
 func newOpenAI(cfg config.Embedder) (Embedder, error) {
 	endpoint := cfg.Endpoint
-	if endpoint == "" {
+	hosted := endpoint == ""
+	if hosted {
 		endpoint = "https://api.openai.com"
 	}
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("embedder.model is required")
 	}
 	key := cfg.APIKey
-	if key == "" {
+	if key == "" && hosted {
 		key = os.Getenv("OPENAI_API_KEY")
 	}
-	if key == "" {
+	if key == "" && hosted {
 		return nil, fmt.Errorf("embedder: openai api key is required")
+	}
+	// The expected dimensions are always checked; they are only asked of the
+	// server (to shorten vectors) on the hosted endpoint, or when requested.
+	send := hosted
+	if cfg.SendDimensions != nil {
+		send = *cfg.SendDimensions
 	}
 	return &openaiEmbedder{
 		url:        joinURL(endpoint, "/v1/embeddings"),
 		model:      cfg.Model,
 		key:        key,
 		dimensions: cfg.Dimensions,
+		ask:        send,
 		client:     newHTTP(),
 	}, nil
 }
@@ -55,11 +64,15 @@ func (e *openaiEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	if len(texts) == 0 {
 		return [][]float32{}, nil
 	}
-	body, err := json.Marshal(struct {
+	req := struct {
 		Model      string   `json:"model"`
 		Input      []string `json:"input"`
 		Dimensions int      `json:"dimensions,omitempty"`
-	}{Model: e.model, Input: texts, Dimensions: e.dimensions})
+	}{Model: e.model, Input: texts}
+	if e.ask {
+		req.Dimensions = e.dimensions
+	}
+	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
 	}

@@ -428,7 +428,7 @@ search:
 		"group_by":       "search:\n  group_by: bogus\n",
 		"negative field": "search:\n  field_weight: -1\n",
 		"expand model":   "search:\n  expand: {provider: ollama}\n",
-		"expand vendor":  "search:\n  expand: {provider: openai, model: m}\n",
+		"expand vendor":  "search:\n  expand: {provider: bogus, model: m}\n",
 	} {
 		d := t.TempDir()
 		writeConfig(t, d, validYAML()+extra)

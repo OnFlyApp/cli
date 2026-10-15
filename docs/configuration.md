@@ -18,12 +18,13 @@ database:
 workspace: backend               # optional; stored on each chunk from this config
 
 embedder:
-  provider: ollama               # ollama, openai, or voyage
+  provider: ollama               # ollama, openai (any OpenAI-compatible server), or voyage
   endpoint: http://localhost:11434
   model: embeddinggemma-2
   dimensions: 768                # required, at least 1
   max_input_tokens: 6000         # default 6000; split chunks above this, and (Ollama) the context window requested
-  # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY; voyage to VOYAGE_API_KEY
+  # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY (hosted endpoint only); voyage to VOYAGE_API_KEY
+  # send_dimensions: true        # openai: ask the server to shorten vectors; default true for api.openai.com only
   # query_prefix: "task: code retrieval | query: "   # prepended to every search query
   # document_prefix: "title: none | text: "          # prepended to every indexed chunk; needs a fresh index
   # alt:                         # a second embedder; both vector lists are fused (needs a fresh index)
@@ -214,10 +215,13 @@ Only `provider`, `endpoint`, `model`, `dimensions`, `api_key`, `query_prefix`, `
 ```yaml
 indexer:
   summaries:
-    provider: ollama             # only ollama is supported
+    provider: ollama             # ollama, or openai for vLLM, mlx_lm.server, LM Studio, llama.cpp, Msty, OpenAI
+    # endpoint: http://localhost:8000   # openai: the server's base URL, without /v1
+    # api_key: ${LLM_API_KEY}    # optional for a custom endpoint
     model: qwen2.5-coder:7b
     # endpoint: http://localhost:11434
     # timeout_ms: 60000          # one call; default 60000
+    # concurrency: 8             # chunks of one file in flight at once (default 1)
     # batch: 4                   # chunks of one file per call; 0 or 1 is one call per chunk
     # files: true                # also write one summarised "file" chunk per file
     # context: true             # tell the model which symbols of the same file the chunk calls, is called by, sits next to
@@ -260,6 +264,62 @@ search:
 ```
 
 Expansion adds one model call to every new query (repeated queries come from a 256-entry cache), so it costs about 3 seconds per new query for a gain of about 0.016 MRR; see [measured effect](evaluation.md#measured-effect) before turning it on.
+
+## Other inference engines
+
+Onfly needs three things from a model server: embeddings, short chat answers (summaries, query expansion, judging), and optionally scores for a reranker. Ollama is the default for all three. Any server that speaks the **OpenAI API** can replace it, which covers vLLM, `mlx_lm.server`, LM Studio, llama.cpp's `llama-server`, Msty's local API and OpenAI itself. There is one setting per role and no engine-specific code:
+
+| Role | Setting | Endpoint used |
+| --- | --- | --- |
+| Embeddings | `embedder.provider: openai` | `POST {endpoint}/v1/embeddings` |
+| Summaries, expansion, `eval --judge` | `provider: openai` under `indexer.summaries` / `search.expand` | `POST {endpoint}/v1/chat/completions` |
+| Scoring reranker | `reranker.provider: openai-score` | `POST {endpoint}/v1/completions` with `logprobs` |
+| Rerank endpoint (vLLM `/v1/rerank`) | `reranker.provider: cohere` or `jina` with `endpoint` | `POST {endpoint}/v2/rerank` or `/v1/rerank` |
+
+`endpoint` is the server's base URL without `/v1`. An API key is optional for a custom endpoint (leave it out for a local server) and required for the hosted OpenAI endpoint. Two behaviours differ for custom endpoints: `dimensions` is not sent with embedding requests (most local servers reject it for models that cannot shorten vectors; set `embedder.send_dimensions: true` if yours accepts it), and chat requests carry `chat_template_kwargs: {"enable_thinking": false}`, which vLLM honours for reasoning models (servers that do not know it ignore it). Text inside `<think>...</think>` in an answer is removed.
+
+### vLLM
+
+```sh
+vllm serve Qwen/Qwen3-Embedding-0.6B --task embed --port 8001     # embeddings
+vllm serve Qwen/Qwen2.5-Coder-7B-Instruct --port 8002             # summaries, expansion
+```
+
+```yaml
+embedder:
+  provider: openai
+  endpoint: http://localhost:8001
+  model: Qwen/Qwen3-Embedding-0.6B
+  dimensions: 1024
+
+indexer:
+  summaries:
+    provider: openai
+    endpoint: http://localhost:8002
+    model: Qwen/Qwen2.5-Coder-7B-Instruct
+    concurrency: 16              # vLLM batches requests: this is where the time goes
+```
+
+### mlx_lm.server (Apple silicon)
+
+```sh
+mlx_lm.server --model mlx-community/Qwen2.5-Coder-7B-Instruct-4bit --port 8080
+```
+
+```yaml
+indexer:
+  summaries:
+    provider: openai
+    endpoint: http://localhost:8080
+    model: mlx-community/Qwen2.5-Coder-7B-Instruct-4bit
+    concurrency: 4
+```
+
+`mlx_lm.server` serves chat models; keep an embedding model on Ollama, vLLM or LM Studio. Use the `model` name the server was started with.
+
+### Summary concurrency
+
+Without `indexer.summaries.concurrency` Onfly sends one chunk at a time per file, which suits Ollama's default. A server that batches requests answers many at once in nearly the time of one, so raising it shortens the first index in proportion, up to the server's limits. It multiplies with `indexer.concurrency` (files in parallel); keep the product within what the server accepts. The answers are applied in order and cached, so a failure or an interrupted run loses nothing already written.
 
 ## Reranker
 
@@ -306,13 +366,13 @@ reranker:
   timeout_ms: 60000
 ```
 
-Not every community build of the reranker works under every Ollama release: `dengcao/Qwen3-Reranker-0.6B:Q8_0` answered with identical probabilities for every token here, the 4B build worked. Check a few calls by hand before measuring. It is slow: about 18 seconds per search on a laptop for 20 candidates with the 4B model, and on the hand-written cases it did not improve MRR (0.768 against 0.767); see [Evaluation](evaluation.md#third-round-prompts-second-embedder-summary-variants).
+`provider: openai-score` does the same through `POST {endpoint}/v1/completions` with `max_tokens: 1` and `logprobs: 20`, so a Qwen3-Reranker served by vLLM or `llama-server` works unchanged (`endpoint`, `model`; no key for a local server). Not every community build of the reranker works under every Ollama release: `dengcao/Qwen3-Reranker-0.6B:Q8_0` answered with identical probabilities for every token here, the 4B build worked. Check a few calls by hand before measuring. It is slow: about 18 seconds per search on a laptop for 20 candidates with the 4B model, and on the hand-written cases it did not improve MRR (0.768 against 0.767); see [Evaluation](evaluation.md#third-round-prompts-second-embedder-summary-variants).
 
 ## Embedders
 
 Ollama: `POST {endpoint}/api/embed` with `{"model","input":[...]}`. The default endpoint is `http://localhost:11434`. The response field is `embeddings`. Each vector must have length `dimensions`.
 
-OpenAI: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.openai.com` (the client adds `/v1/embeddings`). The request sends `dimensions`. The API key is `embedder.api_key` if set, otherwise `OPENAI_API_KEY`.
+OpenAI and compatible servers: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.openai.com` (the client adds `/v1/embeddings`). On the hosted endpoint the request sends `dimensions` and the API key is `embedder.api_key` if set, otherwise `OPENAI_API_KEY` (required). With a custom `endpoint` (vLLM, LM Studio, llama.cpp, a gateway) no key is needed and `dimensions` is not sent unless `embedder.send_dimensions: true`; the returned vectors are still checked against `dimensions`. See [Other inference engines](#other-inference-engines).
 
 Voyage: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.voyageai.com`. The body sends `input_type` `query` for one search string and `document` for an index batch, and `output_dimension` from `dimensions`. The API key is `embedder.api_key` if set, otherwise `VOYAGE_API_KEY`.
 

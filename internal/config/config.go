@@ -45,6 +45,11 @@ type Embedder struct {
 	// Changing DocumentPrefix needs a fresh index.
 	QueryPrefix    string `yaml:"query_prefix"`
 	DocumentPrefix string `yaml:"document_prefix"`
+	// SendDimensions controls whether the openai provider sends "dimensions" in
+	// the request (it asks a model to shorten its vectors). Unset: sent to the
+	// hosted OpenAI endpoint, not to a custom one, because most local servers
+	// reject it for models that cannot shorten vectors.
+	SendDimensions *bool `yaml:"send_dimensions"`
 	// Alt is a second embedder. Every chunk is embedded by both, and search
 	// fuses the two vector lists (search.alt_weight). Only the provider,
 	// endpoint, model, dimensions, api_key, prefixes and max_input_tokens of
@@ -114,11 +119,16 @@ func (c Config) ExtraSlots() map[string]int {
 }
 
 // LLM names a chat model used for a side task (index summaries, query expansion).
-// Only ollama is supported. An empty provider turns the feature off.
+// An empty provider turns the feature off.
 type LLM struct {
-	Provider  string `yaml:"provider"`
-	Endpoint  string `yaml:"endpoint"`
-	Model     string `yaml:"model"`
+	// Provider is ollama or openai. openai means any server that speaks the
+	// OpenAI chat API: vLLM, mlx_lm.server, LM Studio, llama.cpp, Msty, or OpenAI.
+	Provider string `yaml:"provider"`
+	Endpoint string `yaml:"endpoint"`
+	Model    string `yaml:"model"`
+	// APIKey is sent as a bearer token. It is optional with a custom endpoint;
+	// the hosted OpenAI endpoint also reads OPENAI_API_KEY.
+	APIKey    string `yaml:"api_key"`
 	TimeoutMS int    `yaml:"timeout_ms"`
 }
 
@@ -136,7 +146,7 @@ func (r Reranker) Timeout() time.Duration {
 	if r.TimeoutMS > 0 {
 		return time.Duration(r.TimeoutMS) * time.Millisecond
 	}
-	if r.Provider == "ollama" || r.Provider == "ollama-score" {
+	if r.Provider == "ollama" || r.Provider == "ollama-score" || r.Provider == "openai-score" {
 		return 30 * time.Second
 	}
 	return 0
@@ -181,6 +191,10 @@ type Summaries struct {
 	// chunk calls, is called by, and sits next to. A different prompt means new
 	// cache keys, so turning it on asks the model again.
 	Context bool `yaml:"context"`
+	// Concurrency is how many chunks of one file are sent to the model at once
+	// (1 when 0). Servers that batch requests, such as vLLM and mlx_lm.server,
+	// answer many in the time of one; it multiplies with indexer.concurrency.
+	Concurrency int `yaml:"concurrency"`
 	// Cache is a JSON-lines file of model answers keyed by chunk text, reused by
 	// later indexes. Empty means .onfly/summaries.jsonl; "none" turns it off.
 	Cache string `yaml:"cache"`
@@ -406,6 +420,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Embedder.APIKey != "" {
 		out.Embedder.APIKey = child.Embedder.APIKey
 	}
+	if child.Embedder.SendDimensions != nil {
+		out.Embedder.SendDimensions = child.Embedder.SendDimensions
+	}
 	if child.Embedder.QueryPrefix != "" {
 		out.Embedder.QueryPrefix = child.Embedder.QueryPrefix
 	}
@@ -462,6 +479,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Indexer.Summaries.Files {
 		out.Indexer.Summaries.Files = true
+	}
+	if child.Indexer.Summaries.Concurrency != 0 {
+		out.Indexer.Summaries.Concurrency = child.Indexer.Summaries.Concurrency
 	}
 	if child.Indexer.Summaries.Context {
 		out.Indexer.Summaries.Context = true
@@ -662,6 +682,13 @@ func expand(cfg *Config) error {
 		}
 		cfg.Embedder.Alt = &alt
 	}
+	for _, l := range []*LLM{&cfg.Search.Expand, &cfg.Indexer.Summaries.LLM} {
+		for _, f := range []*string{&l.Endpoint, &l.APIKey, &l.Model} {
+			if *f, err = expandOne(*f); err != nil {
+				return err
+			}
+		}
+	}
 	cfg.Reranker.Endpoint, err = expandOne(cfg.Reranker.Endpoint)
 	if err != nil {
 		return err
@@ -740,9 +767,9 @@ func resolvePath(root, p string) string {
 
 func (c Config) validate() error {
 	switch c.Reranker.Provider {
-	case "", "voyage", "cohere", "jina", "ollama", "ollama-score":
+	case "", "voyage", "cohere", "jina", "ollama", "ollama-score", "openai-score":
 	default:
-		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, jina, ollama, or ollama-score)", c.Reranker.Provider)
+		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, jina, ollama, ollama-score, or openai-score)", c.Reranker.Provider)
 	}
 	if strings.TrimSpace(c.Embedder.Model) == "" {
 		return fmt.Errorf("embedder.model is required")
@@ -778,16 +805,17 @@ func (c Config) validate() error {
 		if l.TimeoutMS < 0 {
 			return fmt.Errorf("%s.timeout_ms must be >= 0", name)
 		}
-		if l.Provider != "" && l.Provider != "ollama" {
-			return fmt.Errorf("%s.provider %q is not available (use ollama)", name, l.Provider)
+		if l.Provider != "" && l.Provider != "ollama" && l.Provider != "openai" {
+			return fmt.Errorf("%s.provider %q is not available (use ollama or openai)", name, l.Provider)
 		}
 		if l.Provider != "" && l.Model == "" {
 			return fmt.Errorf("%s.model is required when a provider is set", name)
 		}
 	}
 	if c.Search.UsageWeight < 0 || c.Search.GraphWeight < 0 || c.Indexer.Summaries.Batch < 0 || c.Indexer.Summaries.Batch > 20 ||
-		c.Indexer.Summaries.Questions < 0 || c.Indexer.Summaries.Questions > 5 {
-		return fmt.Errorf("search.usage_weight and search.graph_weight must be >= 0, indexer.summaries.batch from 0 to 20, indexer.summaries.questions from 0 to 5")
+		c.Indexer.Summaries.Questions < 0 || c.Indexer.Summaries.Questions > 5 ||
+		c.Indexer.Summaries.Concurrency < 0 || c.Indexer.Summaries.Concurrency > 64 {
+		return fmt.Errorf("search.usage_weight and search.graph_weight must be >= 0, indexer.summaries.batch from 0 to 20, indexer.summaries.questions from 0 to 5, indexer.summaries.concurrency from 0 to 64")
 	}
 	for name, w := range map[string]*float64{"summary_weight": c.Search.SummaryWeight, "alt_weight": c.Search.AltWeight, "summary_word_weight": c.Search.SummaryWordWeight, "section_weight": c.Search.SectionWeight} {
 		if w != nil && *w < 0 {

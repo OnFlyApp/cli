@@ -26,6 +26,10 @@ In order of effort: (1) keep the defaults, which weigh the semantic list above t
 
 Measure it. With a local chat model (`reranker.provider: ollama`) it raised recall@5 but lowered rank 1 and added seconds per search in the earlier measurement. A hosted cross-encoder (Voyage, Cohere, Jina) is the better candidate and is already supported; it was not measured here because it needs an API key. Run `onfly eval` with and without it on your own cases.
 
+### Can I use vLLM, mlx_lm.server or LM Studio instead of Ollama?
+
+Yes, for every model role. Set `provider: openai` with the server's `endpoint` for embeddings, for `indexer.summaries` and for `search.expand`; use `reranker.provider: openai-score` or a rerank endpoint for reranking. See [Other inference engines](configuration.md#other-inference-engines). Raise `indexer.summaries.concurrency` for servers that batch requests.
+
 ### Which embedding model should I use?
 
 `embeddinggemma-2` (`ollama pull embeddinggemma-2`) was the best of six local models on this repository and indexes in under a minute. Add the code-retrieval prompts (`embedder.query_prefix`, `document_prefix`) and, if you can afford a second embedding pass, `embedder.alt`. See [Query and document prompts](configuration.md#query-and-document-prompts) and [Second embedder](configuration.md#second-embedder).

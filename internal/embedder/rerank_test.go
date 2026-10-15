@@ -190,3 +190,36 @@ func TestOllamaScoreRerankerNeedsLogprobs(t *testing.T) {
 		t.Fatal("a server without logprobs must be an error so the fused order is kept")
 	}
 }
+
+func TestOpenAIScoreRerankerReadsCompletionLogprobs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Prompt    string `json:"prompt"`
+			MaxTokens int    `json:"max_tokens"`
+			Logprobs  int    `json:"logprobs"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if r.URL.Path != "/v1/completions" || in.MaxTokens != 1 || in.Logprobs == 0 {
+			t.Errorf("path %s body %+v", r.URL.Path, in)
+		}
+		top := map[string]float64{"yes": -0.1, "no": -2.5}
+		if strings.Contains(in.Prompt, "<Document>: bad") {
+			top = map[string]float64{"yes": -3, "no": -0.05, "maybe": -5}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{
+			{"text": "yes", "logprobs": map[string]any{"top_logprobs": []map[string]float64{top}}},
+		}})
+	}))
+	defer srv.Close()
+	rr, err := NewReranker(config.Reranker{Provider: "openai-score", Endpoint: srv.URL, Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := rr.Rerank(context.Background(), "q", []string{"bad", "good"}, 2)
+	if err != nil || len(got) != 2 || got[0] != 1 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := NewReranker(config.Reranker{Provider: "openai-score", Model: "m"}); err == nil {
+		t.Fatal("the hosted endpoint needs a key")
+	}
+}
