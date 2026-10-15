@@ -70,6 +70,9 @@ type hitDTO struct {
 	EndLine   int    `json:"end_line,omitempty"`
 	Summary   string `json:"summary,omitempty"`
 	Lines     string `json:"lines"`
+	// Brief marks a hit whose Lines holds only the first line (the signature);
+	// get_component_ast returns the body.
+	Brief bool `json:"brief,omitempty"`
 }
 
 type hitList struct {
@@ -94,6 +97,7 @@ type semanticIn struct {
 	ChangedSince string `json:"changed_since,omitempty" jsonschema:"git ref; keep only files that differ from it, untracked files included"`
 	Type         string `json:"type,omitempty" jsonschema:"keep one chunk type, for example function, method, struct or section (docs)"`
 	Path         string `json:"path,omitempty" jsonschema:"keep files matching a glob relative to the project root, for example internal/** or docs/**"`
+	Detail       string `json:"detail,omitempty" jsonschema:"auto (default): code for the top 3 hits, signatures for the rest; full: every body; brief: signatures only"`
 }
 
 type keywordIn struct {
@@ -320,12 +324,17 @@ func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in s
 }
 
 func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace string, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
+	switch in.Detail {
+	case "", "auto", "full", "brief":
+	default:
+		return nil, hitList{}, fmt.Errorf("detail must be auto, full or brief, got %q", in.Detail)
+	}
 	fused, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: in.Limit, Workspace: workspace, ChangedSince: in.ChangedSince, Type: in.Type, Path: in.Path})
 	if err != nil {
 		return nil, hitList{}, err
 	}
 	budget, text := h.fitBudget(chunkQuery(fused))
-	hits, err := fitHits(fused, budget)
+	hits, err := fitHits(fused, budget, in.Detail)
 	if err != nil {
 		return nil, hitList{}, err
 	}
@@ -366,7 +375,7 @@ func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 		return nil, hitList{}, err
 	}
 	budget, text := h.fitBudget(chunkQuery(chunks))
-	hits, err := fitHits(chunks, budget)
+	hits, err := fitHits(chunks, budget, "full")
 	h.record("search_keyword", in, start, hits, len(hits))
 	out := hitList{Rules: text, Hits: hits}
 	if out.Hits == nil {
@@ -793,10 +802,10 @@ func toDTO(chunks []parser.Chunk) []chunkDTO {
 
 func clampLimit(n int) int { return query.ClampLimit(n) }
 
-func fitHits(chunks []parser.Chunk, maxTokens int) ([]hitDTO, error) {
+func fitHits(chunks []parser.Chunk, maxTokens int, detail string) ([]hitDTO, error) {
 	n := len(chunks)
 	k, err := fitPrefix(n, maxTokens, func(k int) (int, error) {
-		payload := toHits(chunks[:k])
+		payload := shapeHits(chunks[:k], detail)
 		if k < n {
 			payload = append(payload, diagnosticHit(n-k))
 		}
@@ -807,11 +816,29 @@ func fitHits(chunks []parser.Chunk, maxTokens int) ([]hitDTO, error) {
 	}
 	switch {
 	case k == n:
-		return toHits(chunks), nil
+		return shapeHits(chunks, detail), nil
 	case k == 0:
 		return []hitDTO{diagnosticHit(n)}, nil
 	}
-	return append(toHits(chunks[:k]), diagnosticHit(n-k)), nil
+	return append(shapeHits(chunks[:k], detail), diagnosticHit(n-k)), nil
+}
+
+// autoFullHits is how many hits keep their body in "auto" detail.
+const autoFullHits = 3
+
+// shapeHits turns chunks into hits. "full" keeps every body, "brief" only each
+// chunk's first line, and "auto" (or empty) the first autoFullHits bodies, so
+// the tail of a result costs one line each.
+func shapeHits(chunks []parser.Chunk, detail string) []hitDTO {
+	out := toHits(chunks)
+	for i := range out {
+		if detail == "full" || (detail != "brief" && i < autoFullHits) {
+			continue
+		}
+		first, _, _ := strings.Cut(out[i].Lines, "\n")
+		out[i].Lines, out[i].Brief = first, true
+	}
+	return out
 }
 
 func toHits(chunks []parser.Chunk) []hitDTO {

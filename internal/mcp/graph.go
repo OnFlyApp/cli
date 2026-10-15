@@ -212,7 +212,7 @@ func (h *tools) finishGraph(_ context.Context, tool string, in any, start time.T
 		return nil, hitList{}, err
 	}
 	budget, text := h.fitBudget(chunkQuery(chunks))
-	hits, err := fitHits(chunks, budget)
+	hits, err := fitHits(chunks, budget, "full")
 	h.record(tool, in, start, hits, len(hits))
 	out := hitList{Rules: text, Hits: hits}
 	if out.Hits == nil {
