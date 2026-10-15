@@ -290,4 +290,10 @@ func runExtraContract(t *testing.T, st Store) {
 	if got, _ = st.SearchSummary(ctx, "tries a request", 5, ""); len(got) != 0 {
 		t.Fatalf("stale summary text: %+v", got)
 	}
+	if c, ok := st.(Checker); ok {
+		stats, err := c.Stats(ctx)
+		if err != nil || stats.MaxChunkBytes <= 0 || stats.LongChunks != 0 {
+			t.Fatalf("chunk size stats: %+v %v", stats, err)
+		}
+	}
 }

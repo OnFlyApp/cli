@@ -14,6 +14,10 @@ Only to the embedder you choose. With **Ollama**, nothing leaves. With **OpenAI*
 
 Yes, with a chat model: `reranker.provider: ollama`. Ollama has no rerank endpoint, so Onfly asks the model to order the candidates in a single prompt. It works, but it is slower than a dedicated reranker and depends on the model following the format. A 7B instruction model is a sensible minimum. See [Reranker](configuration.md#ollama-llm-based).
 
+### Are long chunks cut before they are embedded?
+
+They can be. Ollama's default window is 4096 tokens and longer input is cut silently; Onfly raises the window to `max_input_tokens` plus 512 for Ollama, but a model that reads fewer tokens than you set (`nomic-embed-text`, `embeddinggemma` v1, `mxbai-embed-large`) still cuts the rest. `onfly stats` prints a `hint:` for those models and when chunks are over about 2000 tokens. Set `embedder.max_input_tokens` below the model's context and reindex: longer chunks are then split with overlap.
+
 ### The right file is found but ranked 2nd to 4th. How do I sharpen it?
 
 In order of effort: (1) keep the defaults, which weigh the semantic list above the keyword list and add a symbol-name list; (2) run `onfly eval tune` on your own cases and adopt its numbers if the check half improves; (3) set `search.group_by: file` if you mostly ask about files; (4) turn on [chunk summaries](configuration.md#chunk-summaries) for questions that use none of the code's words. Query expansion and a reranker trade latency for recall; measure them with `onfly eval` first.

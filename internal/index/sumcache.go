@@ -15,10 +15,15 @@ import (
 const promptVersion = "v1"
 
 // summaryKey identifies the model's answer for a chunk: the model, whether
-// questions were requested, the chunk type and name, and its exact text.
-func summaryKey(model string, questions int, c parser.Chunk) string {
-	return ContentHash([]byte(promptVersion + "\x00" + model + "\x00" + strconv.Itoa(questions) + "\x00" +
-		c.Type + "\x00" + c.Metadata["name"] + "\x00" + c.Content))
+// questions were requested, the chunk type and name, its exact text, and the
+// context block when one is sent.
+func summaryKey(model string, questions int, c parser.Chunk, context string) string {
+	key := promptVersion + "\x00" + model + "\x00" + strconv.Itoa(questions) + "\x00" +
+		c.Type + "\x00" + c.Metadata["name"] + "\x00" + c.Content
+	if context != "" {
+		key += "\x00" + context // only when used, so older cache lines stay valid
+	}
+	return ContentHash([]byte(key))
 }
 
 // summaryCache is an append-only JSON-lines file of model answers keyed by

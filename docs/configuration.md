@@ -22,7 +22,7 @@ embedder:
   endpoint: http://localhost:11434
   model: embeddinggemma-2
   dimensions: 768                # required, at least 1
-  max_input_tokens: 6000         # default 6000; split chunks above this
+  max_input_tokens: 6000         # default 6000; split chunks above this, and (Ollama) the context window requested
   # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY; voyage to VOYAGE_API_KEY
   # query_prefix: "task: code retrieval | query: "   # prepended to every search query
   # document_prefix: "title: none | text: "          # prepended to every indexed chunk; needs a fresh index
@@ -220,12 +220,15 @@ indexer:
     # timeout_ms: 60000          # one call; default 60000
     # batch: 4                   # chunks of one file per call; 0 or 1 is one call per chunk
     # files: true                # also write one summarised "file" chunk per file
+    # context: true             # tell the model which symbols of the same file the chunk calls, is called by, sits next to
     # questions: 3               # also ask for search-style questions per chunk (0 to 5; disables batching)
     # cache: .onfly/summaries.jsonl   # model answers kept across indexes; "none" turns it off
   # summary_vector: true         # embed the summary as a second vector (see below)
 ```
 
 **Cache.** Every answer is also appended to `.onfly/summaries.jsonl`, keyed by the model, the prompt version, the chunk's type and name and its exact text. Deleting the database, changing the embedder or a prefix, or rebuilding on another machine that has the file therefore does not call the model again: a full reindex of this repository dropped from 17 minutes to about a minute and a half. A different summary model or `questions` value has different keys and asks again. Keep the file out of git like `vector.db`.
+
+**Context.** `context: true` adds three lines to each prompt, built from the chunk's own file only: `Calls (same file)`, `Called by (same file)` and `Nearby`. A chunk's role often shows in who uses it, and the model otherwise sees only the body. The text is part of the cache key, so turning it on asks the model again for every chunk, and the cache entries made without it stay valid for when it is off. Cross-file callers are not used on purpose: they change as the index grows, which would invalidate summaries on every run. Measured on this repository it made no difference overall (MRR 0.810 against 0.816, within noise; hand-written cases 0.793 against 0.756) and took 20 minutes of model time, so it is off by default. Try it on a codebase whose files hold many small cooperating functions.
 
 **Questions and a summary vector.** `questions: 3` asks the model for three search-style questions per chunk and embeds them with the summary; `summary_vector: true` embeds the summary and questions as a second vector per chunk and adds a list from it. Both were measured and neither helped on this repository (MRR 0.788 and 0.789 against 0.797 without; `questions` also cost 43 minutes of model time), so both are off by default. They are there for codebases whose questions look unlike their code.
 
@@ -316,6 +319,8 @@ Voyage: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.vo
 The HTTP timeout is 60 seconds. Batches are 32 texts, or 128 with `onfly index --ci`. HTTP 429, 502, 503 and 504, and network errors, are retried up to five times. `Retry-After` of 1–30 seconds replaces the backoff. Other status codes, including a plain 500, fail immediately.
 
 `embeddinggemma-2` (`ollama pull embeddinggemma-2`, 768 dimensions) was the best of six models tried here; see [Evaluation](evaluation.md#embedding-models).
+
+**Context window.** Ollama loads an embedding model with a 4096-token window and cuts longer input without any error. `max_input_tokens` defaults to 6000, so Onfly sends `num_ctx: max_input_tokens + 512` with every Ollama embed request whenever that is above 4096, and `embedder.alt` inherits the value. Models that read fewer tokens than that (`nomic-embed-text` 2048, `embeddinggemma` v1 2048, `mxbai-embed-large` 512) cut the excess regardless; `onfly stats` and `onfly doctor` print a `hint:` when the configured model is one of them, and when the index holds chunks longer than about 2000 tokens. Set `max_input_tokens` to the model's context minus a margin and reindex so those chunks are split instead of cut. This repository has no chunk above 1900 tokens (median 98, 99th percentile 838), so it is unaffected.
 
 `dimensions` is stored in the database on first init. A later run with a different value fails and does not alter the schema. Point `dsn` at a new file or database if you change the model size.
 

@@ -827,6 +827,10 @@ func (p *Postgres) Stats(ctx context.Context) (IndexStats, error) {
 		return out, err
 	}
 	rows.Close()
+	if err := p.pool.QueryRow(ctx, `SELECT coalesce(max(length(content)), 0), count(*) FILTER (WHERE length(content) > $1) FROM chunks`, LongChunkBytes).
+		Scan(&out.MaxChunkBytes, &out.LongChunks); err != nil {
+		return out, err
+	}
 	out.Unnamed, err = p.UnnamedChunks(ctx)
 	return out, err
 }

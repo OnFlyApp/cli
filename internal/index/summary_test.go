@@ -270,3 +270,31 @@ func TestParseGeneratedQuestions(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+func TestContextForUsesOnlyTheFile(t *testing.T) {
+	mk := func(name string, calls ...string) parser.Chunk {
+		return parser.Chunk{Metadata: map[string]string{"name": name}, Outbound: calls}
+	}
+	chunks := []parser.Chunk{
+		mk("Run", "Gather", "Fuse", "Printf", "Store.Search"), // Printf is not defined here
+		mk("Gather", "Embed"),
+		mk("Fuse", "dedupe"),
+		mk("dedupe"),
+	}
+	ctx := contextFor(chunks)
+	got := ctx(0)
+	if !strings.Contains(got, "Calls (same file): Gather, Fuse") || strings.Contains(got, "Printf") || strings.Contains(got, "Called by") {
+		t.Fatalf("%q", got)
+	}
+	if got := ctx(2); !strings.Contains(got, "Called by (same file): Run") || !strings.Contains(got, "Calls (same file): dedupe") || !strings.Contains(got, "Nearby: ") {
+		t.Fatalf("%q", got)
+	}
+	c := chunks[1]
+	c.Content = "func Gather() {}"
+	if summaryKey("m", 0, c, "") == summaryKey("m", 0, c, "Calls (same file): x\n") {
+		t.Fatal("the context must be part of the cache key")
+	}
+	if p := summaryPrompt(c, 0, "Calls (same file): x\n"); !strings.Contains(p, "Calls (same file): x") {
+		t.Fatalf("%q", p)
+	}
+}

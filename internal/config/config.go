@@ -177,6 +177,10 @@ type Summaries struct {
 	// Questions asks for this many search-style questions per chunk besides the
 	// summary (0 to 5); they are embedded with it. It disables batching.
 	Questions int `yaml:"questions"`
+	// Context adds to each summary prompt which symbols of the same file the
+	// chunk calls, is called by, and sits next to. A different prompt means new
+	// cache keys, so turning it on asks the model again.
+	Context bool `yaml:"context"`
 	// Cache is a JSON-lines file of model answers keyed by chunk text, reused by
 	// later indexes. Empty means .onfly/summaries.jsonl; "none" turns it off.
 	Cache string `yaml:"cache"`
@@ -282,6 +286,14 @@ func finish(cfg Config) (Config, error) {
 }
 
 func ApplyDefaults(cfg *Config) {
+	if cfg.Embedder.Alt != nil && cfg.Embedder.Alt.MaxInputTokens == 0 {
+		alt := *cfg.Embedder.Alt
+		alt.MaxInputTokens = cfg.Embedder.MaxInputTokens
+		if alt.MaxInputTokens == 0 {
+			alt.MaxInputTokens = 6000
+		}
+		cfg.Embedder.Alt = &alt
+	}
 	if cfg.Embedder.MaxInputTokens == 0 {
 		cfg.Embedder.MaxInputTokens = 6000
 	}
@@ -450,6 +462,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Indexer.Summaries.Files {
 		out.Indexer.Summaries.Files = true
+	}
+	if child.Indexer.Summaries.Context {
+		out.Indexer.Summaries.Context = true
 	}
 	if child.Indexer.Summaries.Questions != 0 {
 		out.Indexer.Summaries.Questions = child.Indexer.Summaries.Questions

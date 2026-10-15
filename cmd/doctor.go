@@ -85,7 +85,7 @@ func checkDatabase(ctx context.Context, cfg config.Config, out io.Writer) error 
 		fmt.Fprintf(out, "chunks: %d without metadata.name\n", n)
 	}
 	if s, err := st.Stats(ctx); err == nil {
-		for _, h := range indexHints(s) {
+		for _, h := range append(indexHints(s), contextHints(cfg.Embedder.Model, cfg.Embedder.MaxInputTokens, s)...) {
 			fmt.Fprintf(out, "hint: %s\n", h)
 		}
 	}

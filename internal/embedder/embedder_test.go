@@ -387,3 +387,26 @@ func TestWithPrefixesSplitsQueriesFromDocuments(t *testing.T) {
 		t.Fatal("no prefixes must return the embedder unchanged")
 	}
 }
+
+func TestOllamaSendsContextWindowForLongInputs(t *testing.T) {
+	if numCtxFor(0) != 0 || numCtxFor(3000) != 0 || numCtxFor(6000) != 6512 {
+		t.Fatalf("%d %d %d", numCtxFor(0), numCtxFor(3000), numCtxFor(6000))
+	}
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Options map[string]any `json:"options"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		got = in.Options
+		_ = json.NewEncoder(w).Encode(map[string]any{"embeddings": [][]float32{{1, 2}}})
+	}))
+	defer srv.Close()
+	e, err := New(config.Embedder{Provider: "ollama", Endpoint: srv.URL, Model: "m", Dimensions: 2, MaxInputTokens: 6000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Embed(context.Background(), "x"); err != nil || got["num_ctx"] != float64(6512) {
+		t.Fatalf("options %v err %v", got, err)
+	}
+}

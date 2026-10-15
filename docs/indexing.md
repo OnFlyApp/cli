@@ -11,7 +11,7 @@ A file is indexed when all of these hold:
 
 Directory symlinks are not followed. A file symlink is read only when its target stays inside the project and is not excluded, gitignored, or a secret name. The walker does not read files that have no parser.
 
-Each selected file is hashed with xxHash64. A stored hash that matches is skipped: the parser and the embedder are not called. Otherwise the file is parsed, split when a chunk is over `embedder.max_input_tokens`, embedded, and stored in one transaction. The split overlap is 12% of that limit. The stored `file_path` uses forward slashes and is relative to the project root.
+Each selected file is hashed with xxHash64. A stored hash that matches is skipped: the parser and the embedder are not called. Otherwise the file is parsed, split when a chunk is over `embedder.max_input_tokens` (the same number sizes the context window requested from Ollama), embedded, and stored in one transaction. The split overlap is 12% of that limit. The stored `file_path` uses forward slashes and is relative to the project root.
 
 The default embed batch is 32. `onfly index --ci` uses 128. A WASM or stdio parse that runs longer than `indexer.parse_timeout_ms` (default 5 seconds) is cancelled. With `indexer.concurrency` above 1, that many files are parsed, embedded and committed in parallel; each file is still committed in its own transaction. Each WASM runtime is limited to 256 MiB.
 

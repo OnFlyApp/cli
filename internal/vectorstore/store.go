@@ -71,7 +71,13 @@ type IndexStats struct {
 	Workspaces map[string]int
 	// ByExt groups indexed text by file extension.
 	ByExt map[string]ExtStat
+	// MaxChunkBytes is the size of the largest chunk; LongChunks counts chunks
+	// above LongChunkBytes (about 2000 tokens of code).
+	MaxChunkBytes, LongChunks int
 }
+
+// LongChunkBytes is the size above which a chunk may not fit a 2048-token embedder.
+const LongChunkBytes = 8192
 
 // ExtStat is the index footprint of one file extension.
 type ExtStat struct {

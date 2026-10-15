@@ -1109,6 +1109,10 @@ func (s *SQLite) Stats(ctx context.Context) (IndexStats, error) {
 		return out, err
 	}
 	rows.Close()
+	if err := s.db.QueryRowContext(ctx, `SELECT coalesce(max(length(content)), 0), coalesce(sum(length(content) > ?), 0) FROM chunk_meta`, LongChunkBytes).
+		Scan(&out.MaxChunkBytes, &out.LongChunks); err != nil {
+		return out, err
+	}
 	out.Unnamed, err = s.UnnamedChunks(ctx)
 	return out, err
 }

@@ -121,6 +121,8 @@ Same 573 cases, embeddinggemma-2 with `qwen2.5-coder:7b` summaries, fresh index 
 
 The `ollama-score` reranker (Qwen3-Reranker-4B, 20 candidates) was measured on the 45 hand-written cases only, because it took 18 s per search: MRR 0.768 against 0.767 without it, R@3 0.89 against 0.82, R@1 0.62 against 0.67. It reorders the top three but does not improve the first hit, and costs more than the rest of the pipeline put together, so it stays off.
 
+The summary prompt with same-file context (`summaries.context`) scored MRR 0.810 against 0.816 for the final configuration (hand-written 0.793 against 0.756); no chunk in this repository is long enough to be cut by the embedder (longest about 1900 tokens, 99th percentile 838).
+
 `onfly eval tune --learn` on the best row found no weights that beat the defaults on the check half (-0.003 MRR). With `--explain`, 157 of 573 cases were not first: 85 behind another file's code, 33 behind another symbol of the right file, 23 behind a docs section, 16 the other way round. With `--judge qwen2.5-coder:7b`, 130 of those had a better-ranked result judged to answer the question, which lifts MRR from 0.812 to 0.947; most of the "misses" are valid answers that differ from the single expected chunk.
 
 ## Embedding models

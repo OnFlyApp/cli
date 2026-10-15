@@ -51,6 +51,7 @@ indexer:
   # summaries:                     # one-sentence description per chunk, embedded with the code (slower index)
   #   provider: ollama
   #   model: qwen2.5-coder:7b     # qwen2.5-coder:3b indexes faster for a small loss
+  #   context: true               # tell the model which symbols of the file a chunk calls and sits next to
   # embed_neighbours: true         # add nearby symbol names to each embedded chunk
 
 rules:

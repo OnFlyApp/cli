@@ -72,7 +72,17 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		timeout = defaultSummaryLimit
 	}
 	model := s.cfg.Indexer.Summaries.Model
-	key := func(c parser.Chunk) string { return summaryKey(model, wantQ, c) }
+	var ctxOf func(i int) string
+	if s.cfg.Indexer.Summaries.Context {
+		ctxOf = contextFor(chunks)
+	}
+	ctxAt := func(i int) string {
+		if ctxOf == nil {
+			return ""
+		}
+		return ctxOf(i)
+	}
+	key := func(i int) string { return summaryKey(model, wantQ, chunks[i], ctxAt(i)) }
 	var todo []int
 	for i := range chunks {
 		c := &chunks[i]
@@ -81,10 +91,10 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		}
 		if g, ok := stored[c.Content]; ok {
 			g.apply(c)
-			s.sums.put(key(*c), g) // an index made before the cache existed seeds it
+			s.sums.put(key(i), g) // an index made before the cache existed seeds it
 			continue
 		}
-		if g, ok := s.sums.get(key(*c)); ok {
+		if g, ok := s.sums.get(key(i)); ok {
 			g.apply(c)
 			delete(prev, c.Content)
 			continue
@@ -101,7 +111,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 			return
 		}
 		g.apply(&chunks[i])
-		s.sums.put(key(chunks[i]), g)
+		s.sums.put(key(i), g)
 		delete(prev, chunks[i].Content)
 	}
 	ask := func(prompt string) (string, bool) {
@@ -140,7 +150,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 			if failed {
 				break
 			}
-			if out, ok := ask(summaryPrompt(chunks[i], wantQ)); ok {
+			if out, ok := ask(summaryPrompt(chunks[i], wantQ, ctxAt(i))); ok {
 				set(i, parseGenerated(out, wantQ))
 			}
 		}
@@ -176,7 +186,7 @@ func parseGenerated(out string, wantQ int) generated {
 	return generated{Summary: cleanSummary(out)}
 }
 
-func summaryPrompt(c parser.Chunk, questions int) string {
+func summaryPrompt(c parser.Chunk, questions int, context string) string {
 	code := c.Content
 	if r := []rune(code); len(r) > summaryMaxInput {
 		code = string(r[:summaryMaxInput])
@@ -194,6 +204,9 @@ func summaryPrompt(c parser.Chunk, questions int) string {
 	b.WriteString("File: " + c.FilePath + "\n")
 	if n := c.Metadata["name"]; n != "" {
 		b.WriteString("Name: " + n + "\n")
+	}
+	if context != "" {
+		b.WriteString(context)
 	}
 	b.WriteString("\n" + code)
 	return b.String()
@@ -320,4 +333,92 @@ func addNeighbours(chunks []parser.Chunk) {
 			chunks[i].Metadata["neighbours"] = strings.Join(near, ", ")
 		}
 	}
+}
+
+const (
+	contextCalls   = 8
+	contextCallers = 6
+	contextNearby  = 6
+	contextSpan    = 3
+)
+
+// contextFor returns, for each chunk of one file, a short block that says
+// where the chunk sits: which symbols of the same file it calls and is called
+// by, and which symbols are next to it. Only the file itself is used, so the
+// text for a chunk does not change when other files are indexed, and the
+// summary cache stays valid. The model gets it to describe a chunk's role, not
+// only its body.
+func contextFor(chunks []parser.Chunk) func(i int) string {
+	defined := map[string]bool{}
+	for _, c := range chunks {
+		if n := c.Metadata["name"]; n != "" {
+			defined[n] = true
+		}
+	}
+	callers := map[string][]string{}
+	for _, c := range chunks {
+		self := c.Metadata["name"]
+		if self == "" {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, callee := range c.Outbound {
+			callee = callee[strings.LastIndex(callee, ".")+1:]
+			if callee == self || !defined[callee] || seen[callee] {
+				continue
+			}
+			seen[callee] = true
+			callers[callee] = append(callers[callee], self)
+		}
+	}
+	return func(i int) string {
+		c := chunks[i]
+		self := c.Metadata["name"]
+		var b strings.Builder
+		var calls []string
+		seen := map[string]bool{self: true}
+		for _, callee := range c.Outbound {
+			callee = callee[strings.LastIndex(callee, ".")+1:]
+			if defined[callee] && !seen[callee] && len(calls) < contextCalls {
+				seen[callee] = true
+				calls = append(calls, callee)
+			}
+		}
+		if len(calls) > 0 {
+			b.WriteString("Calls (same file): " + strings.Join(calls, ", ") + "\n")
+		}
+		by := dedupeKeep(callers[self], self, contextCallers)
+		if len(by) > 0 {
+			b.WriteString("Called by (same file): " + strings.Join(by, ", ") + "\n")
+		}
+		var near []string
+		nseen := map[string]bool{self: true}
+		for d := 1; d <= contextSpan && len(near) < contextNearby; d++ {
+			for _, j := range []int{i - d, i + d} {
+				if j < 0 || j >= len(chunks) || len(near) >= contextNearby {
+					continue
+				}
+				if n := chunks[j].Metadata["name"]; n != "" && !nseen[n] {
+					nseen[n] = true
+					near = append(near, n)
+				}
+			}
+		}
+		if len(near) > 0 {
+			b.WriteString("Nearby: " + strings.Join(near, ", ") + "\n")
+		}
+		return b.String()
+	}
+}
+
+func dedupeKeep(in []string, skip string, limit int) []string {
+	var out []string
+	seen := map[string]bool{skip: true}
+	for _, s := range in {
+		if !seen[s] && len(out) < limit {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }

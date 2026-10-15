@@ -41,3 +41,21 @@ func TestIndexHintsFlagNoisyExtensions(t *testing.T) {
 		t.Fatalf("empty index: %v", got)
 	}
 }
+
+func TestContextHints(t *testing.T) {
+	var s vectorstore.IndexStats
+	got := contextHints("nomic-embed-text", 0, s)
+	if len(got) != 1 || !strings.Contains(got[0], "reads about 2048 tokens") {
+		t.Fatalf("%v", got)
+	}
+	if got := contextHints("nomic-embed-text", 1800, s); len(got) != 0 {
+		t.Fatalf("a max_input_tokens that fits needs no hint: %v", got)
+	}
+	if got := contextHints("embeddinggemma-2", 0, s); len(got) != 0 {
+		t.Fatalf("a long-context model needs no hint: %v", got)
+	}
+	s.LongChunks, s.MaxChunkBytes = 3, 20000
+	if got := contextHints("qwen3-embedding:0.6b", 6000, s); len(got) != 1 || !strings.Contains(got[0], "3 chunks are longer") {
+		t.Fatalf("%v", got)
+	}
+}
