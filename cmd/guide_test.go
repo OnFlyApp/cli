@@ -19,7 +19,7 @@ func TestGuideWriteIsIdempotent(t *testing.T) {
 	}
 	b, _ := os.ReadFile(f)
 	s := string(b)
-	if strings.Count(s, guideStart) != 1 || !strings.Contains(s, "keep this") || !strings.HasPrefix(s, "# Mine") || !strings.Contains(s, "get_impact") {
+	if strings.Count(s, guideStart) != 1 || !strings.Contains(s, "keep this") || !strings.HasPrefix(s, "# Mine") || !strings.Contains(s, "graph") {
 		t.Fatalf("%s", s)
 	}
 }

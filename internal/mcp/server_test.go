@@ -85,8 +85,8 @@ func TestTools(t *testing.T) {
 	defer session.Close()
 
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "search_keyword",
-		Arguments: map[string]any{"keyword": "getuserid"},
+		Name:      "find",
+		Arguments: map[string]any{"query": "getuserid"},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("keyword %v %+v", err, res)
@@ -397,8 +397,8 @@ func TestGetReferences(t *testing.T) {
 	}
 	session := openServer(t, config.Config{}, store, fakeEmbedder{})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "get_references",
-		Arguments: map[string]any{"name": "User"},
+		Name:      "graph",
+		Arguments: map[string]any{"name": "User", "direction": "references"},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
@@ -408,8 +408,8 @@ func TestGetReferences(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 	res, err = session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "get_references",
-		Arguments: map[string]any{"name": "Missing"},
+		Name:      "graph",
+		Arguments: map[string]any{"name": "Missing", "direction": "references"},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
@@ -437,8 +437,8 @@ func TestWorkspaceArg(t *testing.T) {
 	}
 	session := openServer(t, config.Config{}, store, fakeEmbedder{})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_keyword",
-		Arguments: map[string]any{"keyword": "alpha", "workspace": "frontend"},
+		Name:      "find",
+		Arguments: map[string]any{"query": "alpha", "workspace": "frontend"},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
@@ -468,8 +468,8 @@ func TestTraceLine(t *testing.T) {
 	tracePath := filepath.Join(t.TempDir(), "mcp_trace.jsonl")
 	session := openServer(t, config.Config{Server: config.Server{TraceFile: tracePath}}, store, fakeEmbedder{})
 	res, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
-		Name:      "search_keyword",
-		Arguments: map[string]any{"keyword": "getuserid"},
+		Name:      "find",
+		Arguments: map[string]any{"query": "getuserid"},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
@@ -489,7 +489,7 @@ func TestTraceLine(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
 		t.Fatal(err)
 	}
-	if rec.Tool != "search_keyword" || rec.Chunks < 1 {
+	if rec.Tool != "find" || rec.Chunks < 1 {
 		t.Fatalf("%+v", rec)
 	}
 }
@@ -731,7 +731,7 @@ func TestSearchToolsAndFusion(t *testing.T) {
 	for _, tool := range listed.Tools {
 		names[tool.Name] = true
 	}
-	if !names["search"] || !names["search_keyword"] || names["search_semantic"] {
+	if !names["search"] || !names["find"] || names["search_semantic"] {
 		t.Fatalf("%v", names)
 	}
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
@@ -764,8 +764,8 @@ func TestSearchToolsAndFusion(t *testing.T) {
 		t.Fatalf("%s", raw)
 	}
 	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "search_keyword",
-		Arguments: map[string]any{"keyword": "getUserId"},
+		Name:      "find",
+		Arguments: map[string]any{"query": "getUserId"},
 	})
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)

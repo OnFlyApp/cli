@@ -104,12 +104,12 @@ func TestE2EGoParser(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
-		Name:      "search_keyword",
-		Arguments: map[string]any{"keyword": "Execute"},
+		Name:      "find",
+		Arguments: map[string]any{"query": "Execute"},
 	})
 	session.Close()
 	store.Close()
-	if err != nil || res.IsError || !strings.Contains(jsonText(res.StructuredContent), "Execute") {
+	if err != nil || res.IsError || len(res.Content) == 0 || !strings.Contains(jsonText(res.Content[0]), "Execute") {
 		t.Fatalf("%v %+v", err, res)
 	}
 

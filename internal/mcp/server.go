@@ -204,15 +204,12 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
 	addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns the symbol, a summary and the code of the best matches; the tail of the list is signatures only."}, h.search)
-	addTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier or string you already know, like Grep over the index. For a description of behavior, call search."}, h.searchKeyword)
-	addTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find_symbols instead of reading the whole file."}, h.component)
-	addTool(srv, &sdkmcp.Tool{Name: "get_references", Description: "Return chunks whose outbound references include the name."}, h.references)
-	addTool(srv, &sdkmcp.Tool{Name: "get_callees", Description: "Return the chunks a symbol calls, for names defined in this index."}, h.getCallees)
-	addTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first. Use before changing a function to see what it can break."}, h.getImpact)
+	addTool(srv, &sdkmcp.Tool{Name: "find", Description: "Exact lookup. kind text: chunks containing a string or identifier, like Grep over the index. kind symbol: definitions by name; * and ? are wildcards."}, h.find)
+	addTool(srv, &sdkmcp.Tool{Name: "graph", Description: "Follow calls from a symbol: callers (what breaks if it changes), callees (what it uses) or references (where its name appears)."}, h.graph)
+	addTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find instead of reading the whole file."}, h.component)
 	addTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
 	addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
 	addTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
-	addTool(srv, &sdkmcp.Tool{Name: "find_symbols", Description: "Find definitions by name: a prefix, or a pattern with * and ?. Case-insensitive."}, h.findSymbols)
 	h.addPrompts(srv)
 	addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
 	addTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
@@ -373,12 +370,12 @@ func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	start := time.Now()
 	chunks, err := h.store.SearchKeyword(ctx, in.Keyword, keywordLimit, h.scope(in.Workspace))
 	if err != nil {
-		h.record("search_keyword", in, start, nil, 0)
+		h.record("find", in, start, nil, 0)
 		return nil, hitList{}, err
 	}
 	budget, text := h.fitBudget(chunkQuery(chunks))
 	hits, err := fitHits(chunks, budget, "full")
-	h.record("search_keyword", in, start, hits, len(hits))
+	h.record("find", in, start, hits, len(hits))
 	out := hitList{Rules: text, Hits: hits}
 	if out.Hits == nil {
 		out.Hits = []hitDTO{}
@@ -429,23 +426,6 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in com
 	h.record("get_component_ast", in, start, dto, 1)
 	dto.Rules = text
 	return contentWithRules(text, dto), dto, nil
-}
-
-func (h *tools) references(ctx context.Context, _ *sdkmcp.CallToolRequest, in nameIn) (*sdkmcp.CallToolResult, chunkList, error) {
-	start := time.Now()
-	chunks, err := h.store.GetReferences(ctx, in.Name)
-	if err != nil {
-		h.record("get_references", in, start, nil, 0)
-		return nil, chunkList{}, err
-	}
-	budget, text := h.fitBudget(chunkQuery(chunks))
-	dtos, err := fit(chunks, budget)
-	h.record("get_references", in, start, dtos, len(dtos))
-	if dtos == nil {
-		dtos = []chunkDTO{}
-	}
-	out := chunkList{Rules: text, Chunks: dtos}
-	return contentWithRules(text, out), out, err
 }
 
 func (h *tools) readFile(_ context.Context, _ *sdkmcp.CallToolRequest, in pathIn) (*sdkmcp.CallToolResult, fileOut, error) {
@@ -714,13 +694,9 @@ func (h *tools) trackUsage(tool string, args, result any) {
 			}
 		}
 		h.usage.Search(in.Query, seen)
-	case nameIn:
-		_ = h.usage.Open("", in.Name)
 	case componentIn:
 		_ = h.usage.Open("", in.Name)
-	case calleesIn:
-		_ = h.usage.Open(in.FilePath, in.Name)
-	case impactIn:
+	case graphIn:
 		_ = h.usage.Open(in.FilePath, in.Name)
 	case pathIn:
 		_ = h.usage.Open(in.Path, "")

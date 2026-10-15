@@ -40,7 +40,7 @@ func TestSearchDetailAutoShrinksTail(t *testing.T) {
 func TestInstructionsAndToolDescriptions(t *testing.T) {
 	store := seedUsers(t)
 	session := openServer(t, config.Config{}, store, fakeEmbedder{})
-	if got := session.InitializeResult().Instructions; !strings.Contains(got, "get_impact") || !strings.Contains(got, "get_tests") {
+	if got := session.InitializeResult().Instructions; !strings.Contains(got, "graph") || !strings.Contains(got, "get_tests") {
 		t.Fatalf("instructions must route to the graph tools: %q", got)
 	}
 	res, err := session.ListTools(context.Background(), nil)
@@ -54,7 +54,7 @@ func TestInstructionsAndToolDescriptions(t *testing.T) {
 			t.Errorf("%s: description length %d", tool.Name, len(tool.Description))
 		}
 	}
-	for _, name := range []string{"search", "get_tests", "get_history", "get_impact"} {
+	for _, name := range []string{"search", "get_tests", "get_history", "graph", "find"} {
 		if !seen[name] {
 			t.Errorf("tool %s is not registered", name)
 		}

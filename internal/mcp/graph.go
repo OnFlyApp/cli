@@ -191,19 +191,37 @@ func (h *tools) attributed(ctx context.Context, t definition, refs []parser.Chun
 	return out, nil
 }
 
-func (h *tools) getCallees(ctx context.Context, _ *sdkmcp.CallToolRequest, in calleesIn) (*sdkmcp.CallToolResult, hitList, error) {
-	start := time.Now()
-	chunks, err := h.callees(ctx, in)
-	if errors.Is(err, vectorstore.ErrNotFound) {
-		err = fmt.Errorf("component %q not found", in.Name)
-	}
-	return h.finishGraph(ctx, "get_callees", in, start, chunks, err)
+type graphIn struct {
+	Name      string `json:"name" jsonschema:"symbol name"`
+	Direction string `json:"direction,omitempty" jsonschema:"callers (default), callees or references"`
+	Depth     int    `json:"depth,omitempty" jsonschema:"caller levels, 1 to 4; default 2"`
+	Receiver  string `json:"receiver,omitempty" jsonschema:"receiver or class, for same-name definitions"`
+	FilePath  string `json:"file_path,omitempty" jsonschema:"file of the definition, for same-name definitions"`
 }
 
-func (h *tools) getImpact(ctx context.Context, _ *sdkmcp.CallToolRequest, in impactIn) (*sdkmcp.CallToolResult, hitList, error) {
+// graph follows calls from a symbol: its callers (transitively), the symbols
+// it calls, or the chunks that mention its name.
+func (h *tools) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, in graphIn) (*sdkmcp.CallToolResult, hitList, error) {
 	start := time.Now()
-	chunks, err := h.impact(ctx, in)
-	return h.finishGraph(ctx, "get_impact", in, start, chunks, err)
+	var chunks []parser.Chunk
+	var err error
+	switch in.Direction {
+	case "", "callers":
+		chunks, err = h.impact(ctx, impactIn{Name: in.Name, Depth: in.Depth, Receiver: in.Receiver, FilePath: in.FilePath})
+		if errors.Is(err, vectorstore.ErrNotFound) {
+			err = fmt.Errorf("component %q not found", in.Name)
+		}
+	case "callees":
+		chunks, err = h.callees(ctx, calleesIn{Name: in.Name, Receiver: in.Receiver, FilePath: in.FilePath})
+		if errors.Is(err, vectorstore.ErrNotFound) {
+			err = fmt.Errorf("component %q not found", in.Name)
+		}
+	case "references":
+		chunks, err = h.store.GetReferences(ctx, in.Name)
+	default:
+		err = fmt.Errorf("direction must be callers, callees or references, got %q", in.Direction)
+	}
+	return h.finishGraph(ctx, "graph", in, start, chunks, err)
 }
 
 func (h *tools) finishGraph(_ context.Context, tool string, in any, start time.Time, chunks []parser.Chunk, err error) (*sdkmcp.CallToolResult, hitList, error) {

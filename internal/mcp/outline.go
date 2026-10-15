@@ -113,7 +113,7 @@ func globMatcher(pattern string) (*regexp.Regexp, error) {
 func (h *tools) findSymbols(ctx context.Context, _ *sdkmcp.CallToolRequest, in findIn) (*sdkmcp.CallToolResult, outlineOut, error) {
 	start := time.Now()
 	if strings.TrimSpace(in.Pattern) == "" {
-		h.record("find_symbols", in, start, nil, 0)
+		h.record("find", in, start, nil, 0)
 		return nil, outlineOut{}, fmt.Errorf("pattern is required")
 	}
 	limit := in.Limit
@@ -123,12 +123,12 @@ func (h *tools) findSymbols(ctx context.Context, _ *sdkmcp.CallToolRequest, in f
 	limit = min(limit, maxSymbols)
 	re, err := globMatcher(strings.TrimSpace(in.Pattern))
 	if err != nil {
-		h.record("find_symbols", in, start, nil, 0)
+		h.record("find", in, start, nil, 0)
 		return nil, outlineOut{}, err
 	}
 	names, err := h.store.Names(ctx)
 	if err != nil {
-		h.record("find_symbols", in, start, nil, 0)
+		h.record("find", in, start, nil, 0)
 		return nil, outlineOut{}, err
 	}
 	var hit []string
@@ -167,7 +167,7 @@ loop:
 	}
 	text := h.rulesText(chunkQuery(chunks))
 	out.Rules = text
-	h.record("find_symbols", in, start, out, len(out.Symbols))
+	h.record("find", in, start, out, len(out.Symbols))
 	return contentWithRules(text, out), out, nil
 }
 
@@ -192,12 +192,12 @@ func (h *tools) addPrompts(srv *sdkmcp.Server) {
 	}
 	prompt("explain-component", "Explain a component",
 		"Explain what a component does, what it calls, and where it is used.",
-		"Explain `{name}`. Use find_symbols if the name may be ambiguous, then get_component_ast for its code, "+
-			"get_callees for what it depends on, and get_references for where it is used. "+
+		"Explain `{name}`. Use find (kind symbol) if the name may be ambiguous, then get_component_ast for its code, "+
+			"graph (direction callees) for what it depends on, and graph (direction references) for where it is used. "+
 			"Say what it does, its inputs and outputs, and anything surprising. Cite file paths and line numbers.")
 	prompt("review-impact", "Review the impact of changing a component",
 		"List what could break when a component changes.",
-		"I am about to change `{name}`. Use get_component_ast for its current code, then get_impact with depth 3 "+
+		"I am about to change `{name}`. Use get_component_ast for its current code, then graph (direction callers) with depth 3 "+
 			"to find direct and indirect callers. Group the callers by file, flag the ones most likely to break, "+
 			"and say which tests to run. If several definitions share the name, ask which one I mean.")
 }
