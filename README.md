@@ -55,13 +55,12 @@ New here? [Getting started](docs/getting-started.md) walks through each step and
 | Tool | Use it to |
 | --- | --- |
 | `search` | Find code by what it does. |
-| `search_keyword` | Find an exact identifier or string. |
-| `find_symbols` | List definitions by name: `Save*`, `parse`. |
+| `find` | Exact lookup: a string or identifier, or definitions by name (`Save*`). |
 | `get_file_outline` | See what a file defines, without reading it. |
 | `get_component_ast` | Fetch one function or type with its full code. |
-| `get_references`, `get_callees`, `get_impact` | Follow calls: who uses it, what it uses, what breaks. |
+| `graph` | Follow calls: who uses it, what it uses, what breaks. |
 | `get_tests`, `get_history` | Which tests mention a symbol, and which commits touched it. |
-| `read_file_raw`, `list_directory` | Read a file or browse a folder. |
+| `read_file_raw`, `list_directory` | Opt-in (`server.file_tools: true`): read a file or browse a folder. |
 
 Two ready-made prompts, `explain-component` and `review-impact`, chain these for you. Details are in [MCP server](docs/mcp.md).
 

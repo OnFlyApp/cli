@@ -114,6 +114,8 @@ Run without the redirect to see the entry, and which file it belongs in. Use `cu
 
 Run `onfly guide --write` once to add a short "when to use which tool" block to `CLAUDE.md`. The server also sends it as instructions; the file copy helps clients that ignore them. Running it again replaces the block and leaves the rest of the file alone.
 
+Every onfly tool is read-only. To stop Claude Code asking before each call, run `onfly mcp-config claude-code --allow` and merge the rule it prints into `.claude/settings.json`.
+
 To keep the index fresh while you work, start the server with `--watch` (add it to `args` in the MCP entry), or set `server.watch: true` in the config.
 
 ## 7. Check your setup

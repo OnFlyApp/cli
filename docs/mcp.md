@@ -37,9 +37,9 @@ Global rules are in the server instructions, so the model sees them before it ca
 // [Truncated: N rules omitted due to context limits.]
 ```
 
-`search`, `search_keyword`, `get_references`, `get_callees`, and `get_impact` then fit their code results into the remaining tokens. Frontmatter, templates, and fallback files are described in [configuration.md](configuration.md).
+`search`, `find` (text kind) and `graph` then fit their code results into the remaining tokens. Frontmatter, templates, and fallback files are described in [configuration.md](configuration.md).
 
-`onfly serve --max-tokens N` sets the search budget when `N` is greater than 0. Otherwise the budget is `server.max_tokens`, default 8192. The budget applies to `search`, `search_keyword`, `get_references`, `get_callees`, and `get_impact`. Rank order is kept. A chunk that does not fit beside the diagnostic line is dropped. If nothing fits, the only result is:
+`onfly serve --max-tokens N` sets the search budget when `N` is greater than 0. Otherwise the budget is `server.max_tokens`, default 8192. The budget applies to `search`, `find` (text kind) and `graph`. Rank order is kept. A chunk that does not fit beside the diagnostic line is dropped. If nothing fits, the only result is:
 
 ```text
 // [Truncated: N matches omitted due to context limits.]
@@ -47,11 +47,15 @@ Global rules are in the server instructions, so the model sees them before it ca
 
 When `server.trace_file` is set, each tool call appends one JSON object to it (off by default): `ts`, `tool`, `args`, `duration_ms`, `tokens`, `chunks`. The line stores arguments, not file bodies.
 
-When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `get_references`, `get_callees`, `get_impact`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
+When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `graph`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
 
-The server instructions carry a short routing guide (`search` for behavior, `get_component_ast` for a known symbol, `get_impact` and `get_tests` before a change, `get_history` for risk). `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
+The server instructions carry a short routing guide (`search` for behavior, `get_component_ast` for a known symbol, `graph` and `get_tests` before a change, `get_history` for risk). `onfly mcp-config claude-code --allow` prints the `.claude/settings.json` rule (`mcp__onfly`) that lets the read-only tools run without a prompt. `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
 
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
+
+Every result is one compact JSON text block: no output schema and no `structuredContent`, so tool definitions cost about 1,000 tokens per session (2,475 before the schemas were dropped and the tools merged). When rules apply, their text comes first and the JSON follows on the last line. Every tool is annotated read-only.
+
+A hit has `stale: true` when its file changed on disk after it was indexed (the content hash differs, or the file is gone); its line numbers may be wrong, so read the file before relying on them. Up to 20 files per result are checked.
 
 Tool failures are tool results with `isError` set. They are not protocol errors. The model can read the message and try again.
 
@@ -75,15 +79,6 @@ If the embedder fails, the result is keyword hits only and a warning goes to the
 
 If `workspace` is omitted, `query` is a single identifier, and that exact metadata name is stored in two or more workspaces, the tool returns an elicitation instead of searching. For the query `User` the message is `Which workspace should be searched for "User"?`. Decline does not embed. `*` and an explicit workspace do not ask.
 
-### `search_keyword`
-
-Finds chunks whose text contains an identifier the caller already knows. For a description of behavior, call `search`. Case-insensitive substring search, plus the full-text index. There is no limit argument. The server asks the store for 20 rows. It does not embed and does not fuse. The structured result is `{ "rules", "hits" }`, the same hit object as `search`.
-
-| Argument | Required | Notes |
-| --- | --- | --- |
-| `keyword` | yes | |
-| `workspace` | no | Empty uses the config value. `*` searches every workspace. Any other value matches that workspace. |
-
 ### `get_component_ast`
 
 Returns the chunk whose `metadata.name` equals `name`, as a JSON object with an optional `rules` field. Split parts of that symbol in the same file are joined. An unknown name is a tool error. When several definitions share the name (for example `Save` on two types), the earliest chunk is returned and the others are listed under `alternatives` as `{file_path, receiver, start_line}`, capped at 20 with the dropped count in `alternatives_omitted`. Pass `receiver` to pick one; an unknown receiver is a tool error.
@@ -92,37 +87,6 @@ Returns the chunk whose `metadata.name` equals `name`, as a JSON object with an 
 | --- | --- |
 | `name` | yes |
 | `receiver` | no |
-
-### `get_references`
-
-Returns `{ "rules", "chunks" }`. `chunks` are the rows whose `outbound` list contains `name`, at most 100. An unknown name returns an empty `chunks` array. Indexing fills `outbound` from `Name(` and `.Name` in the chunk text.
-
-| Argument | Required |
-| --- | --- |
-| `name` | yes |
-
-### `get_callees`
-
-Returns `{ "rules", "hits" }`. `hits` are the chunks for each name in the component's `outbound` list that is defined in this index, at most 50. Library and builtin names are skipped. An unknown component is a tool error.
-
-References carry names only, so a callee defined in several places resolves to the definition nearest the caller: same file, then same directory, then the longest shared parent, then the same receiver. `receiver` and `file_path` pick which definition of `name` to start from.
-
-| Argument | Required |
-| --- | --- |
-| `name` | yes |
-| `receiver` | no |
-| `file_path` | no |
-
-### `get_impact`
-
-Returns `{ "rules", "hits" }`. `hits` are the distinct chunks that call `name`, directly or through callers, nearest first, at most 100. `depth` is the number of caller levels, from 1 to 4, default 2. Without `receiver` or `file_path` the walk follows names, so two functions with the same name share callers. With either, the start is one definition, and a caller nearer to another same-name definition (same file, then same directory, then shared parent) is dropped; ties stay. Callers found along the way are followed as the exact definition they came from.
-
-| Argument | Required |
-| --- | --- |
-| `name` | yes |
-| `depth` | no |
-| `receiver` | no |
-| `file_path` | no |
 
 ### `get_tests`
 
@@ -146,6 +110,33 @@ Returns the commits that touched a symbol's lines, newest first: `{ "file_path",
 | `file_path` | no | Same. |
 | `limit` | no | 1 to 20, default 5. |
 
+### `find`
+
+Exact lookup, no embedding. `kind: "text"` finds chunks whose text contains the string or identifier, case-insensitively (substring search plus the full-text index, 20 rows, `{ "hits" }` like `search`). `kind: "symbol"` lists definitions by name, from the index: a pattern with `*` or `?` is a wildcard match over the whole name, anything else is a prefix; the result is `{ "symbols", "omitted" }`. `kind` defaults to `symbol` when `query` contains `*` or `?`, otherwise `text`. For a description of behavior, call `search`.
+
+| Argument | Required | Notes |
+| --- | --- | --- |
+| `query` | yes | |
+| `kind` | no | `text` or `symbol`. |
+| `limit` | no | Symbol results, 1 to 50, default 20. |
+| `workspace` | no | Text kind only. Same meaning as in `search`. |
+
+### `graph`
+
+Follows calls from a symbol. Returns `{ "hits" }`.
+
+- `direction: "callers"` (default): the distinct chunks that call `name`, directly or through callers, nearest first, at most 100. `depth` is the number of caller levels, 1 to 4, default 2. Without `receiver` or `file_path` the walk follows names, so two functions with the same name share callers. With either, the start is one definition, and a caller nearer to another same-name definition (same file, then same directory, then shared parent) is dropped. Use this before changing a function.
+- `direction: "callees"`: the chunks for each name in the component's `outbound` list that is defined in this index, at most 50. Library and builtin names are skipped. A callee defined in several places resolves to the definition nearest the caller. An unknown component is a tool error.
+- `direction: "references"`: the chunks whose `outbound` list contains `name`, at most 100. An unknown name returns no hits. Indexing fills `outbound` from `Name(` and `.Name` in the chunk text.
+
+| Argument | Required | Notes |
+| --- | --- | --- |
+| `name` | yes | |
+| `direction` | no | `callers`, `callees` or `references`. |
+| `depth` | no | Callers only. |
+| `receiver` | no | Picks one of several same-name definitions. |
+| `file_path` | no | Same. |
+
 ### `get_file_outline`
 
 Returns `{ "rules", "symbols", "omitted" }` for one indexed file, in file order. Each symbol has `name`, `type`, `receiver`, `part`, `start_line`, and `end_line`; unnamed chunks have no `name`. At most 300 symbols; `omitted` counts the rest. It reads the index only, so it costs far fewer tokens than `read_file_raw` and shows what a file defines. A path that is not indexed, or that leaves the project, is a tool error.
@@ -154,16 +145,9 @@ Returns `{ "rules", "symbols", "omitted" }` for one indexed file, in file order.
 | --- | --- |
 | `file_path` | yes |
 
-### `find_symbols`
-
-Lists definitions by name, from the index. Matching is case-insensitive: a pattern with `*` or `?` is a wildcard match over the whole name, anything else is a prefix. Returns `{ "rules", "symbols", "omitted" }`, where each symbol also carries `file_path`. An exact name sorts first, then shorter names. Every definition of a matching name is listed, up to `limit` (default 20, at most 50); `omitted` counts the rest. Use it when `search_keyword` is too broad, or before `get_component_ast` to see whether a name is ambiguous.
-
-| Argument | Required |
-| --- | --- |
-| `pattern` | yes |
-| `limit` | no |
-
 ### `read_file_raw`
+
+Off by default; set `server.file_tools: true` to register it and `list_directory`. They duplicate an assistant's own file tools and cost context on every session.
 
 Reads a file inside the project root. The path may be relative or absolute. `..` and a symlink that resolves outside the root are rejected. Secret names (`.env*`, `id_rsa*`, `id_ed25519`, `*.pem`, `*.key`, `*.p12`, `.npmrc`, `.netrc`, `.aws`, `.ssh`, `credentials.json`) are refused with case ignored, so `.ENV` is refused. Paths matched by a `.gitignore` or named in `indexer.exclude` are refused too, and `list_directory` omits them. `.gitignore` files are read when the server starts. Files larger than 1 MiB are rejected.
 
@@ -187,7 +171,7 @@ No arguments. Returns the rendered rules that apply to every request, highest pr
 
 ## Hit object
 
-`search` and `search_keyword` put this object in `hits`:
+`search`, `find` (text kind) and `graph` put this object in `hits`:
 
 ```json
 {
@@ -202,7 +186,7 @@ No arguments. Returns the rendered rules that apply to every request, highest pr
 
 `symbol` is `metadata.name`, or an empty string. `receiver` is present only when `metadata.receiver` is set. `lines` is the chunk text. `start_line` and `end_line` are 1-based and inclusive. The indexer fills them when the parser left them empty, from the first match of the chunk text in the file. If that text is not in the file, both fields are omitted.
 
-`get_component_ast` returns this chunk object, plus `rules` when a rule matches. `get_references` puts the same object in `chunks`:
+`get_component_ast` returns this chunk object, plus `rules` when a rule matches:
 
 ```json
 {
@@ -224,7 +208,7 @@ The server offers two prompts that chain the tools above. Clients that support M
 
 | Prompt | Argument | What it asks the model to do |
 | --- | --- | --- |
-| `explain-component` | `name` | Read the component with `get_component_ast`, its dependencies with `get_callees`, its users with `get_references`, then explain it with file and line citations. |
-| `review-impact` | `name` | Read the component, walk callers with `get_impact` at depth 3, group them by file, and say which tests to run. |
+| `explain-component` | `name` | Read the component with `get_component_ast`, its dependencies with `graph` (callees), its users with `graph` (references), then explain it with file and line citations. |
+| `review-impact` | `name` | Read the component, walk callers with `graph` at depth 3, group them by file, and say which tests to run. |
 
 A missing `name` is an error.
