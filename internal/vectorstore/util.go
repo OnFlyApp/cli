@@ -260,16 +260,7 @@ func validSlot(name string) bool {
 	return true
 }
 
-func summaryText(meta map[string]string) string {
-	s, q := meta["summary"], meta["questions"]
-	switch {
-	case s != "" && q != "":
-		return s + " | " + q
-	case s != "":
-		return s
-	}
-	return q
-}
+func summaryText(meta map[string]string) string { return meta["summary"] }
 
 func likePattern(keyword string) string {
 	keyword = strings.ReplaceAll(keyword, `\`, `\\`)

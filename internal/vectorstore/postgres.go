@@ -488,7 +488,7 @@ func (p *Postgres) SearchSummary(ctx context.Context, keyword string, limit int,
 	rows, err := p.pool.Query(ctx, `
 		SELECT file_path, type, content, metadata::text, outbound::text
 		FROM chunks
-		WHERE (coalesce(metadata->>'summary', '') || ' | ' || coalesce(metadata->>'questions', '')) ILIKE $1 ESCAPE '\'
+		WHERE coalesce(metadata->>'summary', '') ILIKE $1 ESCAPE '\'
 		  AND ($3 = '' OR $3 = '*' OR workspace = $3)
 		LIMIT $2`, likePattern(keyword), limit, workspace)
 	if err != nil {

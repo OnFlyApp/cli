@@ -243,7 +243,7 @@ func runExtraContract(t *testing.T, st Store) {
 		t.Fatalf("other dimensions must fail with ErrDimensionMismatch: %v", err)
 	}
 	a := parser.Chunk{FilePath: "x/a.go", Type: "function", Content: "func retryLoop() {}",
-		Metadata: map[string]string{"name": "retryLoop", "summary": "Waits and tries a request again.", "questions": "how do I retry"}}
+		Metadata: map[string]string{"name": "retryLoop", "summary": "Waits and tries a request again."}}
 	b := parser.Chunk{FilePath: "x/b.go", Type: "function", Content: "func other() {}", Metadata: map[string]string{"name": "other"}}
 	err := saveChunks(ctx, st, []EmbeddedChunk{
 		{Chunk: a, Vector: []float32{1, 0, 0, 0}, Extra: map[string][]float32{"summary": {0, 0, 1, 0}}},
@@ -267,9 +267,9 @@ func runExtraContract(t *testing.T, st Store) {
 	if err != nil || len(got) != 1 || got[0].FilePath != "x/a.go" {
 		t.Fatalf("summary keyword = %+v %v", got, err)
 	}
-	got, err = st.SearchSummary(ctx, "HOW DO I RETRY", 5, "")
+	got, err = st.SearchSummary(ctx, "TRIES A REQUEST", 5, "")
 	if err != nil || len(got) != 1 {
-		t.Fatalf("questions are searched too, case-insensitively: %+v %v", got, err)
+		t.Fatalf("summaries are searched case-insensitively: %+v %v", got, err)
 	}
 	if got, err = st.SearchSummary(ctx, "nothing like it", 5, ""); err != nil || len(got) != 0 {
 		t.Fatalf("%+v %v", got, err)
