@@ -14,8 +14,6 @@ import (
 
 var ErrChecksumMismatch = errors.New("ext: checksum mismatch")
 
-// Download writes the body to a temp file and returns that path only when
-// the SHA-256 matches wantSHA. Any other result deletes the temp file.
 func Download(ctx context.Context, client *http.Client, rawURL, wantSHA string) (string, string, error) {
 	return download(ctx, client, rawURL, wantSHA, maxPluginBytes)
 }
@@ -70,8 +68,6 @@ func download(ctx context.Context, client *http.Client, rawURL, wantSHA string, 
 	return path, got, nil
 }
 
-// MoveInto places tempPath at dest in the destination directory.
-// A previous regular file is left at dest.bak until DiscardBackup or RestoreBackup.
 func MoveInto(tempPath, dest string) error {
 	dir := filepath.Dir(dest)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -127,7 +123,6 @@ func MoveInto(tempPath, dest string) error {
 	return nil
 }
 
-// RestoreBackup puts dest.bak back at dest when a later install step fails.
 func RestoreBackup(dest string) error {
 	bak := dest + ".bak"
 	if _, err := os.Lstat(bak); err != nil {
@@ -140,7 +135,6 @@ func RestoreBackup(dest string) error {
 	return os.Rename(bak, dest)
 }
 
-// DiscardBackup removes dest.bak after config and the lock are both saved.
 func DiscardBackup(dest string) error {
 	err := os.Remove(dest + ".bak")
 	if os.IsNotExist(err) {

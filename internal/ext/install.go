@@ -23,8 +23,7 @@ type Options struct {
 	Stdin                   io.Reader
 	Stdout, Stderr          io.Writer
 	Client                  *http.Client
-	// SaveLock overrides how the lock file is written (tests); nil uses SaveLock.
-	SaveLock func(root string, lock map[string]Installed) error
+	SaveLock                func(root string, lock map[string]Installed) error
 }
 
 type installRef struct {
@@ -49,7 +48,6 @@ func projectOf(opt Options) (cfgPath, root string, err error) {
 	return cfgPath, config.ProjectRoot(cfgPath), nil
 }
 
-// staged is a plugin file on disk in a temp location, ready to be committed.
 type staged struct {
 	ref                        installRef
 	cfgPath, root              string
@@ -98,8 +96,6 @@ func Install(ctx context.Context, opt Options, arg string) error {
 	return withPluginLock(root, func() error { return p.commit(opt, conflicts, accepted) })
 }
 
-// stage resolves the plugin and puts its bytes in a temp file. current is true
-// when the registry version is already installed and intact.
 func (p *staged) stage(ctx context.Context, opt Options) (current bool, err error) {
 	if p.ref.Local {
 		if strings.TrimSpace(opt.Extensions) == "" {
@@ -136,8 +132,6 @@ func (p *staged) stage(ctx context.Context, opt Options) (current bool, err erro
 	return false, err
 }
 
-// commit moves the plugin in, edits the config and the lock, and undoes all of
-// it if any step fails. It runs under the plugin lock.
 func (p *staged) commit(opt Options, conflicts []string, accepted bool) error {
 	want := config.WasmParser{Extensions: p.exts, Path: p.relPath}
 	now, err := config.ParserConflicts(p.cfgPath, want)

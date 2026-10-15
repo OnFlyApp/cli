@@ -53,7 +53,6 @@ type FileResult struct {
 	Err     error
 }
 
-// Failed reports a per-file failure that must not abort the run.
 func (r FileResult) Failed() bool { return r.Err != nil }
 
 type Session struct {
@@ -62,9 +61,9 @@ type Session struct {
 	opt      Options
 	store    vectorstore.Store
 	emb      embedder.Embedder
-	chat     embedder.Chat // writes chunk summaries; nil when indexer.summaries is off
+	chat     embedder.Chat
 	sums     *summaryCache
-	alt      embedder.Embedder // second embedder for the "alt" vector slot; nil when embedder.alt is unset
+	alt      embedder.Embedder
 	router   *parser.Router
 	filter   *ignore.Filter
 	count    func(string) int
@@ -175,7 +174,6 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 	}, nil
 }
 
-// ReloadIgnore re-reads every .gitignore under the project root.
 func (s *Session) ReloadIgnore() error {
 	filter, err := ignore.LoadFilter(s.cfg.ProjectRoot, s.cfg.Indexer.Exclude)
 	if err != nil {
@@ -271,8 +269,6 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 	return stats, nil
 }
 
-// indexAll runs indexFile for every path, with indexer.concurrency workers.
-// done[i] is true when results[i] is valid. The first hard error stops the run.
 func (s *Session) indexAll(ctx context.Context, files []string, hashes map[string]string) ([]FileResult, []bool, error) {
 	results := make([]FileResult, len(files))
 	done := make([]bool, len(files))
@@ -366,7 +362,6 @@ func (s *Session) Drop(ctx context.Context, rel string) error {
 	return s.linkRefs(ctx, []string{})
 }
 
-// knownPaths is every path the store holds chunks or a hash for.
 func (s *Session) knownPaths(ctx context.Context) (map[string]struct{}, error) {
 	hashes, err := s.store.FileHashes(ctx)
 	if err != nil {
@@ -447,7 +442,6 @@ func (s *Session) DropTree(ctx context.Context, rel string) error {
 	return s.linkRefs(ctx, []string{})
 }
 
-// omit drops rel from the store (unless dry run) and tells the caller to ignore it.
 func (s *Session) omit(ctx context.Context, rel string) (FileResult, error) {
 	if !s.opt.DryRun {
 		if err := s.deletePaths(ctx, []string{rel}); err != nil {
@@ -457,9 +451,6 @@ func (s *Session) omit(ctx context.Context, rel string) (FileResult, error) {
 	return FileResult{Omit: true}, nil
 }
 
-// readSource validates and reads a project file. A non-nil early result means
-// the file must not be parsed: it was omitted (and dropped from the store), or
-// it failed with a per-file error.
 func (s *Session) readSource(ctx context.Context, rel string) ([]byte, *FileResult, error) {
 	full := filepath.Join(s.cfg.ProjectRoot, filepath.FromSlash(rel))
 	lst, lerr := os.Lstat(full)
@@ -504,7 +495,6 @@ func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResul
 	return nil, &res, err
 }
 
-// dropTypes removes chunks whose type is in skip (case-insensitive).
 func dropTypes(chunks []parser.Chunk, skip []string) []parser.Chunk {
 	if len(skip) == 0 {
 		return chunks
@@ -600,8 +590,6 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	return FileResult{Chunks: len(chunks), Reused: reused}, nil
 }
 
-// embedWithReuse fills in a stored vector for every chunk whose content the
-// file already had, and embeds the rest. The result keeps chunk order.
 func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, prev map[string][]float32) ([]vectorstore.EmbeddedChunk, int, error) {
 	dims := s.cfg.Embedder.Dimensions
 	out := make([]vectorstore.EmbeddedChunk, len(chunks))
@@ -632,11 +620,6 @@ func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, pre
 	return out, reused, nil
 }
 
-// fillChunkLines sets start_line and end_line when the parser left both empty.
-// The line is 1 plus the newlines before the first match of the chunk text.
-// The end line adds the newlines inside that text. A missing match leaves both unset.
-// Chunks arrive in file order, so each search starts after the previous match;
-// repeated snippets then resolve to successive occurrences, not the first one.
 func fillChunkLines(file []byte, chunks []parser.Chunk) {
 	text := string(file)
 	from := 0
@@ -676,8 +659,6 @@ func (s *Session) prune(ctx context.Context, protected map[string]struct{}, stat
 		if _, ok := protected[path]; ok {
 			continue
 		}
-		// A workspace config may share its database with sibling configs that
-		// index other paths, so it can only drop what its own scope still covers.
 		if s.cfg.Workspace != "" && !s.inScope(path) {
 			continue
 		}
@@ -724,8 +705,6 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 	return out, nil
 }
 
-// embedText is the text sent to the embedder. With context it leads with the
-// path and symbol, so a query naming a file or function can match the vector.
 func embedText(c parser.Chunk, withContext bool) string {
 	summary := c.Metadata["summary"]
 	if !withContext && summary == "" {

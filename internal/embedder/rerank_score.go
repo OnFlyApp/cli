@@ -13,14 +13,7 @@ import (
 	"github.com/axitdev/onfly/internal/config"
 )
 
-// scoreReranker scores each candidate on its own with a generative reranking
-// model (Qwen3-Reranker style): it asks "does the document answer the query?"
-// and reads the probability of "yes" against "no" from the next token's
-// log-probabilities. Unlike the listwise reranker it needs one short call per
-// candidate, but each call is a single token and calls run in parallel.
 type scoreReranker struct {
-	// next returns the most likely next tokens for prompt with their
-	// log-probabilities.
 	next    func(ctx context.Context, prompt string) ([]tokenLogprob, error)
 	workers int
 }
@@ -81,9 +74,6 @@ func newOllamaScoreReranker(cfg config.Reranker) (Reranker, error) {
 	}}, nil
 }
 
-// newOpenAIScoreReranker is the same scoring over the OpenAI completions API
-// (vLLM, mlx_lm.server, llama.cpp, LM Studio), which returns log-probabilities
-// as a token-to-logprob map per position.
 func newOpenAIScoreReranker(cfg config.Reranker) (Reranker, error) {
 	if cfg.Model == "" {
 		return nil, fmt.Errorf("reranker.model is required (a Qwen3-Reranker model)")
@@ -189,7 +179,7 @@ func (r *scoreReranker) score(ctx context.Context, query, doc string) (float64, 
 	}
 	switch {
 	case math.IsInf(yes, -1) && math.IsInf(no, -1):
-		return 0, nil // neither answer was likely: rank last
+		return 0, nil
 	case math.IsInf(no, -1):
 		return 1, nil
 	case math.IsInf(yes, -1):

@@ -12,15 +12,10 @@ import (
 	"github.com/axitdev/onfly/internal/config"
 )
 
-// Chat asks a language model one question and returns its answer text.
 type Chat interface {
 	Complete(ctx context.Context, prompt string) (string, error)
 }
 
-// NewChat builds a Chat for cfg, or returns nil when no provider is set.
-// ollama talks to Ollama's chat API. openai talks to any server that speaks the
-// OpenAI chat completions API: vLLM, mlx_lm.server, LM Studio, llama.cpp,
-// Msty, or OpenAI itself.
 func NewChat(cfg config.LLM) (Chat, error) {
 	switch cfg.Provider {
 	case "":
@@ -51,7 +46,7 @@ func (c *ollamaChat) Complete(ctx context.Context, prompt string) (string, error
 		"model":    c.model,
 		"messages": []map[string]string{{"role": "user", "content": prompt}},
 		"stream":   false,
-		"think":    false, // reasoning models would spend seconds thinking before a one-line answer
+		"think":    false,
 		"options":  map[string]any{"temperature": 0, "num_ctx": ollamaNumCtx},
 	})
 	if err != nil {
@@ -111,9 +106,6 @@ func (c *openaiChat) Complete(ctx context.Context, prompt string) (string, error
 		"stream":      false,
 	}
 	if c.custom {
-		// Local servers: switch reasoning off for models whose chat template
-		// supports it (vLLM honours this, other servers ignore it). The hosted
-		// API rejects unknown fields, so it is not sent there.
 		req["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
 	}
 	body, err := json.Marshal(req)

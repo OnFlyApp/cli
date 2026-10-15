@@ -775,14 +775,14 @@ func TestReindexPrunesFilesThatLeftScope(t *testing.T) {
 		if stats, err := Run(ctx, cfg, nil, Options{}); err != nil || stats.Files != 2 {
 			t.Fatalf("%q first run: %+v %v", workspace, stats, err)
 		}
-		cfg.Indexer.Exclude = append(cfg.Indexer.Exclude, "drop.go") // drop.go is still on disk, now out of scope
+		cfg.Indexer.Exclude = append(cfg.Indexer.Exclude, "drop.go")
 		stats, err := Run(ctx, cfg, nil, Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := 1
 		if workspace != "" {
-			want = 0 // cannot tell whether a sibling config owns it
+			want = 0
 		}
 		if stats.Pruned != want {
 			t.Fatalf("workspace %q: pruned %d, want %d", workspace, stats.Pruned, want)

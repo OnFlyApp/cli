@@ -93,7 +93,6 @@ func TestLinkRefsIncrementalOnlyTouchesChangedFiles(t *testing.T) {
 	if err := session.linkRefs(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	// Edit a.go to call itself too; names are unchanged, so only a.go is relinked.
 	commit("a.go", "A", "func A() { B(); A() }")
 	if err := session.linkRefs(ctx, []string{"a.go"}); err != nil {
 		t.Fatal(err)
@@ -102,7 +101,6 @@ func TestLinkRefsIncrementalOnlyTouchesChangedFiles(t *testing.T) {
 	if err != nil || len(a.Outbound) != 1 || a.Outbound[0] != "B" {
 		t.Fatalf("a outbound %+v %v", a, err)
 	}
-	// A new name forces a full pass so older chunks pick it up.
 	commit("c.go", "C", "func C() {}")
 	commit("b.go", "B", "func B() { C() }")
 	if err := session.linkRefs(ctx, []string{"c.go"}); err != nil {

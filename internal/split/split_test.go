@@ -72,7 +72,7 @@ func TestSplitKeepsSmallChunk(t *testing.T) {
 }
 
 func BenchmarkSplitLongLine(b *testing.B) {
-	text := strings.Repeat("abcdefghij", 40000) // 400 KB, no separators
+	text := strings.Repeat("abcdefghij", 40000)
 	count := func(s string) int { return (len(s) + 3) / 4 }
 	for i := 0; i < b.N; i++ {
 		Split([]parser.Chunk{{Content: text}}, 1000, 100, count)

@@ -1,4 +1,3 @@
-// Package storetest holds fixtures for tests that need a populated store.
 package storetest
 
 import (
@@ -7,8 +6,6 @@ import (
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
-// Save writes chunks the way an index run would: one CommitFile per file path,
-// in first-seen order, replacing any chunks the store already holds for it.
 func Save(ctx context.Context, st vectorstore.Store, chunks []vectorstore.EmbeddedChunk) error {
 	var order []string
 	byPath := map[string][]vectorstore.EmbeddedChunk{}

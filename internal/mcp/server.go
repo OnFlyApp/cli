@@ -28,7 +28,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Version is set at build time with -ldflags -X.
 var Version = "dev"
 
 const (
@@ -39,16 +38,14 @@ const (
 var componentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type chunkDTO struct {
-	Rules    string            `json:"rules,omitempty"`
-	FilePath string            `json:"file_path"`
-	Type     string            `json:"type"`
-	Content  string            `json:"content"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-	Outbound []string          `json:"outbound,omitempty"`
-	// Alternatives lists other definitions of the requested component name.
-	Alternatives []altDTO `json:"alternatives,omitempty"`
-	// AlternativesOmitted counts alternatives dropped by the cap.
-	AlternativesOmitted int `json:"alternatives_omitted,omitempty"`
+	Rules               string            `json:"rules,omitempty"`
+	FilePath            string            `json:"file_path"`
+	Type                string            `json:"type"`
+	Content             string            `json:"content"`
+	Metadata            map[string]string `json:"metadata,omitempty"`
+	Outbound            []string          `json:"outbound,omitempty"`
+	Alternatives        []altDTO          `json:"alternatives,omitempty"`
+	AlternativesOmitted int               `json:"alternatives_omitted,omitempty"`
 }
 
 const maxAlternatives = 20
@@ -67,12 +64,8 @@ type hitDTO struct {
 	EndLine   int    `json:"end_line,omitempty"`
 	Summary   string `json:"summary,omitempty"`
 	Lines     string `json:"lines"`
-	// Brief marks a hit whose Lines holds only the first line (the signature);
-	// get_component_ast returns the body.
-	Brief bool `json:"brief,omitempty"`
-	// Stale marks a hit whose file changed on disk since it was indexed; its
-	// line numbers may be off, so read the file before relying on them.
-	Stale bool `json:"stale,omitempty"`
+	Brief     bool   `json:"brief,omitempty"`
+	Stale     bool   `json:"stale,omitempty"`
 }
 
 type hitList struct {
@@ -296,7 +289,6 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in com
 	chunk := comps[pick]
 	dto := toDTO([]parser.Chunk{chunk})[0]
 	for i, c := range comps {
-		// With an explicit receiver, only same-receiver definitions in other files are ambiguous.
 		if i == pick || in.Receiver != "" && c.Metadata["receiver"] != in.Receiver {
 			continue
 		}
@@ -322,8 +314,6 @@ func contentWithRules(text string, out any) *sdkmcp.CallToolResult {
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}}}
 	}
-	// The rules are the text above the JSON; leave them out of it so they are
-	// not sent twice.
 	var box map[string]json.RawMessage
 	if json.Unmarshal(raw, &box) == nil {
 		if _, ok := box["rules"]; ok {
@@ -338,8 +328,6 @@ func contentWithRules(text string, out any) *sdkmcp.CallToolResult {
 
 func (h *tools) scope(arg string) string { return query.Scope(h.workspace, arg) }
 
-// trackUsage feeds the usage log: a search remembers its hits, and a later
-// open of one of them is recorded with the query that found it.
 func (h *tools) trackUsage(tool string, args, result any) {
 	if h.usage == nil {
 		return
@@ -468,8 +456,6 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
-// startWatch runs the index watcher beside the MCP server. A watcher error is
-// logged and does not end the session. stop cancels it and waits.
 func startWatch(ctx context.Context, cfg config.Config, logger *slog.Logger, run func(context.Context, config.Config, *slog.Logger) error) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})

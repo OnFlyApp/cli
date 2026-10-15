@@ -14,9 +14,9 @@ func TestOpenAfterSearchIsRecordedOncePerHit(t *testing.T) {
 	if err := l.Open("internal/index.go", ""); err != nil {
 		t.Fatal(err)
 	}
-	l.Open("internal/index.go", "prune") // the same hit again: ignored
-	l.Open("other.go", "")               // not a hit: ignored
-	l.Open("", "x")                      // matched by symbol alone
+	l.Open("internal/index.go", "prune")
+	l.Open("other.go", "")
+	l.Open("", "x")
 	ev, err := Load(path)
 	if err != nil || len(ev) != 2 || ev[0].Rank != 2 || ev[0].Symbol != "prune" || ev[1].File != "a.go" || ev[1].Rank != 1 {
 		t.Fatalf("%+v %v", ev, err)

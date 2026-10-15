@@ -11,8 +11,6 @@ import (
 
 var mcpConfigAllow bool
 
-// claudeAllowSnippet is the Claude Code permission rule that lets every onfly
-// tool run without a prompt. All of them are read-only.
 const claudeAllowSnippet = "{\n  \"permissions\": {\n    \"allow\": [\"mcp__onfly\"]\n  }\n}"
 
 var mcpConfigCmd = &cobra.Command{
@@ -69,7 +67,6 @@ func mcpSnippet(client string, serveArgs []string) (string, []byte, error) {
 		quoted[i] = string(raw)
 	}
 	args := "[" + strings.Join(quoted, ", ") + "]"
-	// Written by hand so the keys keep a readable order and args stay on one line.
 	var b strings.Builder
 	fmt.Fprintf(&b, "{\n  %q: {\n    \"onfly\": {\n", key)
 	if vscode {

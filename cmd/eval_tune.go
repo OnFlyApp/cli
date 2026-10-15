@@ -77,7 +77,6 @@ type tuneSetting struct {
 	label string
 }
 
-// tuneGrid lists the settings to try; the first is the current configuration.
 func tuneGrid(cur query.Params) []tuneSetting {
 	mk := func(p query.Params) tuneSetting {
 		return tuneSetting{p, fmt.Sprintf("semantic=%g keyword=%g word=%g field=%g rrf_k=%d", p.Semantic, p.Keyword, p.Word, p.Field, p.RRFK)}
@@ -125,8 +124,6 @@ func init() {
 	evalCmd.AddCommand(evalTuneCmd)
 }
 
-// learnWeights fits every fusion weight by coordinate ascent on the even
-// cases and checks the result on the odd ones.
 func learnWeights(out io.Writer, s *query.Searcher, cases []eval.Case, gathered []*query.Gathered) error {
 	cur := s.Params()
 	names := []string{"semantic_weight", "keyword_weight", "word_weight", "field_weight", "alt_weight", "summary_word_weight", "section_weight", "rrf_k"}
@@ -150,9 +147,9 @@ func learnWeights(out io.Writer, s *query.Searcher, cases []eval.Case, gathered 
 	}
 	candidates := func(i int, v float64) []float64 {
 		switch i {
-		case 7: // rrf_k
+		case 7:
 			return []float64{10, 20, 30, 40, 60, 100}
-		case 6: // section factor
+		case 6:
 			return []float64{0.5, 0.7, 0.85, 1, 1.2, 1.5}
 		}
 		if v == 0 {

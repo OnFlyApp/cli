@@ -7,10 +7,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// addTool registers a read-only tool whose result is one compact JSON text
-// block. The SDK would otherwise publish an output schema in tools/list and
-// send the result twice, as structuredContent and as text; both cost context
-// on every session and every call.
 func addTool[In, Out any](srv *sdkmcp.Server, t *sdkmcp.Tool, h func(context.Context, *sdkmcp.CallToolRequest, In) (*sdkmcp.CallToolResult, Out, error)) {
 	closed := false
 	t.Annotations = &sdkmcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: &closed}

@@ -1019,8 +1019,6 @@ func TestNewServerDegradesWithoutRerankerKey(t *testing.T) {
 	cleanup()
 }
 
-// structured returns a tool result as a JSON object: the last line of the
-// text block, plus "rules" from the lines above it when there are any.
 func structured(res *sdkmcp.CallToolResult) any {
 	if res == nil || len(res.Content) == 0 {
 		return nil

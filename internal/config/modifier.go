@@ -266,7 +266,6 @@ func normalizeList(in []string) ([]string, error) {
 	return out, nil
 }
 
-// NormalizeExt lower-cases ext and adds the leading dot. An empty input stays empty.
 func NormalizeExt(ext string) string {
 	ext = strings.ToLower(strings.TrimSpace(ext))
 	if ext == "" {

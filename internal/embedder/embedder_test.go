@@ -89,7 +89,7 @@ func TestOpenAIOrderAndFactory(t *testing.T) {
 		})
 	}))
 	defer srv.Close()
-	ask := true // a custom endpoint only gets "dimensions" when asked to
+	ask := true
 	emb, err := New(config.Embedder{
 		Provider: "openai", Endpoint: srv.URL, Model: "text-embedding-3-small",
 		Dimensions: 2, APIKey: "test-key", SendDimensions: &ask,

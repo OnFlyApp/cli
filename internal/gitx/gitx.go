@@ -1,4 +1,3 @@
-// Package gitx asks git which files changed. Paths are relative to root, slash-separated.
 package gitx
 
 import (
@@ -26,7 +25,6 @@ func run(ctx context.Context, root string, args ...string) ([]string, error) {
 	return lines, nil
 }
 
-// ChangedSince lists files that differ from ref in the working tree, plus untracked files.
 func ChangedSince(ctx context.Context, root, ref string) ([]string, error) {
 	if ref == "" || strings.HasPrefix(ref, "-") {
 		return nil, fmt.Errorf("invalid git ref %q", ref)
@@ -42,7 +40,6 @@ func ChangedSince(ctx context.Context, root, ref string) ([]string, error) {
 	return dedupe(append(changed, untracked...)), nil
 }
 
-// Recent lists files committed in the last days days, most recently changed first.
 func Recent(ctx context.Context, root string, days int) ([]string, error) {
 	if days < 1 {
 		days = 30
@@ -66,7 +63,6 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// Commit is one entry of a history.
 type Commit struct {
 	Hash    string `json:"hash"`
 	Author  string `json:"author"`
@@ -76,8 +72,6 @@ type Commit struct {
 
 const logFormat = "--format=%h%x09%an%x09%ad%x09%s"
 
-// LineLog lists the commits that touched lines start..end of file, newest
-// first, at most n. file is relative to root.
 func LineLog(ctx context.Context, root, file string, start, end, n int) ([]Commit, error) {
 	if file == "" || strings.HasPrefix(file, "-") || start < 1 || end < start {
 		return nil, fmt.Errorf("invalid history range %q:%d-%d", file, start, end)
@@ -90,7 +84,6 @@ func LineLog(ctx context.Context, root, file string, start, end, n int) ([]Commi
 	return commits(lines), nil
 }
 
-// FileLog lists the commits that touched file, newest first, at most n.
 func FileLog(ctx context.Context, root, file string, n int) ([]Commit, error) {
 	if file == "" || strings.HasPrefix(file, "-") {
 		return nil, fmt.Errorf("invalid file %q", file)

@@ -14,13 +14,9 @@ import (
 )
 
 type Reranker interface {
-	// Rerank returns indices into docs, most relevant first, at most topN.
 	Rerank(ctx context.Context, query string, docs []string, topN int) ([]int, error)
 }
 
-// rerankAPI describes one hosted rerank endpoint. Servers that copy the Cohere
-// or Jina request shape (vLLM, llama.cpp, Infinity, LiteLLM) work with a custom
-// endpoint and need no key.
 type rerankAPI struct {
 	endpoint, path, keyEnv string
 	topField               string
@@ -86,7 +82,6 @@ func (r *restReranker) Rerank(ctx context.Context, query string, docs []string, 
 	if err != nil {
 		return nil, err
 	}
-	// Voyage answers under "data"; Cohere and Jina under "results".
 	var resp struct {
 		Data    []rerankHit `json:"data"`
 		Results []rerankHit `json:"results"`
@@ -109,8 +104,6 @@ type rerankHit struct {
 	Index int `json:"index"`
 }
 
-// ollamaReranker asks a chat model to order the candidates in one call. It
-// needs no rerank endpoint, so any local model can do it, at LLM latency.
 type ollamaReranker struct {
 	url, model string
 	client     *http.Client
@@ -178,9 +171,6 @@ func (r *ollamaReranker) Rerank(ctx context.Context, query string, docs []string
 
 var intRe = regexp.MustCompile(`\d+`)
 
-// parseRanking turns a model answer into 0-based indices. It accepts
-// {"ranking":[...]}, a bare array, or any text with numbers in it, and drops
-// numbers out of range and repeats.
 func parseRanking(content string, n int) []int {
 	var nums []int
 	var obj struct {

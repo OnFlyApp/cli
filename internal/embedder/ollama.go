@@ -13,14 +13,10 @@ type ollamaEmbedder struct {
 	url        string
 	model      string
 	dimensions int
-	// numCtx is the context window sent with each request. Ollama loads
-	// embedding models with 4096 tokens unless told otherwise and silently cuts
-	// longer inputs, so it must cover max_input_tokens plus the prompt prefix.
-	numCtx int
-	client *http.Client
+	numCtx     int
+	client     *http.Client
 }
 
-// ctxMargin is added to max_input_tokens for prompt prefixes and summaries.
 const ctxMargin = 512
 
 func newOllama(cfg config.Embedder) (Embedder, error) {
@@ -80,8 +76,6 @@ func (e *ollamaEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 	return resp.Embeddings, nil
 }
 
-// numCtxFor returns the context window to request for chunks of up to
-// maxInput tokens, or 0 to keep the server default when that already fits.
 func numCtxFor(maxInput int) int {
 	if maxInput <= 0 {
 		return 0

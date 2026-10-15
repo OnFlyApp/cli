@@ -7,8 +7,6 @@ import (
 	"strings"
 )
 
-// TextParser is the built-in fallback for files with no language parser:
-// markdown by heading, everything else by paragraph runs.
 type TextParser struct{}
 
 const blockLines = 30

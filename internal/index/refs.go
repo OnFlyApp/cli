@@ -14,8 +14,6 @@ var (
 	selRef  = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*)`)
 )
 
-// mentioned returns symbol names used as calls or selectors in content.
-// The chunk's own name is omitted. names is the set of metadata.name values.
 func mentioned(content, self string, names map[string]struct{}) []string {
 	found := map[string]struct{}{}
 	add := func(name string) {
@@ -73,10 +71,6 @@ func sameRefs(a, b []string) bool {
 	return true
 }
 
-// linkRefs recomputes outbound references. changed == nil forces a full pass.
-// Otherwise only chunks of the changed files are relinked, because a chunk's
-// references depend only on its own content and the set of defined names. A
-// changed name set (or an unknown previous one) falls back to the full pass.
 func (s *Session) linkRefs(ctx context.Context, changed []string) error {
 	if s == nil || s.store == nil || s.opt.DryRun {
 		return nil

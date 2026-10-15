@@ -1,7 +1,5 @@
 package index
 
-// Event is one step of an index run. N is 1-based. Total is the number of
-// walked files and is 0 before that count is known.
 type Event struct {
 	Action string
 	Path   string

@@ -1,17 +1,11 @@
 package eval
 
-// Ascent is the outcome of a coordinate ascent.
 type Ascent struct {
 	Values []float64
 	Score  float64
 	Evals  int
 }
 
-// Ascend maximises score over a parameter vector by coordinate ascent: each
-// round tries, for every parameter, the candidates candidates(i, value)
-// returns, keeps the best improvement and moves on. It stops after rounds
-// rounds or when a whole round finds no improvement larger than eps. The
-// start vector is not modified.
 func Ascend(start []float64, rounds int, eps float64, candidates func(i int, v float64) []float64, score func([]float64) float64) Ascent {
 	cur := append([]float64(nil), start...)
 	best := score(cur)

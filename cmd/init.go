@@ -15,8 +15,6 @@ var (
 	initCI bool
 )
 
-// configTemplate is the config `onfly init` writes. %s is the quoted project name.
-// Optional blocks are commented out; docs/configuration.md describes every key.
 const configTemplate = `project: %s
 
 database:
@@ -141,7 +139,6 @@ func runInit(dir string, overwrite, ci bool) error {
 	return err
 }
 
-// initProject writes the files and returns their paths relative to dir.
 func initProject(dir string, overwrite, ci bool) ([]string, error) {
 	onfly := filepath.Join(dir, ".onfly")
 	cfgPath := filepath.Join(onfly, "config.yaml")
@@ -201,7 +198,6 @@ Check the setup any time with: onfly doctor
 `)
 }
 
-// projectName is the directory name, which is what a person calls the project.
 func projectName(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {

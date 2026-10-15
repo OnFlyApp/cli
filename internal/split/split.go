@@ -86,9 +86,6 @@ func splitWith(text string, seps []string, limit int, count func(string) int) []
 		}
 		pieces = append(pieces, part)
 	}
-	// Pack by summed piece counts so each piece is tokenised once. A merge
-	// across a piece boundary can change the real count by a token or two, so
-	// each packed part is verified once and wrapped if it went over.
 	var packed []string
 	var buf strings.Builder
 	bufTokens := 0
@@ -129,8 +126,6 @@ func hardWrap(text string, limit int, count func(string) int) []string {
 			break
 		}
 		best := 1
-		// A prefix longer than limit*16 bytes is far past the limit for any
-		// real tokenizer, so bound the search instead of counting all of rest.
 		lo, hi := 1, min(len(rest), limit*16)
 		for lo <= hi {
 			mid := (lo + hi) / 2

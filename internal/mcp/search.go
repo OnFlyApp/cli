@@ -23,7 +23,6 @@ func (h *tools) search(ctx context.Context, req *sdkmcp.CallToolRequest, in sema
 	return res, out, err
 }
 
-// runSearch records only successful calls; search records every failure.
 func (h *tools) runSearch(ctx context.Context, req *sdkmcp.CallToolRequest, in semanticIn, start time.Time) (*sdkmcp.CallToolResult, hitList, error) {
 	if strings.TrimSpace(in.Query) == "" {
 		return nil, hitList{}, fmt.Errorf("query is required")
@@ -144,8 +143,6 @@ func diagnosticHit(omitted int) hitDTO {
 	return hitDTO{Lines: truncationText(omitted)}
 }
 
-// fitPrefix returns the largest k in [0, n] whose payload fits maxTokens.
-// size(k) is the token cost of the first k items plus the truncation notice.
 func fitPrefix(n, maxTokens int, size func(k int) (int, error)) (int, error) {
 	lo, hi := 0, n
 	for lo < hi {
@@ -205,12 +202,8 @@ func fitHits(chunks []parser.Chunk, maxTokens int, detail string) ([]hitDTO, err
 	return append(shapeHits(chunks[:k], detail), diagnosticHit(n-k)), nil
 }
 
-// autoFullHits is how many hits keep their body in "auto" detail.
 const autoFullHits = 3
 
-// shapeHits turns chunks into hits. "full" keeps every body, "brief" only each
-// chunk's first line, and "auto" (or empty) the first autoFullHits bodies, so
-// the tail of a result costs one line each.
 func shapeHits(chunks []parser.Chunk, detail string) []hitDTO {
 	out := toHits(chunks)
 	for i := range out {

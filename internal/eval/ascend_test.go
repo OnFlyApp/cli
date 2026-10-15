@@ -3,7 +3,6 @@ package eval
 import "testing"
 
 func TestAscendFindsTheMaximum(t *testing.T) {
-	// f peaks at (3, 0.5); steps are multiplicative.
 	f := func(v []float64) float64 {
 		d1, d2 := v[0]-3, v[1]-0.5
 		return -(d1*d1 + d2*d2)

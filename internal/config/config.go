@@ -10,7 +10,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// DefaultMaxTokens is the search result budget when server.max_tokens is unset.
 const DefaultMaxTokens = 8192
 
 type Config struct {
@@ -33,28 +32,16 @@ type Database struct {
 }
 
 type Embedder struct {
-	Provider       string `yaml:"provider"`
-	Endpoint       string `yaml:"endpoint"`
-	Model          string `yaml:"model"`
-	Dimensions     int    `yaml:"dimensions"`
-	APIKey         string `yaml:"api_key"`
-	MaxInputTokens int    `yaml:"max_input_tokens"`
-	// QueryPrefix and DocumentPrefix are prepended to every search query and to
-	// every indexed chunk. Some models are trained with task prompts, for example
-	// EmbeddingGemma: "task: code retrieval | query: " and "title: none | text: ".
-	// Changing DocumentPrefix needs a fresh index.
-	QueryPrefix    string `yaml:"query_prefix"`
-	DocumentPrefix string `yaml:"document_prefix"`
-	// SendDimensions controls whether the openai provider sends "dimensions" in
-	// the request (it asks a model to shorten its vectors). Unset: sent to the
-	// hosted OpenAI endpoint, not to a custom one, because most local servers
-	// reject it for models that cannot shorten vectors.
-	SendDimensions *bool `yaml:"send_dimensions"`
-	// Alt is a second embedder. Every chunk is embedded by both, and search
-	// fuses the two vector lists (search.alt_weight). Only the provider,
-	// endpoint, model, dimensions, api_key, prefixes and max_input_tokens of
-	// Alt are read. Needs a fresh index when added.
-	Alt *Embedder `yaml:"alt"`
+	Provider       string    `yaml:"provider"`
+	Endpoint       string    `yaml:"endpoint"`
+	Model          string    `yaml:"model"`
+	Dimensions     int       `yaml:"dimensions"`
+	APIKey         string    `yaml:"api_key"`
+	MaxInputTokens int       `yaml:"max_input_tokens"`
+	QueryPrefix    string    `yaml:"query_prefix"`
+	DocumentPrefix string    `yaml:"document_prefix"`
+	SendDimensions *bool     `yaml:"send_dimensions"`
+	Alt            *Embedder `yaml:"alt"`
 }
 
 type Reranker struct {
@@ -63,46 +50,24 @@ type Reranker struct {
 	Model      string `yaml:"model"`
 	APIKey     string `yaml:"api_key"`
 	Candidates int    `yaml:"candidates"`
-	// TimeoutMS bounds one rerank call; 0 uses the 5 s default.
-	TimeoutMS int `yaml:"timeout_ms"`
+	TimeoutMS  int    `yaml:"timeout_ms"`
 }
 
-// Search tunes how semantic, keyword, and recency lists are fused. A zero
-// weight means 1 for the semantic and keyword lists and 0 (off) for recency.
 type Search struct {
-	SemanticWeight float64 `yaml:"semantic_weight"`
-	KeywordWeight  float64 `yaml:"keyword_weight"`
-	// RecencyWeight adds a list of candidates from files changed in the last
-	// RecencyDays days (git), most recent first. 0 turns it off.
-	RecencyWeight float64 `yaml:"recency_weight"`
-	RecencyDays   int     `yaml:"recency_days"`
-	// WordWeight and FieldWeight scale the per-word keyword list and the
-	// symbol-name/path/comment list against the keyword weight. Unset takes the
-	// default; 0 turns the list off.
-	WordWeight  *float64 `yaml:"word_weight"`
-	FieldWeight *float64 `yaml:"field_weight"`
-	// RRFK is the reciprocal-rank-fusion constant; 0 means 60.
-	RRFK int `yaml:"rrf_k"`
-	// UsageWeight adds a list of chunks an assistant opened after earlier
-	// searches (needs server.usage_file). It is off at 0.
-	UsageWeight float64 `yaml:"usage_weight"`
-	// AltWeight and SummaryWordWeight scale the second-embedder list
-	// (embedder.alt) and the summary keyword list. Unset takes the default; 0
-	// turns the list off.
-	// SectionWeight multiplies the score of documentation sections: below 1
-	// demotes docs against code, above 1 promotes them. Unset or 1 is neutral.
-	SectionWeight *float64 `yaml:"section_weight"`
-	// TypeWeights multiplies the score of chunks by their type (for example
-	// trait_use: 0.3, property: 0.6) so small declarations rank below the
-	// definitions they belong to without being removed from the index. Types
-	// are matched case-insensitively; unlisted types keep 1.
+	SemanticWeight    float64            `yaml:"semantic_weight"`
+	KeywordWeight     float64            `yaml:"keyword_weight"`
+	RecencyWeight     float64            `yaml:"recency_weight"`
+	RecencyDays       int                `yaml:"recency_days"`
+	WordWeight        *float64           `yaml:"word_weight"`
+	FieldWeight       *float64           `yaml:"field_weight"`
+	RRFK              int                `yaml:"rrf_k"`
+	UsageWeight       float64            `yaml:"usage_weight"`
+	SectionWeight     *float64           `yaml:"section_weight"`
 	TypeWeights       map[string]float64 `yaml:"type_weights"`
 	AltWeight         *float64           `yaml:"alt_weight"`
 	SummaryWordWeight *float64           `yaml:"summary_word_weight"`
 }
 
-// ExtraSlots names the extra vector slots this configuration uses, with their
-// dimensions: "alt" for embedder.alt.
 func (c Config) ExtraSlots() map[string]int {
 	out := map[string]int{}
 	if c.Embedder.Alt != nil {
@@ -111,21 +76,14 @@ func (c Config) ExtraSlots() map[string]int {
 	return out
 }
 
-// LLM names a chat model used for a side task (index summaries).
-// An empty provider turns the feature off.
 type LLM struct {
-	// Provider is ollama or openai. openai means any server that speaks the
-	// OpenAI chat API: vLLM, mlx_lm.server, LM Studio, llama.cpp, Msty, or OpenAI.
-	Provider string `yaml:"provider"`
-	Endpoint string `yaml:"endpoint"`
-	Model    string `yaml:"model"`
-	// APIKey is sent as a bearer token. It is optional with a custom endpoint;
-	// the hosted OpenAI endpoint also reads OPENAI_API_KEY.
+	Provider  string `yaml:"provider"`
+	Endpoint  string `yaml:"endpoint"`
+	Model     string `yaml:"model"`
 	APIKey    string `yaml:"api_key"`
 	TimeoutMS int    `yaml:"timeout_ms"`
 }
 
-// Timeout is the bound for one call; zero lets the caller pick its default.
 func (l LLM) Timeout() time.Duration {
 	if l.TimeoutMS > 0 {
 		return time.Duration(l.TimeoutMS) * time.Millisecond
@@ -133,8 +91,6 @@ func (l LLM) Timeout() time.Duration {
 	return 0
 }
 
-// Timeout is the bound for one rerank call. An LLM reranker is slower than a
-// rerank endpoint, so ollama defaults to 30 s; zero elsewhere means the 5 s default.
 func (r Reranker) Timeout() time.Duration {
 	if r.TimeoutMS > 0 {
 		return time.Duration(r.TimeoutMS) * time.Millisecond
@@ -146,43 +102,23 @@ func (r Reranker) Timeout() time.Duration {
 }
 
 type Indexer struct {
-	Include    []string       `yaml:"include"`
-	Exclude    []string       `yaml:"exclude"`
-	Parsers    []ParserConfig `yaml:"parsers"`
-	DebounceMS int            `yaml:"debounce_ms"`
-	// Concurrency is the number of files indexed in parallel (0 or 1: sequential).
-	Concurrency int `yaml:"concurrency"`
-	// EmbedContext prefixes each chunk's embedded text with its path and symbol.
-	// Changing it only affects chunks embedded afterwards; reindex to apply it everywhere.
-	EmbedContext bool `yaml:"embed_context"`
-	// ParseTimeoutMS bounds one parser call; 0 uses the 5 s default.
-	ParseTimeoutMS int `yaml:"parse_timeout_ms"`
-	// SkipTypes drops chunks of these types (case-insensitive) after parsing,
-	// for example "use" or "import" statements that crowd out real code.
-	// "onfly stats" lists the types an index holds. Reindex to apply it.
-	SkipTypes []string `yaml:"skip_types"`
-	// Summaries has a chat model write a one-sentence description of each named
-	// chunk; it is embedded and searched with the code. Off when provider is empty.
-	Summaries Summaries `yaml:"summaries"`
+	Include        []string       `yaml:"include"`
+	Exclude        []string       `yaml:"exclude"`
+	Parsers        []ParserConfig `yaml:"parsers"`
+	DebounceMS     int            `yaml:"debounce_ms"`
+	Concurrency    int            `yaml:"concurrency"`
+	EmbedContext   bool           `yaml:"embed_context"`
+	ParseTimeoutMS int            `yaml:"parse_timeout_ms"`
+	SkipTypes      []string       `yaml:"skip_types"`
+	Summaries      Summaries      `yaml:"summaries"`
 }
 
-// Summaries is an LLM plus how it is used while indexing.
 type Summaries struct {
-	LLM `yaml:",inline"`
-	// Files also writes one chunk per file (type "file") that lists its symbols
-	// and carries a summary, so a question about a package finds the file.
-	Files bool `yaml:"files"`
-	// Context adds to each summary prompt which symbols of the same file the
-	// chunk calls, is called by, and sits next to. A different prompt means new
-	// cache keys, so turning it on asks the model again.
-	Context bool `yaml:"context"`
-	// Concurrency is how many chunks of one file are sent to the model at once
-	// (1 when 0). Servers that batch requests, such as vLLM and mlx_lm.server,
-	// answer many in the time of one; it multiplies with indexer.concurrency.
-	Concurrency int `yaml:"concurrency"`
-	// Cache is a JSON-lines file of model answers keyed by chunk text, reused by
-	// later indexes. Empty means .onfly/summaries.jsonl; "none" turns it off.
-	Cache string `yaml:"cache"`
+	LLM         `yaml:",inline"`
+	Files       bool   `yaml:"files"`
+	Context     bool   `yaml:"context"`
+	Concurrency int    `yaml:"concurrency"`
+	Cache       string `yaml:"cache"`
 }
 
 type ParserConfig struct {
@@ -190,11 +126,8 @@ type ParserConfig struct {
 	Type       string   `yaml:"type"`
 	Path       string   `yaml:"path"`
 	Command    string   `yaml:"command"`
-	// Include and Exclude narrow this parser to a part of the project, as
-	// doublestar globs relative to the project root. Empty Include means
-	// every file with a matching extension. A file must also pass indexer.include.
-	Include []string `yaml:"include"`
-	Exclude []string `yaml:"exclude"`
+	Include    []string `yaml:"include"`
+	Exclude    []string `yaml:"exclude"`
 }
 
 type Server struct {
@@ -203,14 +136,9 @@ type Server struct {
 	LogFile   string `yaml:"log_file"`
 	MaxTokens int    `yaml:"max_tokens"`
 	TraceFile string `yaml:"trace_file"`
-	// UsageFile, when set, appends one JSON line each time an assistant opens a
-	// chunk that the latest search returned. `onfly eval mine` turns it into eval cases.
 	UsageFile string `yaml:"usage_file"`
 	Watch     bool   `yaml:"watch"`
-	// FileTools also registers read_file_raw and list_directory. They duplicate
-	// an assistant's own file tools and cost context on every session, so they
-	// are off by default.
-	FileTools bool `yaml:"file_tools"`
+	FileTools bool   `yaml:"file_tools"`
 }
 
 type RulesEngine struct {
@@ -582,7 +510,6 @@ func mergeParsers(parent, child []ParserConfig) []ParserConfig {
 				if key == "" || key == "." {
 					key = ext
 				}
-				// The same extension may appear once per distinct scope.
 				key += "\x00" + strings.Join(item.Include, "\x00")
 				if _, ok := byExt[key]; !ok {
 					order = append(order, key)
@@ -698,7 +625,7 @@ func expand(cfg *Config) error {
 func expandOne(s string) (string, error) {
 	missing := ""
 	out := os.Expand(s, func(key string) string {
-		if key == "$" { // "$$" is a literal dollar sign
+		if key == "$" {
 			return "$"
 		}
 		v, ok := os.LookupEnv(key)

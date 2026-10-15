@@ -42,13 +42,9 @@ type testList struct {
 var (
 	testBaseRe = regexp.MustCompile(`(^test_.*\.py$)|(_test\.(go|py|rb|rs)$)|(\.(test|spec)\.(js|jsx|ts|tsx|mjs|cjs)$)|(_spec\.rb$)|(Tests?\.(php|java|kt|cs|swift)$)`)
 	testDirs   = map[string]bool{"tests": true, "test": true, "__tests__": true, "spec": true}
-	// testDeclRe finds the line that opens a test, so a hit can name its test.
 	testDeclRe = regexp.MustCompile(`^\s*(func\s+Test|func\s+test|def\s+test_|fn\s+test_|#\[test\]|\[Fact\]|\[Test\]|@Test|public\s+function\s+test|(it|test|describe)\s*\()`)
 )
 
-// isTestFile reports whether a slash-separated project path looks like a test
-// file by name or by living in a test directory. Nothing is parsed, so it
-// works for any language whose convention is listed.
 func isTestFile(rel string) bool {
 	if testBaseRe.MatchString(path.Base(rel)) {
 		return true
@@ -65,8 +61,6 @@ func isTestFile(rel string) bool {
 	return false
 }
 
-// findTests lists lines of test files that mention name as a whole word, at
-// most limit of them. truncated is true when the hit or file cap stopped it.
 func findTests(root string, filter *ignore.Filter, name, glob string, limit int) ([]testHit, bool, error) {
 	re, err := regexp.Compile(`\b` + regexp.QuoteMeta(name) + `\b`)
 	if err != nil {
@@ -77,7 +71,7 @@ func findTests(root string, filter *ignore.Filter, name, glob string, limit int)
 	errStop := fmt.Errorf("stop")
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil // unreadable entry: skip
+			return nil
 		}
 		rel, rerr := filepath.Rel(root, p)
 		if rerr != nil || rel == "." {

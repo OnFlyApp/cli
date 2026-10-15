@@ -86,8 +86,6 @@ func postJSON(ctx context.Context, client *http.Client, url, key string, body []
 	return nil, last
 }
 
-// retryable covers rate limits, gateway errors and network errors. A plain 500
-// is not retried: Ollama returns it for permanent errors such as a missing model.
 func retryable(err error) bool {
 	var se *statusError
 	if errors.As(err, &se) {

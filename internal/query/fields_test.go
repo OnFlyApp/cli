@@ -78,13 +78,10 @@ func TestLeadingComment(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 	if leadingComment("func f() {}") == "" {
-		// the first line of a chunk without a comment still counts (a doc heading)
 		t.Log("ok")
 	}
 }
 
-// searcherWith builds a searcher over the given chunks; every chunk shares one
-// vector so ranking comes from the keyword and name lists.
 func searcherWith(t *testing.T, chunks ...parser.Chunk) *Searcher {
 	t.Helper()
 	st, err := vectorstore.OpenSQLite(filepath.Join(t.TempDir(), "v.db"))
@@ -107,7 +104,6 @@ func searcherWith(t *testing.T, chunks ...parser.Chunk) *Searcher {
 }
 
 func TestFieldListLiftsNamedChunk(t *testing.T) {
-	// "handler" appears in prose in the first chunk; the second is the handler.
 	prose := parser.Chunk{FilePath: "a.go", Type: "function", Content: "func a() { /* the handler of every request is elsewhere */ }", Metadata: map[string]string{"name": "a"}}
 	named := parser.Chunk{FilePath: "b.go", Type: "function", Content: "func requestHandler() {}", Metadata: map[string]string{"name": "requestHandler"}}
 	s := searcherWith(t, prose, named)

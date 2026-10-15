@@ -19,16 +19,12 @@ const (
 	parseTimeout    = 5 * time.Second
 )
 
-// WasmParser runs a WASI command module. The plugin contract, matching
-// github.com/OnFlyApp/ext-parser-go, is: argv[1] is the file path, stdin is
-// the file bytes, stdout is a JSON array of Chunk.
 type WasmParser struct {
 	rt       wazero.Runtime
 	compiled wazero.CompiledModule
 	mu       sync.Mutex
 	closed   bool
-	// Timeout bounds one Parse call; zero means parseTimeout.
-	Timeout time.Duration
+	Timeout  time.Duration
 }
 
 func timeoutOr(d time.Duration) time.Duration {

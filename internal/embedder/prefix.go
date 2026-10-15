@@ -7,9 +7,6 @@ type prefixed struct {
 	query, doc string
 }
 
-// WithPrefixes prepends query to every Embed text (a search query) and doc to
-// every EmbedBatch text (an indexed chunk). Models trained with task prompts
-// retrieve better when the prompts are present. With both empty it returns e.
 func WithPrefixes(e Embedder, query, doc string) Embedder {
 	if query == "" && doc == "" {
 		return e

@@ -5,12 +5,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// MaxMinedExpect caps the expectations kept per mined query.
 const MaxMinedExpect = 3
 
-// Mine turns usage events into cases: each query expects the chunks an
-// assistant opened after it. Queries keep first-seen order; a chunk opened
-// twice for one query counts once.
 func Mine(events []usage.Event) []Case {
 	var order []string
 	by := map[string][]Expect{}
@@ -40,7 +36,6 @@ func Mine(events []usage.Event) []Case {
 	return out
 }
 
-// MarshalCases renders cases as a cases file.
 func MarshalCases(cases []Case) ([]byte, error) {
 	return yaml.Marshal(struct {
 		Cases []Case `yaml:"cases"`

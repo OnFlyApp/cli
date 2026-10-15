@@ -15,8 +15,6 @@ type findArgs struct {
 	Workspace string `json:"workspace,omitempty" jsonschema:"workspace name, or * for every workspace"`
 }
 
-// find is the exact-lookup tool: kind "text" searches chunk text for a string
-// or identifier, kind "symbol" lists definitions by name.
 func (h *tools) find(ctx context.Context, req *sdkmcp.CallToolRequest, in findArgs) (*sdkmcp.CallToolResult, any, error) {
 	q := strings.TrimSpace(in.Query)
 	if q == "" {

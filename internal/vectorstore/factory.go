@@ -18,7 +18,6 @@ func New(ctx context.Context, cfg config.Database) (Store, error) {
 	}
 }
 
-// InitAll initialises the primary vectors and every extra slot the config uses.
 func InitAll(ctx context.Context, st Store, cfg config.Config) error {
 	if err := st.Init(ctx, cfg.Embedder.Dimensions); err != nil {
 		return err
@@ -31,7 +30,6 @@ func InitAll(ctx context.Context, st Store, cfg config.Config) error {
 	return nil
 }
 
-// Checker is the read-only surface `doctor` needs; it never creates a schema.
 type Checker interface {
 	CheckMeta(ctx context.Context, dimensions int) error
 	Ping(ctx context.Context) error

@@ -24,13 +24,11 @@ type historyIn struct {
 }
 
 type historyOut struct {
-	FilePath  string `json:"file_path"`
-	StartLine int    `json:"start_line,omitempty"`
-	EndLine   int    `json:"end_line,omitempty"`
-	// Scope is "symbol" when the commits touched the symbol's lines, "file"
-	// when the definition has no line range and the whole file's log is shown.
-	Scope   string        `json:"scope"`
-	Commits []gitx.Commit `json:"commits"`
+	FilePath  string        `json:"file_path"`
+	StartLine int           `json:"start_line,omitempty"`
+	EndLine   int           `json:"end_line,omitempty"`
+	Scope     string        `json:"scope"`
+	Commits   []gitx.Commit `json:"commits"`
 }
 
 func (h *tools) getHistory(ctx context.Context, _ *sdkmcp.CallToolRequest, in historyIn) (*sdkmcp.CallToolResult, historyOut, error) {

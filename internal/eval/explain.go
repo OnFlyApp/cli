@@ -9,27 +9,22 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 )
 
-// Outranker classes: what stood at rank 1 when the expected chunk did not.
 const (
-	SameFile    = "same file, other symbol" // the file was right, the symbol was not
-	DocOverAPI  = "docs section over code"  // a Markdown section outranked the expected code
-	CodeOverDoc = "code over docs section"  // the expected chunk is docs, code outranked it
+	SameFile    = "same file, other symbol"
+	DocOverAPI  = "docs section over code"
+	CodeOverDoc = "code over docs section"
 	OtherCode   = "other file's code"
-	Duplicate   = "same text elsewhere" // identical content in another file
+	Duplicate   = "same text elsewhere"
 )
 
-// Miss is one case whose expected chunk was not first.
 type Miss struct {
 	Query  string
-	Rank   int // 0 is a miss
+	Rank   int
 	Want   []Expect
-	Top    []parser.Chunk // the first few results
-	Reason string         // class of the rank-1 hit
+	Top    []parser.Chunk
+	Reason string
 }
 
-// Explain lists the cases whose expected chunk was not at rank 1, with the top
-// results and the class of the hit that took rank 1. results maps a query to
-// its results.
 func Explain(cases []Case, results map[string][]parser.Chunk, k int, fileLevel bool) []Miss {
 	var out []Miss
 	for _, c := range cases {
@@ -69,7 +64,6 @@ func classify(top parser.Chunk, c Case, got []parser.Chunk, rank int) string {
 	return OtherCode
 }
 
-// WriteExplain prints the class counts and each miss.
 func WriteExplain(w io.Writer, misses []Miss, total int) {
 	counts := map[string]int{}
 	for _, m := range misses {

@@ -16,7 +16,7 @@ import (
 type Postgres struct {
 	pool       *pgxpool.Pool
 	dimensions int
-	extra      map[string]int // slot -> dimensions, set by InitExtra
+	extra      map[string]int
 }
 
 func OpenPostgres(ctx context.Context, dsn string) (*Postgres, error) {
@@ -245,7 +245,6 @@ func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []E
 	return tx.Commit(ctx)
 }
 
-// insertPGChunks sends all rows in one round trip.
 func insertPGChunks(ctx context.Context, tx pgx.Tx, chunks []EmbeddedChunk, extra map[string]int) error {
 	if len(chunks) == 0 {
 		return nil
@@ -765,7 +764,6 @@ func collect(rows pgx.Rows) ([]parser.Chunk, error) {
 	return out, rows.Err()
 }
 
-// UnnamedChunks counts chunks without metadata.name, which get_component_ast cannot find.
 func (p *Postgres) UnnamedChunks(ctx context.Context) (int, error) {
 	var n int
 	err := p.pool.QueryRow(ctx, `
@@ -774,7 +772,6 @@ func (p *Postgres) UnnamedChunks(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// countBy groups chunks by a fixed column name (never user input).
 func (p *Postgres) countBy(ctx context.Context, col string) (map[string]int, error) {
 	rows, err := p.pool.Query(ctx, `SELECT `+col+`, count(*) FROM chunks GROUP BY `+col)
 	if err != nil {
@@ -793,7 +790,6 @@ func (p *Postgres) countBy(ctx context.Context, col string) (map[string]int, err
 	return m, rows.Err()
 }
 
-// Stats reports file, chunk, type and workspace counts.
 func (p *Postgres) Stats(ctx context.Context) (IndexStats, error) {
 	var out IndexStats
 	if err := p.pool.QueryRow(ctx, `SELECT count(DISTINCT file_path) FROM chunks`).Scan(&out.Files); err != nil {

@@ -29,7 +29,6 @@ func fakeChat(t *testing.T, calls *atomic.Int32, status int) *httptest.Server {
 	}))
 }
 
-// summaryProject writes a one-file project whose parser emits one long chunk.
 func summaryProject(t *testing.T, chatURL string) (string, func(t *testing.T) []vectorstore.StoredChunk) {
 	t.Helper()
 	srv := fakeOllama(t)
@@ -75,7 +74,6 @@ func TestSummariesStoredAndReusedAcrossReindex(t *testing.T) {
 	if len(got) != 1 || got[0].Chunk.Metadata["summary"] != "Retries failed network requests." || calls.Load() != 1 {
 		t.Fatalf("calls=%d chunks=%+v", calls.Load(), got)
 	}
-	// The file changes, the chunk does not: the stored summary is reused.
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package p\n// touched\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +213,7 @@ func TestSummaryCacheSurvivesDeletingTheDatabase(t *testing.T) {
 	if calls.Load() != 1 || len(got) != 1 || got[0].Chunk.Metadata["summary"] == "" {
 		t.Fatalf("a rebuilt index must take the summary from the cache: calls=%d %+v", calls.Load(), got)
 	}
-	cfg.Indexer.Summaries.Model = "other" // another model: a different key
+	cfg.Indexer.Summaries.Model = "other"
 	os.Remove(filepath.Join(dir, ".onfly", "vector.db"))
 	if _, err := Run(ctx, cfg, nil, Options{}); err != nil || calls.Load() != 2 {
 		t.Fatalf("a new model must ask again: calls=%d %v", calls.Load(), err)
@@ -227,7 +225,7 @@ func TestContextForUsesOnlyTheFile(t *testing.T) {
 		return parser.Chunk{Metadata: map[string]string{"name": name}, Outbound: calls}
 	}
 	chunks := []parser.Chunk{
-		mk("Run", "Gather", "Fuse", "Printf", "Store.Search"), // Printf is not defined here
+		mk("Run", "Gather", "Fuse", "Printf", "Store.Search"),
 		mk("Gather", "Embed"),
 		mk("Fuse", "dedupe"),
 		mk("dedupe"),
@@ -261,7 +259,7 @@ func TestSummariesOverOpenAIChatWithConcurrency(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(60 * time.Millisecond) // let requests overlap
+		time.Sleep(60 * time.Millisecond)
 		inflight.Add(-1)
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("path %s", r.URL.Path)

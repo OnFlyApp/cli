@@ -155,7 +155,7 @@ func TestOllamaScoreRerankerOrdersByYesProbability(t *testing.T) {
 		if r.URL.Path != "/api/generate" || !in.Raw || !in.Logprobs || !strings.Contains(in.Prompt, "<Query>: q") {
 			t.Errorf("path %s body %+v", r.URL.Path, in)
 		}
-		yes, no := -0.1, -2.5 // "good" documents
+		yes, no := -0.1, -2.5
 		switch {
 		case strings.Contains(in.Prompt, "<Document>: bad"):
 			yes, no = -3.0, -0.05

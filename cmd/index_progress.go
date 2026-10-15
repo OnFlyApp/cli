@@ -13,11 +13,8 @@ import (
 const progressWidth = 20
 
 type indexProgress struct {
-	out io.Writer
-	tty bool
-	// perFile keeps the "parsing" and "summarising" lines of every file on a
-	// pipe or log. Without it a file gets one line, for its outcome (embedding,
-	// unchanged, failed).
+	out     io.Writer
+	tty     bool
 	perFile bool
 }
 

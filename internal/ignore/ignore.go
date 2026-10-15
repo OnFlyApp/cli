@@ -29,7 +29,6 @@ func Load(root string) (*Set, error) {
 				return filepath.SkipDir
 			}
 			if path != root {
-				// Never descend into ignored or blocked trees (node_modules, build output).
 				if rel, rerr := filepath.Rel(root, path); rerr == nil && set.Ignored(filepath.ToSlash(rel), true) {
 					return filepath.SkipDir
 				}
@@ -126,7 +125,6 @@ func (s *Set) Ignored(rel string, isDir bool) bool {
 	return false
 }
 
-// Sensitive reports paths the indexer refuses and MCP must not return.
 func Sensitive(rel string) bool {
 	return blocked(rel)
 }
@@ -154,9 +152,6 @@ func blocked(rel string) bool {
 	return false
 }
 
-// Filter is the single answer to "is this project-relative path out of scope?".
-// It combines .gitignore rules, the sensitive-name list, .git/.onfly and the
-// configured exclude names. A nil Filter skips nothing.
 type Filter struct {
 	set   *Set
 	names map[string]bool
@@ -172,7 +167,6 @@ func NewFilter(set *Set, exclude []string) *Filter {
 	return &Filter{set: set, names: names}
 }
 
-// LoadFilter reads every .gitignore under root.
 func LoadFilter(root string, exclude []string) (*Filter, error) {
 	set, err := Load(root)
 	if err != nil {
@@ -181,7 +175,6 @@ func LoadFilter(root string, exclude []string) (*Filter, error) {
 	return NewFilter(set, exclude), nil
 }
 
-// Skip reports whether rel (slash separated) must not be indexed, watched or served.
 func (f *Filter) Skip(rel string, isDir bool) bool {
 	if f == nil {
 		return false

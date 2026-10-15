@@ -1,4 +1,3 @@
-// Package eval scores search results against hand-written expectations.
 package eval
 
 import (
@@ -24,7 +23,7 @@ type Case struct {
 
 type CaseResult struct {
 	Query string `json:"query"`
-	Rank  int    `json:"rank"` // 1-based; 0 is a miss
+	Rank  int    `json:"rank"`
 }
 
 type Report struct {
@@ -72,9 +71,6 @@ func matches(c parser.Chunk, want Expect, fileLevel bool) bool {
 	return fileLevel || want.Symbol == "" || c.Metadata["name"] == want.Symbol
 }
 
-// Split keeps every other case: part "even" the cases at even positions
-// (0, 2, ...), "odd" the rest, "" all of them. Tuning fits on one half and is
-// checked on the other.
 func Split(cases []Case, part string) ([]Case, error) {
 	var keep int
 	switch part {
@@ -96,7 +92,6 @@ func Split(cases []Case, part string) ([]Case, error) {
 	return out, nil
 }
 
-// LoadAll loads and concatenates several case files, in order.
 func LoadAll(paths []string) ([]Case, error) {
 	var all []Case
 	for _, p := range paths {
@@ -109,8 +104,6 @@ func LoadAll(paths []string) ([]Case, error) {
 	return all, nil
 }
 
-// Rank is the 1-based position of the first expected hit within the first k
-// results, or 0. With fileLevel, only the file must match, not the symbol.
 func Rank(c Case, got []parser.Chunk, k int, fileLevel bool) int {
 	for i, ch := range got {
 		if i >= k {
@@ -125,7 +118,6 @@ func Rank(c Case, got []parser.Chunk, k int, fileLevel bool) int {
 	return 0
 }
 
-// Score summarises ranks (0 is a miss) into recall and MRR.
 func Score(ranks []int) (recall, mrr float64) {
 	if len(ranks) == 0 {
 		return 0, 0
@@ -140,7 +132,6 @@ func Score(ranks []int) (recall, mrr float64) {
 	return recall / n, mrr / n
 }
 
-// Run scores symbol-level matches; RunLevel can relax them to the file.
 func Run(ctx context.Context, cases []Case, search SearchFunc, k int) (Report, error) {
 	return RunLevel(ctx, cases, search, k, false)
 }
@@ -170,14 +161,12 @@ func RunLevel(ctx context.Context, cases []Case, search SearchFunc, k int, fileL
 	return rep, nil
 }
 
-// Baseline is a saved score that later runs must not fall below.
 type Baseline struct {
 	K      int     `json:"k"`
 	Recall float64 `json:"recall"`
 	MRR    float64 `json:"mrr"`
 }
 
-// SaveBaseline writes rep's scores to path.
 func SaveBaseline(path string, rep Report) error {
 	raw, err := json.MarshalIndent(Baseline{K: rep.K, Recall: rep.Recall, MRR: rep.MRR}, "", "  ")
 	if err != nil {
@@ -186,7 +175,6 @@ func SaveBaseline(path string, rep Report) error {
 	return os.WriteFile(path, append(raw, '\n'), 0o644)
 }
 
-// CheckBaseline fails when rep scores below the baseline at path.
 func CheckBaseline(path string, rep Report) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {

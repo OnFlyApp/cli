@@ -34,7 +34,6 @@ func TestMarkStale(t *testing.T) {
 	if err := storetest.Save(ctx, store, chunks); err != nil {
 		t.Fatal(err)
 	}
-	// Record the hashes as the indexer would have, then edit one file.
 	for f, body := range map[string][]byte{"same.go": same, "changed.go": []byte("package b\n"), "gone.go": []byte("x")} {
 		if err := store.CommitFile(ctx, f, index.ContentHash(body), []vectorstore.EmbeddedChunk{{Chunk: parser.Chunk{FilePath: f, Type: "function", Content: "func F() {}", Metadata: map[string]string{"name": f}}, Vector: []float32{1, 0, 0, 0}}}); err != nil {
 			t.Fatal(err)

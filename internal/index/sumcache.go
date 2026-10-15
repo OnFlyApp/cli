@@ -10,26 +10,17 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 )
 
-// promptVersion is part of every cache key; bump it when the summary prompt changes.
 const promptVersion = "v1"
 
-// summaryKey identifies the model's answer for a chunk: the model, the chunk
-// type and name, its exact text, and the context block when one is sent. The
-// "0" is the number of generated questions (a removed option); keeping it
-// leaves the keys of existing cache files valid.
 func summaryKey(model string, c parser.Chunk, context string) string {
 	key := promptVersion + "\x00" + model + "\x00" + "0" + "\x00" +
 		c.Type + "\x00" + c.Metadata["name"] + "\x00" + c.Content
 	if context != "" {
-		key += "\x00" + context // only when used, so older cache lines stay valid
+		key += "\x00" + context
 	}
 	return ContentHash([]byte(key))
 }
 
-// summaryCache is an append-only JSON-lines file of model answers keyed by
-// summaryKey. It survives deleting the database, so a full reindex, a new
-// embedder or a new prefix does not pay for the model again. A nil cache
-// answers nothing and stores nothing.
 type summaryCache struct {
 	path string
 	mu   sync.Mutex
@@ -41,7 +32,6 @@ type cacheLine struct {
 	S string `json:"s"`
 }
 
-// openSummaryCache loads path. An empty path or "none" disables the cache.
 func openSummaryCache(path string) *summaryCache {
 	if path == "" || path == "none" {
 		return nil

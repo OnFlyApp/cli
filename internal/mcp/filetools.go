@@ -27,7 +27,6 @@ func (h *tools) readFile(_ context.Context, _ *sdkmcp.CallToolRequest, in pathIn
 	return contentWithRules(text, out), out, nil
 }
 
-// rejectSensitive refuses secrets, .gitignore matches and indexer.exclude names.
 func (h *tools) rejectSensitive(full string, isDir bool) error {
 	resolvedRoot, err := filepath.EvalSymlinks(h.root)
 	if err != nil {

@@ -2,7 +2,6 @@ package vectorstore
 
 import "context"
 
-// saveChunks mirrors storetest.Save; this package cannot import storetest.
 func saveChunks(ctx context.Context, st Store, chunks []EmbeddedChunk) error {
 	var order []string
 	byPath := map[string][]EmbeddedChunk{}

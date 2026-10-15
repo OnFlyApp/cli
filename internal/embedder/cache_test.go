@@ -27,13 +27,13 @@ func TestCachedEmbedsOnceAndEvictsOldest(t *testing.T) {
 	if inner.calls != 2 {
 		t.Fatalf("calls = %d, want 2", inner.calls)
 	}
-	e.Embed(ctx, "ccc") // evicts "bb" (least recently used)
+	e.Embed(ctx, "ccc")
 	e.Embed(ctx, "bb")
 	if inner.calls != 4 {
 		t.Fatalf("calls = %d, want 4", inner.calls)
 	}
 	v, _ := e.Embed(ctx, "a")
-	v[0] = 99 // callers may mutate; the cache must not change
+	v[0] = 99
 	if w, _ := e.Embed(ctx, "a"); w[0] != 1 {
 		t.Fatalf("cache entry was mutated: %v", w)
 	}

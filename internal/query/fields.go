@@ -9,11 +9,9 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 )
 
-// Weights of where a query word is found. A symbol name is the strongest hint,
-// then the file name, the directories, then comments and the generated summary.
 const (
 	nameHit    = 3.0
-	nameCover  = 2.0 // every part of the symbol name matched
+	nameCover  = 2.0
 	baseHit    = 2.0
 	dirHit     = 1.0
 	docHit     = 1.0
@@ -21,11 +19,6 @@ const (
 	minStemLen = 4
 )
 
-// fieldMatches ranks candidates by how many query words their symbol name,
-// file path, leading comment and summary contain. It needs no store lookup:
-// the candidates already came from the semantic and keyword lists, so this
-// only reorders what retrieval found, favouring the chunk that is *named* for
-// the query over one that merely mentions it.
 func fieldMatches(terms []string, cands []parser.Chunk) []parser.Chunk {
 	if len(terms) == 0 || len(cands) == 0 {
 		return nil
@@ -76,7 +69,6 @@ func fieldScore(want []string, c parser.Chunk) float64 {
 	return score
 }
 
-// countHits is how many distinct query words match a token of have.
 func countHits(want, have []string) int {
 	n := 0
 	for _, w := range want {
@@ -90,8 +82,6 @@ func countHits(want, have []string) int {
 	return n
 }
 
-// sameWord matches equal words and, from four letters, a shared stem
-// ("retries"/"retry", "indexing"/"index").
 func sameWord(a, b string) bool {
 	if a == b {
 		return true
@@ -114,7 +104,6 @@ func stem(w string) string {
 	return w
 }
 
-// splitWords lowercases and splits on non-letters and camelCase boundaries.
 func splitWords(s string) []string {
 	var out []string
 	var cur []rune
@@ -141,8 +130,6 @@ func splitWords(s string) []string {
 	return out
 }
 
-// leadingComment is the first comment lines of a chunk (// # /* * or a doc
-// heading), which usually say in words what the code does.
 func leadingComment(content string) string {
 	var b strings.Builder
 	n := 0
@@ -152,7 +139,7 @@ func leadingComment(content string) string {
 			continue
 		}
 		t := strings.TrimLeft(l, "/#*- ")
-		if t == l && n > 0 { // code after the comment
+		if t == l && n > 0 {
 			break
 		}
 		if t != l || n == 0 {

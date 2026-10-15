@@ -112,7 +112,6 @@ func printHits(w io.Writer, chunks []parser.Chunk, asJSON bool) error {
 	return nil
 }
 
-// snippet is the first non-blank line of a chunk, shortened to fit a terminal.
 func snippet(content string) string {
 	for _, l := range strings.Split(content, "\n") {
 		if l = strings.TrimSpace(l); l != "" {

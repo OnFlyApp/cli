@@ -21,5 +21,5 @@ func TestTrackUsageRecordsOpensThatFollowASearch(t *testing.T) {
 		t.Fatalf("%+v %v", ev, err)
 	}
 	var off *tools = &tools{}
-	off.trackUsage("search", semanticIn{Query: "q"}, nil) // no log configured: nothing happens
+	off.trackUsage("search", semanticIn{Query: "q"}, nil)
 }

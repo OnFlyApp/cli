@@ -91,7 +91,6 @@ func extShares(s vectorstore.IndexStats) (exts []string, share map[string]float6
 	return exts, share
 }
 
-// topExtensions lists the n extensions holding the most indexed text.
 func topExtensions(s vectorstore.IndexStats, n int) []string {
 	exts, share := extShares(s)
 	var out []string
@@ -104,15 +103,11 @@ func topExtensions(s vectorstore.IndexStats, n int) []string {
 	return out
 }
 
-// noisyExt are extensions that are usually data or generated output, not code.
 var noisyExt = map[string]bool{
 	".json": true, ".lock": true, ".svg": true, ".csv": true, ".map": true, ".min.js": true,
 	".min.css": true, ".snap": true, ".sum": true, ".xml": true, ".log": true, ".sql": true,
 }
 
-// modelContext is the token context of embedding models that read fewer
-// tokens than the 6000 that embedder.max_input_tokens defaults to. Text beyond
-// it is cut silently by the server.
 var modelContext = map[string]int{
 	"nomic-embed-text":       2048,
 	"embeddinggemma":         2048,
@@ -121,8 +116,6 @@ var modelContext = map[string]int{
 	"snowflake-arctic-embed": 512,
 }
 
-// contextHints warns when max_input_tokens is above what the model reads, and
-// when the index holds chunks that a 2048-token model would cut.
 func contextHints(model string, maxInput int, s vectorstore.IndexStats) []string {
 	var out []string
 	name := strings.TrimSuffix(strings.SplitN(model, ":", 2)[0], ":latest")
@@ -135,7 +128,6 @@ func contextHints(model string, maxInput int, s vectorstore.IndexStats) []string
 	return out
 }
 
-// indexHints names noisy extensions that take a large share of the index.
 func indexHints(s vectorstore.IndexStats) []string {
 	exts, share := extShares(s)
 	var out []string

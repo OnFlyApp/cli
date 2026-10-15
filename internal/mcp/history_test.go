@@ -53,7 +53,7 @@ func TestGetHistory(t *testing.T) {
 	if _, _, err := h.getHistory(ctx, nil, historyIn{Name: "Missing"}); err == nil {
 		t.Fatal("an unknown component is a tool error")
 	}
-	h.root = t.TempDir() // not a git repository
+	h.root = t.TempDir()
 	if _, _, err := h.getHistory(ctx, nil, historyIn{Name: "One"}); err == nil {
 		t.Fatal("outside git the tool errors")
 	}

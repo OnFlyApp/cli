@@ -12,8 +12,6 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// AllowStdioEnv must be "1" for stdio parsers to run. A project config can
-// name any shell command, so it is opt-in per machine.
 const AllowStdioEnv = "ONFLY_ALLOW_STDIO"
 
 type Router struct {
@@ -22,7 +20,6 @@ type Router struct {
 	parsers []Parser
 }
 
-// entry is one parser with the extensions and path scope it serves.
 type entry struct {
 	p       Parser
 	ext     string
@@ -85,7 +82,6 @@ func newRouter(index config.Indexer, projectRoot string, open opener) (*Router, 
 				return nil, fmt.Errorf("parser extension %q is invalid", ext)
 			}
 			for _, other := range r.entries {
-				// Two parsers may share an extension only when each is scoped by include.
 				if other.ext == ext && (len(other.include) == 0 || len(cfg.Include) == 0) {
 					_ = r.Close()
 					return nil, fmt.Errorf("duplicate parser extension %s (give each parser an include scope to share it)", ext)
@@ -119,7 +115,6 @@ func openParser(cfg config.ParserConfig) (Parser, error) {
 	}
 }
 
-// rel turns a project path, absolute or relative, into a slash path under the root.
 func (r *Router) rel(path string) string {
 	if filepath.IsAbs(path) && r.root != "" {
 		if rel, err := filepath.Rel(r.root, path); err == nil {
@@ -129,8 +124,6 @@ func (r *Router) rel(path string) string {
 	return filepath.ToSlash(path)
 }
 
-// match picks the parser with the longest extension whose scope accepts the
-// file; equal extensions go to the parser listed first.
 func (r *Router) match(path string) Parser {
 	rel := r.rel(path)
 	low := strings.ToLower(rel)

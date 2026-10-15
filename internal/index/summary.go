@@ -17,8 +17,6 @@ const (
 	defaultSummaryLimit = 60 * time.Second
 )
 
-// summarizable reports whether a chunk is worth a generated description: a
-// named symbol or a docs section with enough text to say something about.
 func summarizable(c parser.Chunk) bool {
 	if c.Metadata["name"] == "" && c.Type != "section" && c.Type != fileChunkType {
 		return false
@@ -26,27 +24,18 @@ func summarizable(c parser.Chunk) bool {
 	return c.Type == fileChunkType || len([]rune(c.Content)) >= summaryMinRunes
 }
 
-// generated is what the model wrote for one chunk.
 type generated struct {
 	Summary string
 }
 
 func (g generated) empty() bool { return g.Summary == "" }
 
-// apply stores g on the chunk's metadata.
 func (g generated) apply(c *parser.Chunk) {
 	if g.Summary != "" {
 		c.Metadata["summary"] = g.Summary
 	}
 }
 
-// addSummaries sets Metadata["summary"] on the chunks of
-// one file. A chunk is answered, in order, from what the file already stored,
-// from the summary cache, and only then from the model, so a reindex or an
-// embedder change calls the model only for chunks it has never seen. It
-// returns prev without the vectors of chunks that gained text, so those are
-// embedded again. A model failure stops summarising this file and leaves the
-// rest as they are: indexing never fails because the summary model is down.
 func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.Chunk, prev map[string][]float32) map[string][]float32 {
 	stored := map[string]generated{}
 	if old, err := s.store.ChunksByFiles(ctx, []string{rel}); err != nil {
@@ -82,7 +71,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		}
 		if g, ok := stored[c.Content]; ok {
 			g.apply(c)
-			s.sums.put(key(i), g) // an index made before the cache existed seeds it
+			s.sums.put(key(i), g)
 			continue
 		}
 		if g, ok := s.sums.get(key(i)); ok {
@@ -110,7 +99,6 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		i int
 		g generated
 	}
-	// job asks the model about one chunk and returns what it wrote.
 	job := func(i int) []answer {
 		if failed.Load() {
 			return nil
@@ -137,7 +125,6 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		wg.Wait()
 		close(results)
 	}()
-	// Answers are applied here, one at a time: prev and the cache are shared.
 	for res := range results {
 		for _, a := range res {
 			if a.g.empty() {
@@ -171,7 +158,6 @@ func summaryPrompt(c parser.Chunk, context string) string {
 	return b.String()
 }
 
-// cleanSummary keeps the first non-empty line, without quotes or a leading label.
 func cleanSummary(out string) string {
 	for _, l := range strings.Split(out, "\n") {
 		l = strings.Trim(strings.TrimSpace(l), "\"'`")
@@ -193,9 +179,6 @@ const (
 	fileChunkSymbol = 40
 )
 
-// fileChunk is one extra chunk per file: its path and the names it defines.
-// With a summary it answers questions about what a file or package is for.
-// It returns false for a file that defines nothing nameable.
 func fileChunk(rel string, chunks []parser.Chunk) (parser.Chunk, bool) {
 	var names []string
 	seen := map[string]bool{}
@@ -228,12 +211,6 @@ const (
 	contextSpan    = 3
 )
 
-// contextFor returns, for each chunk of one file, a short block that says
-// where the chunk sits: which symbols of the same file it calls and is called
-// by, and which symbols are next to it. Only the file itself is used, so the
-// text for a chunk does not change when other files are indexed, and the
-// summary cache stays valid. The model gets it to describe a chunk's role, not
-// only its body.
 func contextFor(chunks []parser.Chunk) func(i int) string {
 	defined := map[string]bool{}
 	for _, c := range chunks {

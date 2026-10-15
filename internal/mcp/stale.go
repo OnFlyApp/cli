@@ -13,10 +13,6 @@ const (
 	maxStaleBytes = 1 << 20
 )
 
-// markStale sets Stale on every hit whose file no longer matches what was
-// indexed: the content hash differs, or the file is gone. Line numbers of such
-// a hit may be wrong. It never fails a search: a file it cannot read is left
-// unmarked, and only the first maxStaleFiles distinct files are checked.
 func (h *tools) markStale(ctx context.Context, hits []hitDTO) {
 	if h.store == nil || h.root == "" {
 		return

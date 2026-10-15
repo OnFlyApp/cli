@@ -138,7 +138,7 @@ func TestRerankTimeoutKeepsFusedOrder(t *testing.T) {
 
 func TestSearchWeightsShiftTheRanking(t *testing.T) {
 	s := newSearcher(t)
-	s.KeywordWeight = 0.001 // semantic puts b.go first; keyword alone favours a.go
+	s.KeywordWeight = 0.001
 	got, err := s.Search(context.Background(), "getUserId", 5, "")
 	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" {
 		t.Fatalf("%+v %v", got, err)
@@ -199,7 +199,6 @@ func TestChangedSinceKeepsOnlyChangedFiles(t *testing.T) {
 	if _, err := s.Run(context.Background(), Request{Query: "x", ChangedSince: "--output=/tmp/x"}); err == nil {
 		t.Fatal("a ref starting with - must be rejected")
 	}
-	// Recency: only b.go was committed recently by ref order, both were; both stay, none lost.
 	s.RecencyWeight = 1
 	if got, err := s.Search(context.Background(), "getUserId", 5, ""); err != nil || len(got) != 2 {
 		t.Fatalf("%+v %v", got, err)
@@ -235,7 +234,7 @@ func TestWordMatchesRanksByHowManyWordsMatch(t *testing.T) {
 }
 
 func TestSearchFiltersByTypeAndPath(t *testing.T) {
-	s := newSearcher(t) // a.go and b.go, both type function
+	s := newSearcher(t)
 	ctx := context.Background()
 	got, err := s.Run(ctx, Request{Query: "getUserId", Limit: 5, Type: "FUNCTION"})
 	if err != nil || len(got) != 2 {

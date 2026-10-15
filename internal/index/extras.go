@@ -11,10 +11,6 @@ import (
 
 const slotAlt = "alt"
 
-// addExtraVectors fills the optional vector slots of one file's chunks. A
-// slot vector is reused when the chunk's primary vector was reused (same text,
-// same summary) and the store still holds one for that text; the rest are
-// embedded in batches. prev is the primary-vector reuse map embedWithReuse got.
 func (s *Session) addExtraVectors(ctx context.Context, rel string, chunks []vectorstore.EmbeddedChunk, prev map[string][]float32) error {
 	slots := map[string]func(vectorstore.EmbeddedChunk) string{}
 	embs := map[string]embedder.Embedder{}

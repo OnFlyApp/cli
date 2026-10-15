@@ -11,35 +11,23 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 )
 
-// Chat is the one method of a chat model the judge needs.
 type Chat interface {
 	Complete(ctx context.Context, prompt string) (string, error)
 }
 
-// JudgeTop is how many results the judge looks at per case.
 const JudgeTop = 5
 
 const judgeSnippetRunes = 700
 
-// Judged is the result of asking a model whether better-ranked hits also
-// answer the question. A single expected chunk understates quality: a hit at
-// rank 1 that is not the expected chunk may still be a correct answer.
 type Judged struct {
-	Total int
-	// Alternatives counts cases whose expected chunk was not first but a hit
-	// ranked above it (or any hit, for a miss) was judged to answer the question.
-	Alternatives int
-	// Recall and MRR count a hit as the expected chunk or a judged answer,
-	// within JudgeTop results.
-	Recall, MRR float64
-	// Strict is the same measurement without the judge, at JudgeTop.
+	Total                   int
+	Alternatives            int
+	Recall, MRR             float64
 	StrictRecall, StrictMRR float64
 }
 
 var numRe = regexp.MustCompile(`\d+`)
 
-// Judge asks chat which of each case's top results answer the question. Only
-// cases whose expected chunk is not first are sent to the model.
 func Judge(ctx context.Context, chat Chat, cases []Case, results map[string][]parser.Chunk, fileLevel bool) (Judged, error) {
 	var j Judged
 	j.Total = len(cases)
@@ -57,7 +45,7 @@ func Judge(ctx context.Context, chat Chat, cases []Case, results map[string][]pa
 		if r != 1 && len(got) > 0 {
 			limit := len(got)
 			if r > 0 {
-				limit = r - 1 // only hits ranked above the expected one can improve it
+				limit = r - 1
 			}
 			if limit > 0 {
 				rel, err := askJudge(ctx, chat, c.Query, got[:limit])
@@ -86,7 +74,6 @@ func Judge(ctx context.Context, chat Chat, cases []Case, results map[string][]pa
 	return j, nil
 }
 
-// askJudge returns the 0-based indices of the results that answer the question.
 func askJudge(ctx context.Context, chat Chat, question string, results []parser.Chunk) ([]int, error) {
 	var b strings.Builder
 	b.WriteString("A developer asked a question about a codebase. Below are code search results.\n")
@@ -108,8 +95,6 @@ func askJudge(ctx context.Context, chat Chat, question string, results []parser.
 	return parseRelevant(out, len(results)), nil
 }
 
-// parseRelevant reads {"relevant":[...]} (or any text with numbers) into
-// 0-based indices within n, without repeats.
 func parseRelevant(out string, n int) []int {
 	var nums []int
 	var obj struct {

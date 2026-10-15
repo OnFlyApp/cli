@@ -7,7 +7,6 @@ import (
 	"github.com/axitdev/onfly/internal/config"
 )
 
-// dbLabel describes the database without credentials.
 func dbLabel(db config.Database) string {
 	if db.Driver != "postgres" {
 		return db.Driver + " " + db.DSN

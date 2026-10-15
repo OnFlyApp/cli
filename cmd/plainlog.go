@@ -8,9 +8,6 @@ import (
 	"sync"
 )
 
-// plainHandler writes log records as "warning: message key=value" lines, with
-// no timestamp, so they read well between progress lines. A terminal progress
-// line is erased first when clearLine is set.
 type plainHandler struct {
 	w         io.Writer
 	mu        *sync.Mutex

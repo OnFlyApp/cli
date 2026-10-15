@@ -1,8 +1,5 @@
 package mcp
 
-// Guidance tells a model which onfly tool to reach for. The server sends it as
-// instructions, and "onfly guide" prints it for a CLAUDE.md or AGENTS.md. It is
-// read on every turn, so it stays short.
 const Guidance = `## Code search (onfly)
 - Question about behavior, or "where is X done": call search first; use Grep only for exact strings.
 - Have a symbol name: get_component_ast, not Read of the whole file.

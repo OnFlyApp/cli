@@ -396,7 +396,6 @@ func TestKeywordSearchIsSubstringAndUpgradesOldFTS(t *testing.T) {
 	if err := st.Init(ctx, 4); err != nil {
 		t.Fatal(err)
 	}
-	// Recreate the FTS table the way an older build did: default tokenizer.
 	for _, q := range []string{
 		`DROP TABLE chunk_fts`,
 		`CREATE VIRTUAL TABLE chunk_fts USING fts5(content, file_path, content='chunk_meta', content_rowid='rowid')`,

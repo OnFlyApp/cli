@@ -44,8 +44,6 @@ var guideCmd = &cobra.Command{
 	},
 }
 
-// writeGuide puts the guidance block into file: it replaces an existing block
-// between the markers, or appends one, and leaves the rest of the file alone.
 func writeGuide(file string) error {
 	old, err := os.ReadFile(file)
 	if err != nil && !os.IsNotExist(err) {

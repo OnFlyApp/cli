@@ -1,4 +1,3 @@
-// Package query runs one search: embed, semantic, keyword, reciprocal-rank fusion.
 package query
 
 import (
@@ -22,11 +21,10 @@ import (
 )
 
 const (
-	DefaultLimit = 10
-	MaxLimit     = 50
-	keywordPool  = 20
-	rrfK         = 60
-	// EmbedCacheSize is how many query vectors a Searcher remembers.
+	DefaultLimit   = 10
+	MaxLimit       = 50
+	keywordPool    = 20
+	rrfK           = 60
 	EmbedCacheSize = 256
 )
 
@@ -44,7 +42,6 @@ func CandidatePool(limit int) int {
 	return max(ClampLimit(limit), keywordPool)
 }
 
-// Scope maps a tool argument to a store workspace: "" is the default, "*" is all.
 func Scope(def, arg string) string {
 	switch arg {
 	case "":
@@ -56,54 +53,38 @@ func Scope(def, arg string) string {
 }
 
 type Searcher struct {
-	Store  vectorstore.Store
-	Emb    embedder.Embedder
-	Logger *slog.Logger
-	// Rerank, when set, reorders the top Candidates fused hits.
-	Rerank     embedder.Reranker
-	Candidates int
-	// RerankTimeout bounds one rerank call; zero means 5s.
-	RerankTimeout time.Duration
-	// Fusion weights; a zero semantic or keyword weight takes the default, zero recency means off.
+	Store                                        vectorstore.Store
+	Emb                                          embedder.Embedder
+	Logger                                       *slog.Logger
+	Rerank                                       embedder.Reranker
+	Candidates                                   int
+	RerankTimeout                                time.Duration
 	SemanticWeight, KeywordWeight, RecencyWeight float64
 	RecencyDays                                  int
-	// WordWeight and FieldWeight scale the per-word keyword list and the
-	// name/path/doc list against the keyword weight; nil takes the default, 0 turns the list off.
-	WordWeight, FieldWeight *float64
-	// RRFK is the reciprocal-rank constant; 0 means the default (20).
-	RRFK int
-	// UsageWeight scales a list of chunks an assistant opened after earlier
-	// searches (0 is off; Usage supplies the counts).
-	UsageWeight float64
-	Usage       *usage.Counter
-	// SummaryKeyword and Alt turn on the lists fed by the summary keyword
-	// index and the "alt" vector slot (AltEmb embeds the query for it). The
-	// weights scale them; nil takes the default and 0 turns the list off.
-	SummaryKeyword    bool
-	AltEmb            embedder.Embedder
-	AltWeight         *float64
-	SummaryWordWeight *float64
-	SectionWeight     *float64
-	// TypeWeights scales scores by chunk type (lowercase keys); nil keeps 1.
-	TypeWeights map[string]float64
-	// Root is the project root, used for git-based recency and changed-since filters.
-	Root string
+	WordWeight, FieldWeight                      *float64
+	RRFK                                         int
+	UsageWeight                                  float64
+	Usage                                        *usage.Counter
+	SummaryKeyword                               bool
+	AltEmb                                       embedder.Embedder
+	AltWeight                                    *float64
+	SummaryWordWeight                            *float64
+	SectionWeight                                *float64
+	TypeWeights                                  map[string]float64
+	Root                                         string
 
 	recentMu   sync.Mutex
 	recentAt   time.Time
 	recentList []string
 }
 
-// Request is one search. ChangedSince, a git ref, keeps only files that differ from it.
 type Request struct {
 	Query        string
 	Limit        int
 	Workspace    string
 	ChangedSince string
-	// Type keeps one chunk type (function, method, struct, section, ...).
-	Type string
-	// Path keeps files matching a doublestar glob, relative to the project root.
-	Path string
+	Type         string
+	Path         string
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -130,7 +111,6 @@ var stopWords = map[string]bool{
 	"can": true, "not": true, "into": true, "file": true, "files": true, "code": true, "get": true, "all": true,
 }
 
-// queryWords picks the words of a question worth a keyword lookup, in order.
 func queryWords(q string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -151,20 +131,14 @@ func queryWords(q string) []string {
 }
 
 const (
-	maxQueryWords = 6
-	// defaultWordWeight scales the per-word keyword list against the other lists.
-	// Measured on this repo's eval set: 0.25 beat 0.1, 0.5 and 0.75 (recall@5 0.9 vs 0.8).
+	maxQueryWords     = 6
 	defaultWordWeight = 0.25
 )
 
-// wordMatches runs a keyword lookup per query word and ranks chunks by how
-// many words they contain, so "retry 429 embedder" favours the chunk that has
-// all three. The whole-question keyword search rarely matches prose questions.
 func (s *Searcher) wordMatches(ctx context.Context, words []string, pool int, workspace string) []parser.Chunk {
 	return s.wordMatchesWith(ctx, words, pool, workspace, s.Store.SearchKeyword)
 }
 
-// wordMatchesWith is wordMatches over any keyword lookup (content or summaries).
 func (s *Searcher) wordMatchesWith(ctx context.Context, words []string, pool int, workspace string,
 	lookup func(context.Context, string, int, string) ([]parser.Chunk, error)) []parser.Chunk {
 	type acc struct {
@@ -216,8 +190,6 @@ func filterChunks(in []parser.Chunk, keep func(parser.Chunk) bool) []parser.Chun
 	return out
 }
 
-// recentCandidates orders the candidates from recently committed files by how
-// recently their file changed. Git failures only turn the signal off.
 func (s *Searcher) recentCandidates(ctx context.Context, cands ...[]parser.Chunk) []parser.Chunk {
 	if s.Root == "" {
 		return nil
@@ -251,7 +223,6 @@ func (s *Searcher) recentCandidates(ctx context.Context, cands ...[]parser.Chunk
 	return out
 }
 
-// Open builds a Searcher for command-line use. Close the store with the returned func.
 func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, error) {
 	store, err := vectorstore.New(ctx, cfg.Database)
 	if err != nil {
@@ -279,8 +250,6 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 	return s, store.Close, nil
 }
 
-// NewSearcher wires a Searcher from the project config; the command line and
-// the MCP server both build theirs here so every search setting applies to both.
 func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, logger *slog.Logger) (*Searcher, error) {
 	s := &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
@@ -312,13 +281,10 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	return s, nil
 }
 
-// Fuse merges ranked lists by reciprocal rank. A chunk in several lists
-// appears once and outranks a chunk that is first in only one list.
 func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
 	return FuseWeighted(nil, lists...)
 }
 
-// FuseWeighted is Fuse with a weight per list; a missing weight is 1.
 func FuseWeighted(weights []float64, lists ...[]parser.Chunk) []parser.Chunk {
 	return chunksOf(fuseScored(rrfK, weights, lists...))
 }
@@ -336,17 +302,10 @@ func chunksOf(in []scored) []parser.Chunk {
 	return out
 }
 
-// fuseScored merges ranked lists by weighted reciprocal rank, best first, with
-// rank constant k. Ties break by path, then content, so the order is stable.
 func fuseScored(k int, weights []float64, lists ...[]parser.Chunk) []scored {
 	return fuseTyped(k, weights, nil, lists...)
 }
 
-// fuseTyped is fuseScored with a per-chunk weight tw (nil means 1). A chunk
-// with weight 0.3 contributes 0.3 of its reciprocal rank and also takes only
-// 0.3 of a position in the list, so the chunks behind it are ranked nearly as
-// if it were absent. That is what separates demoting a type from only
-// scaling its final score: the noise no longer pushes real hits down the lists.
 func fuseTyped(k int, weights []float64, tw func(parser.Chunk) float64, lists ...[]parser.Chunk) []scored {
 	var order []string
 	by := map[string]*scored{}
@@ -397,8 +356,6 @@ func sortScored(out []scored) {
 	})
 }
 
-// ChunkKey identifies a chunk across result lists. Path, type, name, part,
-// first line and content together are unique per row.
 func ChunkKey(c parser.Chunk) string {
 	m := c.Metadata
 	return c.FilePath + "\x00" + c.Type + "\x00" + m["name"] + "\x00" + m["part"] + "\x00" + m["start_line"] + "\x00" + c.Content

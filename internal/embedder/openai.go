@@ -16,7 +16,7 @@ type openaiEmbedder struct {
 	model      string
 	key        string
 	dimensions int
-	ask        bool // send dimensions with the request
+	ask        bool
 	client     *http.Client
 }
 
@@ -36,8 +36,6 @@ func newOpenAI(cfg config.Embedder) (Embedder, error) {
 	if key == "" && hosted {
 		return nil, fmt.Errorf("embedder: openai api key is required")
 	}
-	// The expected dimensions are always checked; they are only asked of the
-	// server (to shorten vectors) on the hosted endpoint, or when requested.
 	send := hosted
 	if cfg.SendDimensions != nil {
 		send = *cfg.SendDimensions

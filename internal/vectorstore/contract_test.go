@@ -183,8 +183,6 @@ func runStoreContract(t *testing.T, st Store) {
 	runWorkspaceKNN(t, st)
 }
 
-// runWorkspaceKNN checks that a workspace filter still returns `limit` rows when
-// another workspace owns the nearest vectors.
 func runWorkspaceKNN(t *testing.T, st Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -229,8 +227,6 @@ func containsPath(ss []string, want string) bool {
 	return false
 }
 
-// runExtraContract checks extra vector slots and the summary keyword index.
-// It runs after runStoreContract on the same store (dimension 4).
 func runExtraContract(t *testing.T, st Store) {
 	t.Helper()
 	ctx := context.Background()
@@ -278,7 +274,6 @@ func runExtraContract(t *testing.T, st Store) {
 	if got, err = st.SearchSummary(ctx, "nothing like it", 5, ""); err != nil || len(got) != 0 {
 		t.Fatalf("%+v %v", got, err)
 	}
-	// Replacing the file drops its old extra vector and summary text.
 	a2 := a
 	a2.Metadata = map[string]string{"name": "retryLoop"}
 	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: a2, Vector: []float32{1, 0, 0, 0}}}); err != nil {

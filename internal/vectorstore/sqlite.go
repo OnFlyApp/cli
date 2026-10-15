@@ -25,7 +25,7 @@ const schemaVersion = "2"
 type SQLite struct {
 	db         *sql.DB
 	dimensions int
-	extra      map[string]int // slot -> dimensions, set by InitExtra
+	extra      map[string]int
 }
 
 func OpenSQLite(dsn string) (*SQLite, error) {
@@ -55,7 +55,6 @@ func OpenSQLite(dsn string) (*SQLite, error) {
 }
 
 func sqliteFileURI(abs string) string {
-	// ToSlash keeps '\' on Unix. SQLite file URIs need forward slashes.
 	abs = strings.ReplaceAll(filepath.ToSlash(abs), `\`, "/")
 	if !strings.HasPrefix(abs, "/") {
 		abs = "/" + abs
@@ -103,8 +102,6 @@ func (s *SQLite) Init(ctx context.Context, dimensions int) error {
 	return nil
 }
 
-// readMeta returns the stored dimensions and schema version, rejecting a
-// mismatch or a version this build cannot migrate.
 func (s *SQLite) readMeta(ctx context.Context, dimensions int) (existing, version string, err error) {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
 		return "", "", err
@@ -126,7 +123,6 @@ func (s *SQLite) readMeta(ctx context.Context, dimensions int) (existing, versio
 	return existing, version, nil
 }
 
-// ensureTables creates or migrates chunk_meta, the FTS table, triggers and index_state.
 func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 	exists, err := sqliteTable(ctx, s.db, "chunk_meta")
 	if err != nil {
@@ -154,8 +150,6 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 		return err
 	}
 	if hadFTS {
-		// An index built with the default tokenizer cannot answer substring
-		// queries. Drop it so the rebuild below recreates it with trigrams.
 		var create string
 		if err := s.db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE name = 'chunk_fts'`).Scan(&create); err != nil {
 			return err
@@ -182,8 +176,6 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 			file_path TEXT PRIMARY KEY,
 			content_hash TEXT NOT NULL
 		)`,
-		// Generated summaries and questions, searchable by substring. It has its
-		// own copy of the text; rows share chunk_meta's rowid.
 		`CREATE VIRTUAL TABLE IF NOT EXISTS summary_fts USING fts5(summary, tokenize='trigram')`,
 	}
 	for _, stmt := range stmts {
@@ -199,7 +191,6 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 	return nil
 }
 
-// writeMeta records dimensions, schema version and the generation counter.
 func (s *SQLite) writeMeta(ctx context.Context, existing, version string, dimensions int) error {
 	if existing == "" {
 		if _, err := s.db.ExecContext(ctx, `INSERT INTO schema_meta(key, value) VALUES ('dimensions', ?)
@@ -231,9 +222,6 @@ func cosineVecSQL(dimensions int) string {
 	return fmt.Sprintf(`CREATE VIRTUAL TABLE chunk_vecs USING vec0(embedding float[%d] distance_metric=cosine)`, dimensions)
 }
 
-// ensureCosine creates chunk_vecs with cosine distance. An existing L2 vec0
-// table is rebuilt in place: rowid and embedding are copied, and schema_meta
-// is left unchanged.
 func (s *SQLite) ensureCosine(ctx context.Context, dimensions int) error {
 	var create string
 	err := s.db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE name = 'chunk_vecs'`).Scan(&create)
@@ -451,9 +439,6 @@ func (s *SQLite) deleteChunkBatch(ctx context.Context, tx *sql.Tx, paths []strin
 	return err
 }
 
-// slotTables lists the tables that hold one row per chunk rowid: the primary
-// vectors, the summary index, and every extra slot found in the database (not
-// only the ones this process initialised, so a delete never leaves orphans).
 func slotTables(ctx context.Context, tx *sql.Tx) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT name FROM sqlite_master
 		WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE chunk_vecs_%'`)
@@ -526,8 +511,6 @@ func (s *SQLite) SearchSemantic(ctx context.Context, queryVector []float32, limi
 	return scanChunks(rows)
 }
 
-// SearchKeyword is a case-insensitive substring match. Keywords of three or
-// more characters use the trigram FTS index; shorter ones scan chunk_meta.
 func (s *SQLite) SearchKeyword(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error) {
 	if strings.TrimSpace(keyword) == "" {
 		return nil, fmt.Errorf("vectorstore: empty keyword")
@@ -661,9 +644,6 @@ func (s *SQLite) ExtraVectorsByFile(ctx context.Context, path, slot string) (map
 	return out, rows.Err()
 }
 
-// SearchSummary matches keyword against generated summaries and questions.
-// Keywords shorter than three characters match nothing: the trigram index
-// cannot answer them and a scan would not be worth it.
 func (s *SQLite) SearchSummary(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error) {
 	if strings.TrimSpace(keyword) == "" {
 		return nil, fmt.Errorf("vectorstore: empty keyword")
@@ -1046,7 +1026,6 @@ func scanChunks(rows *sql.Rows) ([]parser.Chunk, error) {
 	return out, rows.Err()
 }
 
-// UnnamedChunks counts chunks without metadata.name, which get_component_ast cannot find.
 func (s *SQLite) UnnamedChunks(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `
@@ -1055,7 +1034,6 @@ func (s *SQLite) UnnamedChunks(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// Stats reports file, chunk, type and workspace counts.
 func (s *SQLite) Stats(ctx context.Context) (IndexStats, error) {
 	out := IndexStats{ByType: map[string]int{}, Workspaces: map[string]int{}}
 	if err := s.db.QueryRowContext(ctx, `SELECT count(DISTINCT file_path) FROM chunk_meta`).Scan(&out.Files); err != nil {

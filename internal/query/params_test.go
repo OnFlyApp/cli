@@ -105,7 +105,6 @@ func TestTypeWeightTakesPartOfAPosition(t *testing.T) {
 		}
 		return 1
 	}
-	// other leads list one; list two puts the noise first, then real.
 	got := fuseTyped(20, []float64{1, 1}, tw, []parser.Chunk{other, real}, []parser.Chunk{noise, real})
 	plain := fuseScored(20, []float64{1, 1}, []parser.Chunk{other, real}, []parser.Chunk{noise, real})
 	score := func(in []scored, c parser.Chunk) float64 {

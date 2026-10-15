@@ -10,9 +10,6 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// toolsTokenBudget caps what tools/list costs a session. A tool or argument
-// description that pushes past it should be shortened, or the budget raised
-// on purpose.
 const toolsTokenBudget = 1200
 
 func TestToolDefinitionsStayWithinBudget(t *testing.T) {

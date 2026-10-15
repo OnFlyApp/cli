@@ -89,7 +89,6 @@ type findIn struct {
 	Limit   int    `json:"limit,omitempty" jsonschema:"maximum definitions, from 1 to 50; default 20"`
 }
 
-// globMatcher compiles a case-insensitive pattern. Without a wildcard it is a prefix.
 func globMatcher(pattern string) (*regexp.Regexp, error) {
 	var b strings.Builder
 	b.WriteString("(?is)^")

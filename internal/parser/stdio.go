@@ -14,7 +14,6 @@ import (
 type StdioParser struct {
 	command string
 	mu      sync.Mutex
-	// Timeout bounds one Parse call; zero means parseTimeout.
 	Timeout time.Duration
 }
 

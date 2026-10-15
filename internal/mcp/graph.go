@@ -34,9 +34,6 @@ type impactIn struct {
 	FilePath string `json:"file_path,omitempty" jsonschema:"file of the definition, to pick one of several same-name definitions"`
 }
 
-// pathCloseness ranks how near two files are: the same file beats the same
-// directory, which beats a shared parent. References carry only names, so
-// nearness stands in for resolving which same-name definition a call meant.
 func pathCloseness(a, b string) int {
 	if a == b {
 		return 1 << 20
@@ -49,7 +46,6 @@ func pathCloseness(a, b string) int {
 	return n
 }
 
-// pickDefinition selects one definition by optional receiver and file.
 func pickDefinition(defs []parser.Chunk, receiver, file string) (parser.Chunk, bool) {
 	for _, d := range defs {
 		if receiver != "" && d.Metadata["receiver"] != receiver {
@@ -63,8 +59,6 @@ func pickDefinition(defs []parser.Chunk, receiver, file string) (parser.Chunk, b
 	return parser.Chunk{}, false
 }
 
-// nearestDefinition picks the definition a reference from `from` most likely
-// meant: closest file, then the same receiver, then index order.
 func nearestDefinition(defs []parser.Chunk, from parser.Chunk) parser.Chunk {
 	best, bestScore := defs[0], -1
 	for _, d := range defs {
@@ -95,7 +89,7 @@ func (h *tools) callees(ctx context.Context, in calleesIn) ([]parser.Chunk, erro
 		}
 		cands, err := h.store.GetComponents(ctx, ref)
 		if errors.Is(err, vectorstore.ErrNotFound) {
-			continue // a library or builtin name, not defined in this index
+			continue
 		}
 		if err != nil {
 			return nil, err
@@ -164,11 +158,9 @@ func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error)
 	return out, nil
 }
 
-// attributed drops referrers that are nearer to another same-name definition
-// than to t. Ties stay: a missed caller costs more than an extra one.
 func (h *tools) attributed(ctx context.Context, t definition, refs []parser.Chunk) ([]parser.Chunk, error) {
 	if t.file == "" {
-		return refs, nil // no definition chosen: every same-name caller counts
+		return refs, nil
 	}
 	defs, err := h.store.GetComponents(ctx, t.name)
 	if err != nil {
@@ -199,8 +191,6 @@ type graphIn struct {
 	FilePath  string `json:"file_path,omitempty" jsonschema:"file of the definition, for same-name definitions"`
 }
 
-// graph follows calls from a symbol: its callers (transitively), the symbols
-// it calls, or the chunks that mention its name.
 func (h *tools) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, in graphIn) (*sdkmcp.CallToolResult, hitList, error) {
 	start := time.Now()
 	var chunks []parser.Chunk

@@ -11,7 +11,7 @@ type cached struct {
 	Embedder
 	mu  sync.Mutex
 	max int
-	ll  *list.List // of *entry, front is newest
+	ll  *list.List
 	m   map[string]*list.Element
 }
 
@@ -20,8 +20,6 @@ type entry struct {
 	vec  []float32
 }
 
-// Cached wraps e with an LRU of single-text Embed results, for repeated
-// queries. EmbedBatch is not cached; indexing already reuses vectors by content.
 func Cached(e Embedder, size int) Embedder {
 	if size < 1 {
 		return e

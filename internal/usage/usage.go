@@ -1,5 +1,3 @@
-// Package usage records which search hit an assistant opens next, so real
-// questions can become eval cases and opened chunks can rank a little higher.
 package usage
 
 import (
@@ -10,14 +8,10 @@ import (
 	"time"
 )
 
-// Window is how long after a search an open still counts as following it.
 const Window = 10 * time.Minute
 
-// Hit is one search result, reduced to what an open can be matched against.
 type Hit struct{ File, Symbol string }
 
-// Event is one open that followed a search: the query, the hit that was
-// opened, and its 1-based position in that search's results.
 type Event struct {
 	TS     string `json:"ts"`
 	Query  string `json:"query"`
@@ -26,7 +20,6 @@ type Event struct {
 	Rank   int    `json:"rank"`
 }
 
-// Log appends events to a JSON-lines file. A nil *Log records nothing.
 type Log struct {
 	path string
 	now  func() time.Time
@@ -38,7 +31,6 @@ type Log struct {
 	at    time.Time
 }
 
-// New returns a Log writing to path, or nil when path is empty.
 func New(path string) *Log {
 	if path == "" {
 		return nil
@@ -46,7 +38,6 @@ func New(path string) *Log {
 	return &Log{path: path, now: time.Now}
 }
 
-// Search remembers the results of the latest search.
 func (l *Log) Search(query string, hits []Hit) {
 	if l == nil {
 		return
@@ -56,9 +47,6 @@ func (l *Log) Search(query string, hits []Hit) {
 	l.query, l.hits, l.used, l.at = query, hits, make([]bool, len(hits)), l.now()
 }
 
-// Open records that file (and symbol, when known) was opened. It is kept only
-// when it matches a hit of the latest search made within Window; each hit is
-// recorded once per search.
 func (l *Log) Open(file, symbol string) error {
 	if l == nil || (file == "" && symbol == "") {
 		return nil
@@ -101,8 +89,6 @@ func (l *Log) append(e Event) error {
 	return err
 }
 
-// Load reads every event from path. A missing file is no events; a damaged
-// line is skipped.
 func Load(path string) ([]Event, error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -124,10 +110,8 @@ func Load(path string) ([]Event, error) {
 	return out, sc.Err()
 }
 
-// Key identifies a chunk in Counts.
 func Key(file, symbol string) string { return file + "\x00" + symbol }
 
-// Counter reads open counts from a usage file and reloads when it changes.
 type Counter struct {
 	Path string
 
@@ -138,7 +122,6 @@ type Counter struct {
 	counts map[string]int
 }
 
-// Counts returns how often each (file, symbol) was opened after a search.
 func (c *Counter) Counts() map[string]int {
 	if c == nil || c.Path == "" {
 		return nil

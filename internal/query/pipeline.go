@@ -12,9 +12,6 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// Defaults measured with `onfly eval tune` on 573 cases (45 hand-written, 528
-// generated), fitted on half and checked on the other half: MRR 0.605 -> 0.678
-// on the held-out half against the old semantic=1 keyword=1 field=off rrf_k=60.
 const (
 	slotAlt = "alt"
 )
@@ -23,27 +20,21 @@ const (
 	typeWeightPoolFactor = 3
 	typeWeightPoolMax    = 150
 
-	defaultSemanticWeight = 2.0
-	defaultKeywordWeight  = 0.5
-	defaultFieldWeight    = 0.5
-	defaultRRFK           = 20
-	defaultAltWeight      = 1.0
-	// defaultSummaryWordWeight is absolute (the per-word list is relative to the keyword weight).
+	defaultSemanticWeight    = 2.0
+	defaultKeywordWeight     = 0.5
+	defaultFieldWeight       = 0.5
+	defaultRRFK              = 20
+	defaultAltWeight         = 1.0
 	defaultSummaryWordWeight = 0.125
 )
 
-// Params are the numbers that turn gathered candidate lists into one ranking.
-// Tuning varies them without touching the store or the embedder again.
 type Params struct {
 	Semantic, Keyword, Word, Field, Recency float64
-	// Alt and SummaryWord weigh the second-embedder and summary-keyword lists.
-	Alt, SummaryWord float64
-	// Section multiplies the score of documentation sections (1 is neutral).
-	Section float64
-	RRFK    int
+	Alt, SummaryWord                        float64
+	Section                                 float64
+	RRFK                                    int
 }
 
-// Params returns the searcher's effective fusion numbers.
 func (s *Searcher) Params() Params {
 	p := Params{
 		Semantic:    orDefault(s.SemanticWeight, defaultSemanticWeight),
@@ -77,23 +68,17 @@ func (s *Searcher) Params() Params {
 	return p
 }
 
-// Gathered holds every candidate list for one query, filtered but not yet fused.
 type Gathered struct {
-	Query string
-	// Terms are the content words of the query, used by the name/path/doc list.
-	Terms    []string
-	Semantic []parser.Chunk
-	Keyword  []parser.Chunk
-	Words    []parser.Chunk
-	Recent   []parser.Chunk
-	// Alt and SummaryWords come from the second embedder and the summary
-	// keyword index; empty when those are not in use.
+	Query             string
+	Terms             []string
+	Semantic          []parser.Chunk
+	Keyword           []parser.Chunk
+	Words             []parser.Chunk
+	Recent            []parser.Chunk
 	Alt, SummaryWords []parser.Chunk
 	req               Request
 }
 
-// Run embeds the query, merges semantic, keyword and name lists and reranks. When the embedder fails it answers
-// from keyword results alone.
 func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 	g, err := s.Gather(ctx, r)
 	if err != nil {
@@ -106,7 +91,6 @@ func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 	return fused, nil
 }
 
-// Gather runs the store and embedder lookups for r.
 func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	var only map[string]bool
 	pool := CandidatePool(r.Limit)
@@ -145,11 +129,9 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	}
 	filtered := only != nil || r.Type != "" || r.Path != ""
 	if filtered {
-		pool = MaxLimit // filters run after retrieval, so look wide
+		pool = MaxLimit
 	}
 	if len(s.TypeWeights) > 0 {
-		// Demoted chunks still fill candidate slots; read deeper so real
-		// definitions behind them make it into the lists.
 		pool = max(pool, min(pool*typeWeightPoolFactor, typeWeightPoolMax))
 	}
 	g := &Gathered{Query: r.Query, Terms: queryWords(r.Query), req: r}
@@ -175,7 +157,7 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	if embedErr != nil {
 		s.logger().Warn("embedder unavailable, using keyword results only", "err", embedErr)
 	}
-	if len(g.Terms) >= 2 { // a single word is already the whole-query keyword search
+	if len(g.Terms) >= 2 {
 		g.Words = s.wordMatches(ctx, g.Terms, pool, r.Workspace)
 	}
 	if s.AltEmb != nil {
@@ -200,7 +182,6 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	return g, nil
 }
 
-// Fuse turns gathered lists into one ranked list, before reranking and the limit.
 func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	lists := [][]parser.Chunk{g.Semantic, g.Keyword, g.Words}
 	weights := []float64{p.Semantic, p.Keyword, p.Word * p.Keyword}
@@ -245,7 +226,6 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	return chunksOf(ranked)
 }
 
-// union is the distinct chunks of every list, in list order.
 func union(lists ...[]parser.Chunk) []parser.Chunk {
 	seen := map[string]bool{}
 	var out []parser.Chunk
@@ -260,7 +240,6 @@ func union(lists ...[]parser.Chunk) []parser.Chunk {
 	return out
 }
 
-// usedChunks orders candidates that were opened before by how often.
 func usedChunks(counts map[string]int, cands []parser.Chunk) []parser.Chunk {
 	if len(counts) == 0 {
 		return nil

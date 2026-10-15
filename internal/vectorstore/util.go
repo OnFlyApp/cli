@@ -26,7 +26,6 @@ func vecLiteral(v []float32) string {
 	return b.String()
 }
 
-// parseVecLiteral is the inverse of vecLiteral: "[1,2.5,-3]".
 func parseVecLiteral(s string) ([]float32, error) {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
@@ -102,7 +101,6 @@ func scanOutbound(raw string) ([]string, error) {
 	return v, nil
 }
 
-// assembleComponents groups rows by file and receiver and assembles each group.
 func assembleComponents(chunks []parser.Chunk) ([]parser.Chunk, error) {
 	if len(chunks) == 0 {
 		return nil, ErrNotFound
@@ -131,9 +129,6 @@ func assembleComponents(chunks []parser.Chunk) ([]parser.Chunk, error) {
 	return out, nil
 }
 
-// assembleComponent returns the earliest chunk with a name. Later split parts
-// of that same file are joined in part order. The overlap shared by two
-// adjacent parts is written once.
 func assembleComponent(chunks []parser.Chunk) (*parser.Chunk, error) {
 	if len(chunks) == 0 {
 		return nil, ErrNotFound
@@ -253,7 +248,6 @@ func checkVectors(chunks []EmbeddedChunk, dimensions int) error {
 	return nil
 }
 
-// validSlot reports whether name is safe to use inside an SQL identifier.
 func validSlot(name string) bool {
 	if name == "" || len(name) > 16 {
 		return false
@@ -266,7 +260,6 @@ func validSlot(name string) bool {
 	return true
 }
 
-// summaryText is what the summary keyword index holds for a chunk.
 func summaryText(meta map[string]string) string {
 	s, q := meta["summary"], meta["questions"]
 	switch {
@@ -289,7 +282,6 @@ func ftsPhrase(keyword string) string {
 	return `"` + strings.ReplaceAll(keyword, `"`, `""`) + `"`
 }
 
-// extOf names a file's extension, treating compound ones like ".min.js" as one.
 func extOf(p string) string {
 	base := strings.ToLower(path.Base(slashPath(p)))
 	for _, compound := range []string{".min.js", ".min.css", ".d.ts", ".blade.php"} {
@@ -303,7 +295,6 @@ func extOf(p string) string {
 	return "(none)"
 }
 
-// addExt folds one file's footprint into by.
 func addExt(by map[string]ExtStat, file string, chunks, bytes int) {
 	e := extOf(file)
 	st := by[e]

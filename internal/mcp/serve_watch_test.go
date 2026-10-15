@@ -44,5 +44,5 @@ func TestStartWatchStopsWithContextAndSurvivesFailure(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("failing watcher did not run")
 	}
-	stop() // must not panic or block
+	stop()
 }

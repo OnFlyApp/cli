@@ -52,7 +52,7 @@ func TestFindSymbolsPrefixAndGlob(t *testing.T) {
 	ctx := context.Background()
 	_, out, err := h.findSymbols(ctx, nil, findIn{Pattern: "save"})
 	if err != nil || len(out.Symbols) != 3 {
-		t.Fatalf("prefix: %+v %v", out, err) // Save (two receivers) and saveAll
+		t.Fatalf("prefix: %+v %v", out, err)
 	}
 	if out.Symbols[0].Name != "Save" {
 		t.Fatalf("exact name must come first: %+v", out.Symbols)

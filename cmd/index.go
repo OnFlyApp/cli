@@ -31,7 +31,7 @@ var indexCmd = &cobra.Command{
 			return err
 		}
 		if err != nil && stats == (index.Stats{}) {
-			return err // stopped before any file was looked at; a summary of zeros would mislead
+			return err
 		}
 		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, reused %d, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Reused, stats.Skipped, stats.Pruned, stats.Failed)
 		return err

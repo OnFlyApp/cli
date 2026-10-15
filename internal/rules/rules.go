@@ -38,8 +38,6 @@ var langExt = map[string][]string{
 	"java":       {".java"},
 }
 
-// Query is the path and syntax the MCP call is about.
-// An empty query matches only global rules.
 type Query struct {
 	Targets []Target
 }
@@ -104,8 +102,6 @@ type frontmatter struct {
 	Priority int      `yaml:"priority"`
 }
 
-// Load reads .onfly/rules/*.md, then config rule paths, then the first
-// fallback file when no explicit rule exists and auto-discovery is on.
 func Load(cfg config.Config) *Engine {
 	percent := cfg.RulesEngine.MaxTokenBudgetPercent
 	if percent <= 0 {
@@ -198,8 +194,6 @@ func (e *Engine) HasRules() bool {
 	return e != nil && (len(e.rules) > 0 || e.readErr != nil)
 }
 
-// Inject renders the rules that match q, highest priority first, capped at
-// percent of maxTokens.
 func (e *Engine) Inject(q Query, maxTokens int) string {
 	if e == nil {
 		return ""
@@ -397,8 +391,6 @@ func isGlob(entry string) bool {
 	return strings.ContainsAny(entry, "*?[") || strings.Contains(entry, "/")
 }
 
-// globHit matches a file path, and also a directory request whose path is the
-// literal prefix of the pattern (frontend/src matches frontend/src/**).
 func globHit(pattern, path string) bool {
 	pattern = filepath.ToSlash(strings.TrimSpace(pattern))
 	path = filepath.ToSlash(path)

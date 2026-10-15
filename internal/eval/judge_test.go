@@ -36,8 +36,6 @@ func TestJudgeCountsValidAlternatives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// "first" is not sent; "alt" (rank 2) gets answer 1: result 1 is a valid answer;
-	// "miss" gets []: still a miss.
 	if j.calls != 2 || got.Alternatives != 1 || got.Recall != 2.0/3 || got.StrictRecall != 2.0/3 {
 		t.Fatalf("%+v calls=%d", got, j.calls)
 	}

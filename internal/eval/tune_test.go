@@ -42,7 +42,6 @@ func TestScoreAndRankFileLevel(t *testing.T) {
 }
 
 func TestTunePicksBestAndChecksHeldOut(t *testing.T) {
-	// setting 1 ranks even cases at 1 and odd ones at 2; setting 0 misses all.
 	tu := Tuner{
 		N:    2,
 		Name: func(s int) string { return []string{"base", "better"}[s] },
@@ -74,7 +73,7 @@ func TestMineGroupsOpensByQuery(t *testing.T) {
 	ev := []usage.Event{
 		{Query: "q1", File: "a.go", Symbol: "A"},
 		{Query: "q2", File: "b.go"},
-		{Query: "q1", File: "a.go", Symbol: "A"}, // repeat
+		{Query: "q1", File: "a.go", Symbol: "A"},
 		{Query: "q1", File: "c.go", Symbol: "C"},
 	}
 	got := Mine(ev)
