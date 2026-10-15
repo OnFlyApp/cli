@@ -193,7 +193,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		h.trace = f
 		closer = func() { f.Close() }
 	}
-	instructions := "Search the indexed project. stdout is JSON-RPC only."
+	instructions := "Search the indexed project. stdout is JSON-RPC only.\n\n" + Guidance
 	if text := h.engine.Inject(rules.Query{}, maxTokens); text != "" {
 		instructions = text + "\n\n" + instructions
 	}
@@ -203,12 +203,12 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does. Returns the path, the symbol, and the lines to edit."}, h.search)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier you already know. For a description of behavior, call search."}, h.searchKeyword)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the chunk whose metadata name matches. Split parts of that symbol are joined."}, h.component)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns the symbol, a summary and the code of the best matches; the tail of the list is signatures only."}, h.search)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier or string you already know, like Grep over the index. For a description of behavior, call search."}, h.searchKeyword)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find_symbols instead of reading the whole file."}, h.component)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_references", Description: "Return chunks whose outbound references include the name."}, h.references)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_callees", Description: "Return the chunks a symbol calls, for names defined in this index."}, h.getCallees)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first."}, h.getImpact)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first. Use before changing a function to see what it can break."}, h.getImpact)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)

@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"context"
+	"strings"
 	"testing"
 
+	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/tokens"
 )
@@ -31,5 +34,29 @@ func TestSearchDetailAutoShrinksTail(t *testing.T) {
 	na, _ := tokens.Count(string(mustJSON(auto)))
 	if na >= nf {
 		t.Fatalf("auto must cost fewer tokens than full: %d >= %d", na, nf)
+	}
+}
+
+func TestInstructionsAndToolDescriptions(t *testing.T) {
+	store := seedUsers(t)
+	session := openServer(t, config.Config{}, store, fakeEmbedder{})
+	if got := session.InitializeResult().Instructions; !strings.Contains(got, "get_impact") || !strings.Contains(got, "get_tests") {
+		t.Fatalf("instructions must route to the graph tools: %q", got)
+	}
+	res, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, tool := range res.Tools {
+		seen[tool.Name] = true
+		if tool.Description == "" || len(tool.Description) > 250 {
+			t.Errorf("%s: description length %d", tool.Name, len(tool.Description))
+		}
+	}
+	for _, name := range []string{"search", "get_tests", "get_history", "get_impact"} {
+		if !seen[name] {
+			t.Errorf("tool %s is not registered", name)
+		}
 	}
 }
