@@ -72,11 +72,13 @@ onfly index                  # update the index after changes
 onfly serve --watch          # serve your IDE and keep the index fresh
 onfly search "question"      # try a search from the terminal
 onfly doctor                 # something wrong? start here
-onfly stats                  # how big is the index, what's in it
+onfly stats                  # how big is the index, what's in it, which chunk types
 onfly eval tune              # find ranking weights that fit your code
 ```
 
 Every command is listed in [Commands](docs/commands.md).
+
+Results too noisy for your language, for example property or `use` chunks outranking classes? Drop or demote chunk types with `indexer.skip_types` and `search.type_weights`; see the [cookbook](docs/cookbook.md#quiet-small-declarations-properties-enum-cases-imports).
 
 ## How it works, in one picture
 

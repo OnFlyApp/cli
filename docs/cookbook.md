@@ -58,6 +58,19 @@ indexer:
 
 Or leave out the extension by not giving it a parser (a file with no parser is never indexed).
 
+## Quiet small declarations (properties, enum cases, imports)
+
+Some parsers emit one chunk per `use` line, property or enum case. Their names often match a question's words and outrank the class that holds them. Look at `onfly stats` for the chunk types, then:
+
+```yaml
+indexer:
+  skip_types: [use, namespace]       # no search value at all: drop them (reindex)
+search:
+  type_weights: {trait_use: 0.05, property: 0.1, enum_case: 0.1}   # keep them findable, rank them low (no reindex)
+```
+
+On a PHP project this took MRR from 0.838 to 0.868 while keeping enum and property lookups; dropping the types outright reached 0.885 but made those lookups impossible. See [measured results](evaluation.md#a-php-project). Change one type at a time and run `onfly eval` after each.
+
 ## Use a different parser for part of the project
 
 Each parser can have its own `include` and `exclude`, on top of the global ones. Paths are relative to the project root.
