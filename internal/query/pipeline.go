@@ -20,6 +20,9 @@ const (
 )
 
 const (
+	typeWeightPoolFactor = 3
+	typeWeightPoolMax    = 150
+
 	defaultSemanticWeight = 2.0
 	defaultKeywordWeight  = 0.5
 	defaultFieldWeight    = 0.5
@@ -143,6 +146,11 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	filtered := only != nil || r.Type != "" || r.Path != ""
 	if filtered {
 		pool = MaxLimit // filters run after retrieval, so look wide
+	}
+	if len(s.TypeWeights) > 0 {
+		// Demoted chunks still fill candidate slots; read deeper so real
+		// definitions behind them make it into the lists.
+		pool = max(pool, min(pool*typeWeightPoolFactor, typeWeightPoolMax))
 	}
 	g := &Gathered{Query: r.Query, Terms: queryWords(r.Query), req: r}
 
