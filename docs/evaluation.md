@@ -163,3 +163,17 @@ Demoting the same types with `search.type_weights` instead of deleting them (632
 
 The first rows were stuck because demoted chunks still filled the top 20 slots of every candidate list; reading a deeper pool and letting a demoted chunk take a fraction of a position is what moved the score. The remaining 0.017 is the price of keeping enum and property lookups.
 
+
+## A Go project, end to end
+
+Agent benchmark on Hugo (523 non-test Go files, 6,967 chunks, embeddinggemma-2, no summaries): seven tasks, three runs each, `claude -p` with and without the MCP server, sum of per-task medians.
+
+| Arm | Turns | Seconds | Output tokens |
+| --- | --- | --- | --- |
+| Without onfly | 37 | 72 | 8,092 |
+| With onfly, server instructions only | 33 | 64 | 7,082 |
+| With onfly, instructions + `onfly guide --write` CLAUDE.md block | 37 | 64 | 6,773 |
+
+The gain comes from the semantic questions (how is X chosen, how is Y decided: 4 to 3 and 7 to 4 turns). On an exact lookup, Grep is already one call, so onfly adds none. With the CLAUDE.md block the model called `search` 15 times instead of never, and the turn count rose back to the baseline: more onfly use did not mean fewer turns on a repository the model already knows well. All answers were equally correct and the edit task built and passed `go test` in every run.
+
+`graph` returned 7,219 tokens for one callers query before it defaulted to signatures; it now returns 544 for the same nine hits (`detail: full` keeps bodies).
