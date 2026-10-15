@@ -190,10 +190,6 @@ func (e *Engine) ReadError() error {
 	return e.readErr
 }
 
-func (e *Engine) HasRules() bool {
-	return e != nil && (len(e.rules) > 0 || e.readErr != nil)
-}
-
 func (e *Engine) Inject(q Query, maxTokens int) string {
 	if e == nil {
 		return ""
@@ -397,7 +393,7 @@ func globHit(pattern, path string) bool {
 	if pattern == "" || path == "" {
 		return false
 	}
-	if doublestar.PathMatchUnvalidated(pattern, path) {
+	if doublestar.MatchUnvalidated(pattern, path) {
 		return true
 	}
 	prefix := pattern

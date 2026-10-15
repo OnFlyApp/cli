@@ -44,14 +44,6 @@ func TestFuseWithParamsChangesRanking(t *testing.T) {
 	}
 }
 
-func names(cs []parser.Chunk) []string {
-	var out []string
-	for _, c := range cs {
-		out = append(out, c.Metadata["name"])
-	}
-	return out
-}
-
 func TestSummaryKeywordListFindsChunkByItsSummary(t *testing.T) {
 	target := parser.Chunk{FilePath: "retry.go", Type: "function", Content: "func backoffLoop() { sleep }",
 		Metadata: map[string]string{"name": "backoffLoop", "summary": "Pauses between attempts to contact the server."}}

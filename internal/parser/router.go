@@ -36,7 +36,7 @@ func (e entry) accepts(rel string) bool {
 
 func globAny(patterns []string, rel string) bool {
 	for _, pat := range patterns {
-		if ok, err := doublestar.PathMatch(pat, rel); err == nil && ok {
+		if ok, err := doublestar.Match(pat, rel); err == nil && ok {
 			return true
 		}
 	}

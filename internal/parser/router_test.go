@@ -86,6 +86,7 @@ func TestRouterCloseOnce(t *testing.T) {
 }
 
 func TestBladeScriptBeatsPHP(t *testing.T) {
+	skipWithoutShell(t)
 	dir := t.TempDir()
 	script := filepath.Join(dir, "blade.sh")
 	body := "#!/bin/sh\nprintf '%s\\n' '[{\"file_path\":\"\",\"type\":\"blade\",\"content\":\"x\",\"metadata\":{\"name\":\"View\"}}]'\n"

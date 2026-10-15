@@ -160,6 +160,7 @@ func TestSummaryCacheSurvivesDeletingTheDatabase(t *testing.T) {
 }
 
 func TestSummariesOverOpenAIChatWithConcurrency(t *testing.T) {
+	skipWithoutShell(t)
 	var calls, inflight, peak atomic.Int32
 	chat := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)

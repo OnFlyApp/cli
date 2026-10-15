@@ -39,7 +39,7 @@ func TestGoParserWASM(t *testing.T) {
 func buildGoParser(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	clone := exec.Command("gh", "repo", "clone", "OnFlyApp/ext-parser-go", dir, "--", "--depth=1")
+	clone := exec.Command("git", "clone", "--depth=1", "https://github.com/OnFlyApp/ext-parser-go", dir)
 	if buf, err := clone.CombinedOutput(); err != nil {
 		t.Fatalf("clone go parser: %v\n%s", err, buf)
 	}

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,6 +38,7 @@ func TestFillChunkLines(t *testing.T) {
 }
 
 func TestProgressNamesTheSlowSteps(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -83,6 +85,7 @@ func TestProgressNamesTheSlowSteps(t *testing.T) {
 }
 
 func TestIndexStoresStartLine(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -137,6 +140,7 @@ func TestSpecGlobs(t *testing.T) {
 }
 
 func TestReindexPrunesAndSkips(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -226,6 +230,7 @@ func TestReindexPrunesAndSkips(t *testing.T) {
 }
 
 func TestFailedReindexKeepsChunks(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -272,6 +277,7 @@ func TestFailedReindexKeepsChunks(t *testing.T) {
 }
 
 func TestGitignoreSkipsEnv(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -330,6 +336,7 @@ func TestWithinRootResolvesAncestorSymlink(t *testing.T) {
 }
 
 func TestSymlinkToIgnoredTargetIsNotRead(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -394,6 +401,7 @@ func TestSymlinkToIgnoredTargetIsNotRead(t *testing.T) {
 }
 
 func TestDropAbsentRemovesDeletedFile(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -439,6 +447,7 @@ func TestDropAbsentRemovesDeletedFile(t *testing.T) {
 }
 
 func TestIndexContinuesAfterFileError(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -489,6 +498,7 @@ func fakeOllama(t *testing.T) *httptest.Server {
 }
 
 func writeProject(t *testing.T, dir, endpoint, script string) {
+	skipWithoutShell(t)
 	t.Helper()
 	onfly := filepath.Join(dir, ".onfly")
 	if err := os.MkdirAll(filepath.Join(onfly, "rules"), 0o755); err != nil {
@@ -529,6 +539,7 @@ func shellQuote(path string) string {
 }
 
 func TestDryRunDoesNotCreateDB(t *testing.T) {
+	skipWithoutShell(t)
 	dir := t.TempDir()
 	script := filepath.Join(dir, "chunk.sh")
 	body := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '[{\"type\":\"function\",\"content\":\"func getUserId\",\"metadata\":{\"name\":\"User\"}}]'\n"
@@ -555,6 +566,7 @@ func TestDryRunDoesNotCreateDB(t *testing.T) {
 }
 
 func TestCIBatch(t *testing.T) {
+	skipWithoutShell(t)
 	parts := make([]string, 40)
 	for i := range parts {
 		parts[i] = `{"type":"function","content":"chunk","metadata":{"name":"C"}}`
@@ -618,6 +630,7 @@ func TestFillChunkLinesRepeatedSnippets(t *testing.T) {
 }
 
 func TestConcurrentIndexMatchesSequential(t *testing.T) {
+	skipWithoutShell(t)
 	srv := fakeOllama(t)
 	defer srv.Close()
 	dir := t.TempDir()
@@ -652,6 +665,7 @@ func TestConcurrentIndexMatchesSequential(t *testing.T) {
 }
 
 func TestReindexEmbedsOnlyChangedChunks(t *testing.T) {
+	skipWithoutShell(t)
 	var texts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -755,6 +769,7 @@ func TestEmbedText(t *testing.T) {
 }
 
 func TestReindexPrunesFilesThatLeftScope(t *testing.T) {
+	skipWithoutShell(t)
 	for _, workspace := range []string{"", "web"} {
 		srv := fakeOllama(t)
 		dir := t.TempDir()
@@ -788,5 +803,12 @@ func TestReindexPrunesFilesThatLeftScope(t *testing.T) {
 			t.Fatalf("workspace %q: pruned %d, want %d", workspace, stats.Pruned, want)
 		}
 		srv.Close()
+	}
+}
+
+func skipWithoutShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
 	}
 }

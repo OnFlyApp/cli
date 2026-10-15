@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ func TestCoalesceOnce(t *testing.T) {
 }
 
 func TestWatchIgnoresOnflyDB(t *testing.T) {
+	skipWithoutShell(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"embeddings":[[1,0,0,1]]}`))
@@ -144,4 +146,11 @@ func countLines(b []byte) int {
 
 func quote(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+}
+
+func skipWithoutShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
+	}
 }

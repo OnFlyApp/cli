@@ -88,7 +88,7 @@ func findTests(root string, filter *ignore.Filter, name, glob string, limit int)
 			return nil
 		}
 		if glob != "" {
-			if ok, _ := doublestar.PathMatch(glob, rel); !ok {
+			if ok, _ := doublestar.Match(glob, rel); !ok {
 				return nil
 			}
 		}

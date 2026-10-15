@@ -94,7 +94,7 @@ func linkTargetOK(root, target string, filter *ignore.Filter) bool {
 
 func matchAny(rel string, patterns []string) (bool, error) {
 	for _, pattern := range patterns {
-		ok, err := doublestar.PathMatch(pattern, rel)
+		ok, err := doublestar.Match(pattern, rel)
 		if err != nil {
 			return false, fmt.Errorf("indexer include %q: %w", pattern, err)
 		}

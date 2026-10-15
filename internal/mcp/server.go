@@ -73,11 +73,6 @@ type hitList struct {
 	Hits  []hitDTO `json:"hits"`
 }
 
-type chunkList struct {
-	Rules  string     `json:"rules,omitempty"`
-	Chunks []chunkDTO `json:"chunks"`
-}
-
 type dirList struct {
 	Rules   string     `json:"rules,omitempty"`
 	Entries []dirEntry `json:"entries"`
@@ -96,10 +91,6 @@ type semanticIn struct {
 type keywordIn struct {
 	Keyword   string `json:"keyword" jsonschema:"case-insensitive substring"`
 	Workspace string `json:"workspace,omitempty" jsonschema:"workspace name, or * for every workspace"`
-}
-
-type nameIn struct {
-	Name string `json:"name" jsonschema:"component name from chunk metadata"`
 }
 
 type componentIn struct {
@@ -436,8 +427,6 @@ func toDTO(chunks []parser.Chunk) []chunkDTO {
 	}
 	return out
 }
-
-func clampLimit(n int) int { return query.ClampLimit(n) }
 
 func logLevel(name string) slog.Level {
 	switch strings.ToLower(name) {

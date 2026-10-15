@@ -135,10 +135,6 @@ func truncationText(omitted int) string {
 	return fmt.Sprintf("// [Truncated: %d matches omitted due to context limits.]", omitted)
 }
 
-func truncation(omitted int) parser.Chunk {
-	return parser.Chunk{Type: "diagnostic", Content: truncationText(omitted)}
-}
-
 func diagnosticHit(omitted int) hitDTO {
 	return hitDTO{Lines: truncationText(omitted)}
 }
@@ -158,27 +154,6 @@ func fitPrefix(n, maxTokens int, size func(k int) (int, error)) (int, error) {
 		}
 	}
 	return lo, nil
-}
-
-func fit(chunks []parser.Chunk, maxTokens int) ([]chunkDTO, error) {
-	n := len(chunks)
-	k, err := fitPrefix(n, maxTokens, func(k int) (int, error) {
-		payload := toDTO(chunks[:k])
-		if k < n {
-			payload = append(payload, toDTO([]parser.Chunk{truncation(n - k)})...)
-		}
-		return tokens.Count(mustJSON(payload))
-	})
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case k == n:
-		return toDTO(chunks), nil
-	case k == 0:
-		return toDTO([]parser.Chunk{truncation(n)}), nil
-	}
-	return append(toDTO(chunks[:k]), toDTO([]parser.Chunk{truncation(n - k)})...), nil
 }
 
 func fitHits(chunks []parser.Chunk, maxTokens int, detail string) ([]hitDTO, error) {

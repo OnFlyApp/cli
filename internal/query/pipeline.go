@@ -118,7 +118,7 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 			return false
 		}
 		if r.Path != "" {
-			if ok, _ := doublestar.PathMatch(r.Path, c.FilePath); !ok {
+			if ok, _ := doublestar.Match(r.Path, c.FilePath); !ok {
 				return false
 			}
 		}

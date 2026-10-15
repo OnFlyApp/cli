@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ func writeScript(t *testing.T, body string) string {
 }
 
 func TestStdioParse(t *testing.T) {
+	skipWithoutShell(t)
 	script := writeScript(t, `#!/bin/sh
 cat >/dev/null
 printf '%s\n' '[{"file_path":"","type":"class","content":"class A {}","metadata":{"name":"User"}}]'
@@ -34,6 +36,7 @@ printf '%s\n' '[{"file_path":"","type":"class","content":"class A {}","metadata"
 }
 
 func TestStdioExitError(t *testing.T) {
+	skipWithoutShell(t)
 	script := writeScript(t, "#!/bin/sh\necho boom >&2\nexit 1\n")
 	p := newStdioParser(script)
 	_, err := p.Parse(context.Background(), "a.php", []byte("x"))
@@ -43,6 +46,7 @@ func TestStdioExitError(t *testing.T) {
 }
 
 func TestStdioTimeout(t *testing.T) {
+	skipWithoutShell(t)
 	script := writeScript(t, "#!/bin/sh\nsleep 30\n")
 	p := newStdioParser(script)
 	start := time.Now()
@@ -58,10 +62,18 @@ func TestStdioTimeout(t *testing.T) {
 }
 
 func TestStdioBadJSON(t *testing.T) {
+	skipWithoutShell(t)
 	script := writeScript(t, "#!/bin/sh\necho not-json\n")
 	p := newStdioParser(script)
 	_, err := p.Parse(context.Background(), "a.php", []byte("x"))
 	if err == nil || !strings.Contains(err.Error(), "json") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func skipWithoutShell(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs /bin/sh")
 	}
 }
