@@ -339,6 +339,15 @@ func chunksOf(in []scored) []parser.Chunk {
 // fuseScored merges ranked lists by weighted reciprocal rank, best first, with
 // rank constant k. Ties break by path, then content, so the order is stable.
 func fuseScored(k int, weights []float64, lists ...[]parser.Chunk) []scored {
+	return fuseTyped(k, weights, nil, lists...)
+}
+
+// fuseTyped is fuseScored with a per-chunk weight tw (nil means 1). A chunk
+// with weight 0.3 contributes 0.3 of its reciprocal rank and also takes only
+// 0.3 of a position in the list, so the chunks behind it are ranked nearly as
+// if it were absent. That is what separates demoting a type from only
+// scaling its final score: the noise no longer pushes real hits down the lists.
+func fuseTyped(k int, weights []float64, tw func(parser.Chunk) float64, lists ...[]parser.Chunk) []scored {
 	var order []string
 	by := map[string]*scored{}
 	for li, list := range lists {
@@ -347,21 +356,25 @@ func fuseScored(k int, weights []float64, lists ...[]parser.Chunk) []scored {
 			w = weights[li]
 		}
 		seen := map[string]bool{}
-		rank := 0
+		rank := 0.0
 		for _, ch := range list {
 			key := ChunkKey(ch)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			rank++
+			cw := 1.0
+			if tw != nil {
+				cw = tw(ch)
+			}
+			rank += cw
 			item := by[key]
 			if item == nil {
 				item = &scored{chunk: ch}
 				by[key] = item
 				order = append(order, key)
 			}
-			item.score += w / float64(k+rank)
+			item.score += w * cw / (float64(k) + rank)
 		}
 	}
 	out := make([]scored, 0, len(order))

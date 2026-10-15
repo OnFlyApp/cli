@@ -216,15 +216,20 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	if len(g.Recent) > 0 && p.Recency > 0 {
 		lists, weights = append(lists, g.Recent), append(weights, p.Recency)
 	}
-	ranked := fuseScored(p.RRFK, weights, lists...)
-	reweigh := p.Section != 1 && p.Section > 0
-	if reweigh || len(s.TypeWeights) > 0 {
-		for i := range ranked {
-			if reweigh && ranked[i].chunk.Type == "section" {
-				ranked[i].score *= p.Section
+	var typeW func(parser.Chunk) float64
+	if len(s.TypeWeights) > 0 {
+		typeW = func(c parser.Chunk) float64 {
+			if w, ok := s.TypeWeights[strings.ToLower(c.Type)]; ok {
+				return w
 			}
-			if w, ok := s.TypeWeights[strings.ToLower(ranked[i].chunk.Type)]; ok {
-				ranked[i].score *= w
+			return 1
+		}
+	}
+	ranked := fuseTyped(p.RRFK, weights, typeW, lists...)
+	if p.Section != 1 && p.Section > 0 {
+		for i := range ranked {
+			if ranked[i].chunk.Type == "section" {
+				ranked[i].score *= p.Section
 			}
 		}
 		sortScored(ranked)

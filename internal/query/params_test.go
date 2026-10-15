@@ -94,3 +94,35 @@ func TestTypeWeightsDemoteSmallDeclarations(t *testing.T) {
 		t.Fatalf("a weighted-down type must sort below the definition, and stay in the results: %+v", got)
 	}
 }
+
+func TestTypeWeightTakesPartOfAPosition(t *testing.T) {
+	noise := parser.Chunk{FilePath: "n.php", Type: "property", Content: "n"}
+	real := parser.Chunk{FilePath: "r.php", Type: "class", Content: "r"}
+	other := parser.Chunk{FilePath: "o.php", Type: "class", Content: "o"}
+	tw := func(c parser.Chunk) float64 {
+		if c.Type == "property" {
+			return 0
+		}
+		return 1
+	}
+	// other leads list one; list two puts the noise first, then real.
+	got := fuseTyped(20, []float64{1, 1}, tw, []parser.Chunk{other, real}, []parser.Chunk{noise, real})
+	plain := fuseScored(20, []float64{1, 1}, []parser.Chunk{other, real}, []parser.Chunk{noise, real})
+	score := func(in []scored, c parser.Chunk) float64 {
+		for _, x := range in {
+			if x.chunk.FilePath == c.FilePath {
+				return x.score
+			}
+		}
+		return -1
+	}
+	if score(got, real) <= score(plain, real) {
+		t.Fatalf("a zero-weight type must not take a position, so real moves up: typed=%v plain=%v", got, plain)
+	}
+	if score(got, other) <= score(got, noise) {
+		t.Fatalf("typed fusion ranks the noise below other: %v", got)
+	}
+	if got[len(got)-1].chunk.Type != "property" {
+		t.Fatalf("the demoted chunk sorts last: %+v", got)
+	}
+}
