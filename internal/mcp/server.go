@@ -211,6 +211,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first."}, h.getImpact)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
+	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "find_symbols", Description: "Find definitions by name: a prefix, or a pattern with * and ?. Case-insensitive."}, h.findSymbols)
 	h.addPrompts(srv)
 	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)

@@ -65,3 +65,50 @@ func dedupe(in []string) []string {
 	}
 	return out
 }
+
+// Commit is one entry of a history.
+type Commit struct {
+	Hash    string `json:"hash"`
+	Author  string `json:"author"`
+	Date    string `json:"date"`
+	Subject string `json:"subject"`
+}
+
+const logFormat = "--format=%h%x09%an%x09%ad%x09%s"
+
+// LineLog lists the commits that touched lines start..end of file, newest
+// first, at most n. file is relative to root.
+func LineLog(ctx context.Context, root, file string, start, end, n int) ([]Commit, error) {
+	if file == "" || strings.HasPrefix(file, "-") || start < 1 || end < start {
+		return nil, fmt.Errorf("invalid history range %q:%d-%d", file, start, end)
+	}
+	lines, err := run(ctx, root, "log", "-L"+strconv.Itoa(start)+","+strconv.Itoa(end)+":"+file,
+		"-n", strconv.Itoa(n), "-s", "--date=short", logFormat)
+	if err != nil {
+		return nil, err
+	}
+	return commits(lines), nil
+}
+
+// FileLog lists the commits that touched file, newest first, at most n.
+func FileLog(ctx context.Context, root, file string, n int) ([]Commit, error) {
+	if file == "" || strings.HasPrefix(file, "-") {
+		return nil, fmt.Errorf("invalid file %q", file)
+	}
+	lines, err := run(ctx, root, "log", "-n", strconv.Itoa(n), "--date=short", logFormat, "--", file)
+	if err != nil {
+		return nil, err
+	}
+	return commits(lines), nil
+}
+
+func commits(lines []string) []Commit {
+	out := []Commit{}
+	for _, l := range lines {
+		f := strings.SplitN(l, "\t", 4)
+		if len(f) == 4 {
+			out = append(out, Commit{Hash: f[0], Author: f[1], Date: f[2], Subject: f[3]})
+		}
+	}
+	return out
+}
