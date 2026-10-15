@@ -32,3 +32,14 @@ func TestMCPSnippet(t *testing.T) {
 		t.Fatal("unknown client must fail")
 	}
 }
+
+func TestClaudeAllowSnippet(t *testing.T) {
+	var v struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(claudeAllowSnippet), &v); err != nil || len(v.Permissions.Allow) != 1 || v.Permissions.Allow[0] != "mcp__onfly" {
+		t.Fatalf("%+v %v", v, err)
+	}
+}

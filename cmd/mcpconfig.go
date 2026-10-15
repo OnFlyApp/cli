@@ -9,12 +9,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var mcpConfigAllow bool
+
+// claudeAllowSnippet is the Claude Code permission rule that lets every onfly
+// tool run without a prompt. All of them are read-only.
+const claudeAllowSnippet = "{\n  \"permissions\": {\n    \"allow\": [\"mcp__onfly\"]\n  }\n}"
+
 var mcpConfigCmd = &cobra.Command{
 	Use:       "mcp-config <claude-code|cursor|vscode>",
 	Short:     "Print the MCP server entry for an IDE",
 	Args:      cobra.ExactArgs(1),
 	ValidArgs: []string{"claude-code", "cursor", "vscode"},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if mcpConfigAllow {
+			if args[0] != "claude-code" {
+				return fmt.Errorf("--allow is for claude-code, not %q", args[0])
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), "Merge this into .claude/settings.json (every onfly tool is read-only):")
+			fmt.Fprintln(cmd.OutOrStdout(), claudeAllowSnippet)
+			return nil
+		}
 		serveArgs := []string{"serve"}
 		if configPath != "" {
 			abs, err := filepath.Abs(configPath)
@@ -63,4 +77,8 @@ func mcpSnippet(client string, serveArgs []string) (string, []byte, error) {
 	}
 	fmt.Fprintf(&b, "      \"command\": \"onfly\",\n      \"args\": %s\n    }\n  }\n}", args)
 	return file, []byte(b.String()), nil
+}
+
+func init() {
+	mcpConfigCmd.Flags().BoolVar(&mcpConfigAllow, "allow", false, "print the Claude Code permission rule that allows every onfly tool, instead of the server entry")
 }
