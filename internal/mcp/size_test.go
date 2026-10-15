@@ -13,7 +13,7 @@ import (
 // toolsTokenBudget caps what tools/list costs a session. A tool or argument
 // description that pushes past it should be shortened, or the budget raised
 // on purpose.
-const toolsTokenBudget = 1600
+const toolsTokenBudget = 1200
 
 func TestToolDefinitionsStayWithinBudget(t *testing.T) {
 	session := openServer(t, config.Config{}, seedUsers(t), fakeEmbedder{})
@@ -26,6 +26,7 @@ func TestToolDefinitionsStayWithinBudget(t *testing.T) {
 		raw, _ := json.Marshal(tool)
 		n, _ := tokens.Count(string(raw))
 		total += n
+		t.Logf("  %-18s %d", tool.Name, n)
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
 			t.Errorf("%s must be marked read-only", tool.Name)
 		}
@@ -48,5 +49,28 @@ func TestResultIsOneTextBlock(t *testing.T) {
 	var body struct{ Hits []hitDTO }
 	if err := json.Unmarshal([]byte(res.Content[0].(*sdkmcp.TextContent).Text), &body); err != nil || len(body.Hits) == 0 {
 		t.Fatalf("the text block must be the JSON result: %v", err)
+	}
+}
+
+func TestFileToolsAreOptIn(t *testing.T) {
+	names := func(cfg config.Config) map[string]bool {
+		session := openServer(t, cfg, seedUsers(t), fakeEmbedder{})
+		res, err := session.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]bool{}
+		for _, tool := range res.Tools {
+			m[tool.Name] = true
+		}
+		return m
+	}
+	off := names(config.Config{})
+	if off["read_file_raw"] || off["list_directory"] {
+		t.Fatalf("file tools must be off by default: %v", off)
+	}
+	on := names(config.Config{Server: config.Server{FileTools: true}})
+	if !on["read_file_raw"] || !on["list_directory"] {
+		t.Fatalf("server.file_tools turns them on: %v", on)
 	}
 }

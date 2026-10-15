@@ -91,13 +91,13 @@ type dirList struct {
 }
 
 type semanticIn struct {
-	Query        string `json:"query" jsonschema:"natural language query"`
-	Limit        int    `json:"limit,omitempty" jsonschema:"maximum results, from 1 to 50"`
+	Query        string `json:"query" jsonschema:"what the code does, in words"`
+	Limit        int    `json:"limit,omitempty" jsonschema:"1 to 50"`
 	Workspace    string `json:"workspace,omitempty" jsonschema:"workspace name, or * for every workspace"`
-	ChangedSince string `json:"changed_since,omitempty" jsonschema:"git ref; keep only files that differ from it, untracked files included"`
-	Type         string `json:"type,omitempty" jsonschema:"keep one chunk type, for example function, method, struct or section (docs)"`
-	Path         string `json:"path,omitempty" jsonschema:"keep files matching a glob relative to the project root, for example internal/** or docs/**"`
-	Detail       string `json:"detail,omitempty" jsonschema:"auto (default): code for the top 3 hits, signatures for the rest; full: every body; brief: signatures only"`
+	ChangedSince string `json:"changed_since,omitempty" jsonschema:"git ref; only files changed since it"`
+	Type         string `json:"type,omitempty" jsonschema:"one chunk type: function, method, struct, section"`
+	Path         string `json:"path,omitempty" jsonschema:"file glob, e.g. internal/**"`
+	Detail       string `json:"detail,omitempty" jsonschema:"auto (top 3 with code), full or brief (signatures)"`
 }
 
 type keywordIn struct {
@@ -203,7 +203,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
-	addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns the symbol, a summary and the code of the best matches; the tail of the list is signatures only."}, h.search)
+	addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns symbols, summaries and code; hits past the third are signatures."}, h.search)
 	addTool(srv, &sdkmcp.Tool{Name: "find", Description: "Exact lookup. kind text: chunks containing a string or identifier, like Grep over the index. kind symbol: definitions by name; * and ? are wildcards."}, h.find)
 	addTool(srv, &sdkmcp.Tool{Name: "graph", Description: "Follow calls from a symbol: callers (what breaks if it changes), callees (what it uses) or references (where its name appears)."}, h.graph)
 	addTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find instead of reading the whole file."}, h.component)
@@ -211,8 +211,10 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
 	addTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
 	h.addPrompts(srv)
-	addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
-	addTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
+	if cfg.Server.FileTools {
+		addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
+		addTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
+	}
 	addTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
 	srv.AddResource(&sdkmcp.Resource{URI: "onfly://index", Name: "index", MIMEType: "text/plain"}, func(ctx context.Context, _ *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
 		n, err := store.Generation(ctx)

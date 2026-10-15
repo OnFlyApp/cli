@@ -207,6 +207,10 @@ type Server struct {
 	// chunk that the latest search returned. `onfly eval mine` turns it into eval cases.
 	UsageFile string `yaml:"usage_file"`
 	Watch     bool   `yaml:"watch"`
+	// FileTools also registers read_file_raw and list_directory. They duplicate
+	// an assistant's own file tools and cost context on every session, so they
+	// are off by default.
+	FileTools bool `yaml:"file_tools"`
 }
 
 type RulesEngine struct {
@@ -431,6 +435,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Server.Watch {
 		out.Server.Watch = true
+	}
+	if child.Server.FileTools {
+		out.Server.FileTools = true
 	}
 	if child.Server.UsageFile != "" {
 		out.Server.UsageFile = child.Server.UsageFile

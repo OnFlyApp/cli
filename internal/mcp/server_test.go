@@ -66,7 +66,7 @@ func TestTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{ProjectRoot: root, Rules: []string{rules}}
+	cfg := config.Config{ProjectRoot: root, Rules: []string{rules}, Server: config.Server{FileTools: true}}
 	srv, cleanup, err := NewServer(cfg, store, fakeEmbedder{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -828,7 +828,7 @@ func TestRulesFollowTheRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := openSession(t, config.Config{ProjectRoot: root, Server: config.Server{MaxTokens: 8192}}, store, fakeEmbedder{}, nil)
+	session := openSession(t, config.Config{ProjectRoot: root, Server: config.Server{MaxTokens: 8192, FileTools: true}}, store, fakeEmbedder{}, nil)
 	ctx := context.Background()
 
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "read_file_raw", Arguments: map[string]any{"path": "src/a.go"}})
@@ -872,7 +872,7 @@ func TestRulesFollowTheRequest(t *testing.T) {
 		t.Fatalf("project rules: %s", body)
 	}
 
-	missing := openSession(t, config.Config{ProjectRoot: root, Rules: []string{filepath.Join(root, "missing.md")}, Server: config.Server{MaxTokens: 8192}}, store, fakeEmbedder{}, nil)
+	missing := openSession(t, config.Config{ProjectRoot: root, Rules: []string{filepath.Join(root, "missing.md")}, Server: config.Server{MaxTokens: 8192, FileTools: true}}, store, fakeEmbedder{}, nil)
 	res, err = missing.CallTool(ctx, &sdkmcp.CallToolParams{Name: "get_project_rules", Arguments: map[string]any{}})
 	if err != nil || !res.IsError {
 		t.Fatalf("missing rule %v %+v", err, res)
