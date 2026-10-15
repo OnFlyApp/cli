@@ -267,7 +267,7 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in com
 	if in.Receiver != "" {
 		pick = -1
 		for i, c := range comps {
-			if c.Metadata["receiver"] == in.Receiver {
+			if receiverMatches(c.Metadata["receiver"], in.Receiver) {
 				pick = i
 				break
 			}
@@ -280,7 +280,7 @@ func (h *tools) component(ctx context.Context, _ *sdkmcp.CallToolRequest, in com
 	chunk := comps[pick]
 	dto := toDTO([]parser.Chunk{chunk})[0]
 	for i, c := range comps {
-		if i == pick || in.Receiver != "" && c.Metadata["receiver"] != in.Receiver {
+		if i == pick || in.Receiver != "" && !receiverMatches(c.Metadata["receiver"], in.Receiver) {
 			continue
 		}
 		if len(dto.Alternatives) >= maxAlternatives {

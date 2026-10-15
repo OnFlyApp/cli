@@ -119,3 +119,23 @@ func TestImpactScopedToOneDefinition(t *testing.T) {
 		t.Fatalf("%v", names)
 	}
 }
+
+func TestReceiverMatchesShortAndQualifiedNames(t *testing.T) {
+	cases := []struct {
+		have, want string
+		ok         bool
+	}{
+		{`App\Pipeline\ModelCaller`, "ModelCaller", true},
+		{`App\Pipeline\ModelCaller`, `Pipeline\ModelCaller`, true},
+		{"pkg.Service", "Service", true},
+		{"Service", "Service", true},
+		{`App\Pipeline\XModelCaller`, "ModelCaller", false},
+		{`App\Pipeline\ModelCaller`, "Caller", false},
+		{"", "Service", false},
+	}
+	for _, c := range cases {
+		if got := receiverMatches(c.have, c.want); got != c.ok {
+			t.Errorf("receiverMatches(%q, %q) = %v", c.have, c.want, got)
+		}
+	}
+}

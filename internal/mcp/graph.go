@@ -48,7 +48,7 @@ func pathCloseness(a, b string) int {
 
 func pickDefinition(defs []parser.Chunk, receiver, file string) (parser.Chunk, bool) {
 	for _, d := range defs {
-		if receiver != "" && d.Metadata["receiver"] != receiver {
+		if receiver != "" && !receiverMatches(d.Metadata["receiver"], receiver) {
 			continue
 		}
 		if file != "" && d.FilePath != file {
@@ -228,4 +228,19 @@ func (h *tools) finishGraph(ctx context.Context, tool string, in any, start time
 		out.Hits = []hitDTO{}
 	}
 	return contentWithRules(text, out), out, err
+}
+
+// receiverMatches reports whether a stored receiver is the one asked for. A
+// short class name matches the qualified one the parser stored, so
+// "ModelCaller" finds "App\\Pipeline\\ModelCaller".
+func receiverMatches(have, want string) bool {
+	if have == want {
+		return true
+	}
+	for _, sep := range []string{`\`, ".", "::", "/"} {
+		if strings.HasSuffix(have, sep+want) {
+			return true
+		}
+	}
+	return false
 }
