@@ -173,7 +173,8 @@ Agent benchmark on Hugo (523 non-test Go files, 6,967 chunks, embeddinggemma-2, 
 | Without onfly | 37 | 72 | 8,092 |
 | With onfly, server instructions only | 33 | 64 | 7,082 |
 | With onfly, instructions + `onfly guide --write` CLAUDE.md block | 37 | 64 | 6,773 |
+| With onfly, instructions only, `indexer.summaries` (qwen2.5-coder:7b) | 37 | 68 | 7,546 |
 
-The gain comes from the semantic questions (how is X chosen, how is Y decided: 4 to 3 and 7 to 4 turns). On an exact lookup, Grep is already one call, so onfly adds none. With the CLAUDE.md block the model called `search` 15 times instead of never, and the turn count rose back to the baseline: more onfly use did not mean fewer turns on a repository the model already knows well. All answers were equally correct and the edit task built and passed `go test` in every run.
+The gain comes from the semantic questions (how is X chosen, how is Y decided: 4 to 3 and 7 to 4 turns). On an exact lookup, Grep is already one call, so onfly adds none. With the CLAUDE.md block the model called `search` 15 times instead of never, and the turn count rose back to the baseline: more onfly use did not mean fewer turns on a repository the model already knows well. Summaries did not help here: indexing took about two hours instead of four minutes, the model still never called `search` (only `graph` and `get_tests`), and task 1 took 6 turns instead of 3. With three runs per task, a swing of one turn is within noise, so read the first two arms as "a little better than baseline", not as a measured gain. Summaries pay off in retrieval quality (see the tables above), not in how often a model that knows the repository reaches for `search`. All answers were equally correct and the edit task built and passed `go test` in every run.
 
 `graph` returned 7,219 tokens for one callers query before it defaulted to signatures; it now returns 544 for the same nine hits (`detail: full` keeps bodies).
