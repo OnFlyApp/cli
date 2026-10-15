@@ -158,3 +158,14 @@ Dropping types with `indexer.skip_types`, same 100 cases, recall@10 1.00 through
 | + `enum_case` | 532 | 0.885 |
 
 None of the 100 cases asks for a single enum case or property value, so the table cannot show what dropping them costs: a question like "which approval status exists" now lands on the enum or class chunk. Add such cases before dropping `property` or `enum_case`, or use `type_weights` to demote them instead.
+
+Demoting the same types with `search.type_weights` instead of deleting them (632 chunks, `use` and `namespace` still skipped):
+
+| Setting | MRR | Notes |
+| --- | --- | --- |
+| Weights 0.3 / 0.6 / 0.7, final score only | 0.851 | lowering them further changed nothing |
+| Weights 0.05 / 0.1 / 0.1, fractional list positions, 3x candidate pool | 0.868 | "five million" lookup ranks 5 |
+| `skip_types` for `trait_use`, `property`, `enum_case` | 0.885 | those chunks cannot be found |
+
+The first rows were stuck because demoted chunks still filled the top 20 slots of every candidate list; reading a deeper pool and letting a demoted chunk take a fraction of a position is what moved the score. The remaining 0.017 is the price of keeping enum and property lookups.
+
