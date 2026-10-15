@@ -84,6 +84,8 @@ type Searcher struct {
 	AltWeight         *float64
 	SummaryWordWeight *float64
 	SectionWeight     *float64
+	// TypeWeights scales scores by chunk type (lowercase keys); nil keeps 1.
+	TypeWeights map[string]float64
 	// Root is the project root, used for git-based recency and changed-since filters.
 	Root string
 
@@ -294,6 +296,12 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	s.SummaryKeyword = cfg.Indexer.Summaries.Provider != ""
 	s.AltWeight, s.SummaryWordWeight = cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
 	s.SectionWeight = cfg.Search.SectionWeight
+	if len(cfg.Search.TypeWeights) > 0 {
+		s.TypeWeights = make(map[string]float64, len(cfg.Search.TypeWeights))
+		for t, w := range cfg.Search.TypeWeights {
+			s.TypeWeights[strings.ToLower(strings.TrimSpace(t))] = w
+		}
+	}
 	if cfg.Embedder.Alt != nil {
 		alt, err := embedder.New(*cfg.Embedder.Alt)
 		if err != nil {

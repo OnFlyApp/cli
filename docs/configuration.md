@@ -50,6 +50,7 @@ search:                          # optional; how the result lists are fused (val
   recency_days: 30
   usage_weight: 0                # >0 adds a list of chunks an assistant opened after earlier searches
   section_weight: 1              # multiplier for documentation sections; below 1 demotes docs against code
+  type_weights: {}               # score multiplier per chunk type, e.g. {trait_use: 0.3, property: 0.6}; unlisted types keep 1
   summary_word_weight: 0.125     # keyword list over summaries; 0 turns it off
   alt_weight: 1                  # list from the second embedder (embedder.alt)
 
@@ -164,6 +165,8 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 1. **Retrieve.** Semantic (nearest vectors), keyword (the whole question as a substring) and a per-word keyword list (each content word of the question looked up on its own, chunks ranked by how many words they contain). The per-word list is what lets "retry on 429 from the embedder" find the chunk containing all three words.
 2. **Name list.** The retrieved chunks are scored again by where the question's words appear: the symbol name (strongest), the file name, the directories, then the leading comment and the [summary](#chunk-summaries). A chunk *named* for the question outranks one that merely mentions it. Words match across plurals and endings (`retries`, `retry`; `index`, `indexing`). This list adds no store query.
 3. **Fuse.** Every list scores `weight / (rrf_k + rank)` and the scores add up. Defaults: `semantic_weight` 2, `keyword_weight` 0.5, `word_weight` 0.25 and `field_weight` 0.5 (both relative to `keyword_weight`), `rrf_k` 20. A zero value takes the default, except `word_weight` and `field_weight`, where 0 turns the list off.
+`search.type_weights` multiplies a chunk's fused score by its type (`onfly stats` lists the types). Use it where small declarations such as PHP `trait_use`, `property` or `enum_case` chunks match a question's words and outrank the class that holds them: a weight of 0.3 sends them below the definition without deleting them, unlike `indexer.skip_types`. It needs no reindex. Measure with `onfly eval` before keeping a value.
+
 `search.recency_weight` above 0 adds another list of candidates whose files were committed within `search.recency_days` (default 30), most recent first, read from `git log` in the project root and cached for 30 seconds. Outside a git repository the signal is skipped with a warning.
 
 The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half of 573 cases and checked on the other half, where MRR rose from 0.605 to 0.678. Your code may prefer other numbers: run `onfly eval tune` on your own cases before changing them.

@@ -91,9 +91,14 @@ type Search struct {
 	// turns the list off.
 	// SectionWeight multiplies the score of documentation sections: below 1
 	// demotes docs against code, above 1 promotes them. Unset or 1 is neutral.
-	SectionWeight     *float64 `yaml:"section_weight"`
-	AltWeight         *float64 `yaml:"alt_weight"`
-	SummaryWordWeight *float64 `yaml:"summary_word_weight"`
+	SectionWeight *float64 `yaml:"section_weight"`
+	// TypeWeights multiplies the score of chunks by their type (for example
+	// trait_use: 0.3, property: 0.6) so small declarations rank below the
+	// definitions they belong to without being removed from the index. Types
+	// are matched case-insensitively; unlisted types keep 1.
+	TypeWeights       map[string]float64 `yaml:"type_weights"`
+	AltWeight         *float64           `yaml:"alt_weight"`
+	SummaryWordWeight *float64           `yaml:"summary_word_weight"`
 }
 
 // ExtraSlots names the extra vector slots this configuration uses, with their
@@ -429,6 +434,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Server.UsageFile != "" {
 		out.Server.UsageFile = child.Server.UsageFile
+	}
+	if len(child.Search.TypeWeights) > 0 {
+		out.Search.TypeWeights = child.Search.TypeWeights
 	}
 	if child.Search.SectionWeight != nil {
 		out.Search.SectionWeight = child.Search.SectionWeight
@@ -767,6 +775,11 @@ func (c Config) validate() error {
 	}
 	if c.Search.UsageWeight < 0 || c.Indexer.Summaries.Concurrency < 0 || c.Indexer.Summaries.Concurrency > 64 {
 		return fmt.Errorf("search.usage_weight must be >= 0 and indexer.summaries.concurrency from 0 to 64")
+	}
+	for typ, w := range c.Search.TypeWeights {
+		if w < 0 {
+			return fmt.Errorf("search.type_weights.%s must be >= 0", typ)
+		}
 	}
 	for name, w := range map[string]*float64{"alt_weight": c.Search.AltWeight, "summary_word_weight": c.Search.SummaryWordWeight, "section_weight": c.Search.SectionWeight} {
 		if w != nil && *w < 0 {

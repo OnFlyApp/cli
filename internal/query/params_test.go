@@ -81,3 +81,16 @@ func TestSummaryKeywordListFindsChunkByItsSummary(t *testing.T) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
+
+func TestTypeWeightsDemoteSmallDeclarations(t *testing.T) {
+	use := parser.Chunk{FilePath: "a.php", Type: "trait_use", Content: "use PasswordRules; widget", Metadata: map[string]string{"name": "PasswordRules"}}
+	def := parser.Chunk{FilePath: "b.php", Type: "trait", Content: "trait PasswordRules { widget }", Metadata: map[string]string{"name": "PasswordRules"}}
+	s := searcherWith(t, use, def)
+	zero := 0.0
+	s.FieldWeight, s.WordWeight = &zero, &zero
+	s.TypeWeights = map[string]float64{"trait_use": 0}
+	got, _ := s.Search(context.Background(), "widget", 5, "")
+	if len(got) != 2 || got[0].Type != "trait" || got[1].Type != "trait_use" {
+		t.Fatalf("a weighted-down type must sort below the definition, and stay in the results: %+v", got)
+	}
+}

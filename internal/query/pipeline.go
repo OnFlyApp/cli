@@ -217,10 +217,14 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 		lists, weights = append(lists, g.Recent), append(weights, p.Recency)
 	}
 	ranked := fuseScored(p.RRFK, weights, lists...)
-	if p.Section != 1 && p.Section > 0 {
+	reweigh := p.Section != 1 && p.Section > 0
+	if reweigh || len(s.TypeWeights) > 0 {
 		for i := range ranked {
-			if ranked[i].chunk.Type == "section" {
+			if reweigh && ranked[i].chunk.Type == "section" {
 				ranked[i].score *= p.Section
+			}
+			if w, ok := s.TypeWeights[strings.ToLower(ranked[i].chunk.Type)]; ok {
+				ranked[i].score *= w
 			}
 		}
 		sortScored(ranked)
