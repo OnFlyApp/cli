@@ -147,3 +147,14 @@ These were options in earlier builds. Each was measured above and none improved 
 ## A PHP project
 
 A Laravel and Livewire application (107 files, 632 chunks, embeddinggemma-2, no summaries), 100 hand-written cases, file-level hits: recall@10 1.00, MRR 0.838; 73 cases ranked first. The misses put a neighbouring file first. The chunks that outranked the right file were small ones: `trait_use`, `enum_case` and `property`. They are the reason for `search.type_weights`, which demotes a type without removing it; `indexer.skip_types` is for chunks, such as `use` and `namespace`, that have no search value at all. `onfly stats` lists the types an index holds.
+
+Dropping types with `indexer.skip_types`, same 100 cases, recall@10 1.00 throughout:
+
+| `skip_types` | Chunks | MRR |
+| --- | --- | --- |
+| `use`, `namespace` | 632 | 0.838 |
+| + `trait_use` | 611 | 0.845 |
+| + `property` | 559 | 0.849 |
+| + `enum_case` | 532 | 0.885 |
+
+None of the 100 cases asks for a single enum case or property value, so the table cannot show what dropping them costs: a question like "which approval status exists" now lands on the enum or class chunk. Add such cases before dropping `property` or `enum_case`, or use `type_weights` to demote them instead.
