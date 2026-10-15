@@ -91,8 +91,8 @@ func TestTools(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("keyword %v %+v", err, res)
 	}
-	if !strings.Contains(mustJSON(res.StructuredContent), "getUserId") {
-		t.Fatalf("%s", mustJSON(res.StructuredContent))
+	if !strings.Contains(mustJSON(structured(res)), "getUserId") {
+		t.Fatalf("%s", mustJSON(structured(res)))
 	}
 	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
 		Name:      "search",
@@ -115,7 +115,7 @@ func TestTools(t *testing.T) {
 		Name:      "get_project_rules",
 		Arguments: map[string]any{},
 	})
-	if err != nil || res.IsError || !strings.Contains(mustJSON(res.StructuredContent), "use errors") {
+	if err != nil || res.IsError || !strings.Contains(mustJSON(structured(res)), "use errors") {
 		t.Fatalf("rules %v %+v", err, res)
 	}
 	res, err = session.CallTool(ctx, &sdkmcp.CallToolParams{
@@ -350,7 +350,7 @@ func TestSemanticBudgetDropsTail(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got := decodeHits(t, res.StructuredContent)
+	got := decodeHits(t, structured(res))
 	if len(got) != 2 || got[0].Symbol != "A" {
 		t.Fatalf("%+v", got)
 	}
@@ -367,7 +367,7 @@ func TestSemanticBudgetDropsTail(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got = decodeHits(t, res.StructuredContent)
+	got = decodeHits(t, structured(res))
 	if len(got) != 1 || got[0].Lines != "// [Truncated: 3 matches omitted due to context limits.]" {
 		t.Fatalf("%+v", got)
 	}
@@ -403,7 +403,7 @@ func TestGetReferences(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got := decodeChunks(t, res.StructuredContent)
+	got := decodeChunks(t, structured(res))
 	if len(got) != 1 || got[0].FilePath != "src/order.go" {
 		t.Fatalf("%+v", got)
 	}
@@ -414,8 +414,8 @@ func TestGetReferences(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	if len(decodeChunks(t, res.StructuredContent)) != 0 {
-		t.Fatalf("%s", mustJSON(res.StructuredContent))
+	if len(decodeChunks(t, structured(res))) != 0 {
+		t.Fatalf("%s", mustJSON(structured(res)))
 	}
 }
 
@@ -443,7 +443,7 @@ func TestWorkspaceArg(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got := decodeChunks(t, res.StructuredContent)
+	got := decodeChunks(t, structured(res))
 	if len(got) != 1 || got[0].FilePath != "front.go" {
 		t.Fatalf("%+v", got)
 	}
@@ -581,7 +581,7 @@ func TestSemanticElicitsCollidingName(t *testing.T) {
 	if emb.n != 1 {
 		t.Fatalf("embeds = %d", emb.n)
 	}
-	got := decodeChunks(t, res.StructuredContent)
+	got := decodeChunks(t, structured(res))
 	if len(got) != 1 || got[0].FilePath != "frontend/user.go" {
 		t.Fatalf("%+v", got)
 	}
@@ -651,7 +651,7 @@ func TestSemanticSentenceDoesNotElicit(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	got := decodeChunks(t, res.StructuredContent)
+	got := decodeChunks(t, structured(res))
 	if len(got) != 1 || got[0].FilePath != "backend/user.go" {
 		t.Fatalf("%+v", got)
 	}
@@ -686,7 +686,7 @@ func TestComponentASTIsObject(t *testing.T) {
 		t.Fatalf("%v %+v", err, res)
 	}
 	var dto chunkDTO
-	if err := json.Unmarshal([]byte(mustJSON(res.StructuredContent)), &dto); err != nil {
+	if err := json.Unmarshal([]byte(mustJSON(structured(res))), &dto); err != nil {
 		t.Fatal(err)
 	}
 	if dto.FilePath != "src/a.go" || dto.Type != "function" || dto.Metadata["name"] != "User" {
@@ -741,7 +741,7 @@ func TestSearchToolsAndFusion(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	raw := mustJSON(res.StructuredContent)
+	raw := mustJSON(structured(res))
 	var wrapped struct {
 		Hits []map[string]any `json:"hits"`
 	}
@@ -770,7 +770,7 @@ func TestSearchToolsAndFusion(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("%v %+v", err, res)
 	}
-	hits := decodeHits(t, res.StructuredContent)
+	hits := decodeHits(t, structured(res))
 	if len(hits) != 1 || hits[0].FilePath != "far.go" || hits[0].Lines != "func getUserId() {}" {
 		t.Fatalf("%+v", hits)
 	}
@@ -838,8 +838,8 @@ func TestRulesFollowTheRequest(t *testing.T) {
 	if !strings.Contains(contentText(t, res), "NO RAW SQL") || !strings.Contains(contentText(t, res), "ALWAYS ON") {
 		t.Fatalf("go file rules: %s", contentText(t, res))
 	}
-	if !strings.Contains(mustJSON(res.StructuredContent), "NO RAW SQL") || !strings.Contains(mustJSON(res.StructuredContent), "ALWAYS ON") {
-		t.Fatalf("structured %s", mustJSON(res.StructuredContent))
+	if !strings.Contains(mustJSON(structured(res)), "NO RAW SQL") || !strings.Contains(mustJSON(structured(res)), "ALWAYS ON") {
+		t.Fatalf("structured %s", mustJSON(structured(res)))
 	}
 	if instr := session.InitializeResult().Instructions; !strings.Contains(instr, "ALWAYS ON") || strings.Contains(instr, "NO RAW SQL") {
 		t.Fatalf("instructions %s", instr)
@@ -867,7 +867,7 @@ func TestRulesFollowTheRequest(t *testing.T) {
 	if err != nil || res.IsError {
 		t.Fatalf("rules %v %+v", err, res)
 	}
-	body := mustJSON(res.StructuredContent)
+	body := mustJSON(structured(res))
 	if !strings.Contains(body, "ALWAYS ON") || strings.Contains(body, "NO RAW SQL") {
 		t.Fatalf("project rules: %s", body)
 	}
@@ -959,7 +959,7 @@ func TestComponentReceiverDisambiguation(t *testing.T) {
 			t.Fatalf("%v %+v", err, res)
 		}
 		var dto chunkDTO
-		if err := json.Unmarshal([]byte(mustJSON(res.StructuredContent)), &dto); err != nil {
+		if err := json.Unmarshal([]byte(mustJSON(structured(res))), &dto); err != nil {
 			t.Fatal(err)
 		}
 		return dto
@@ -998,7 +998,7 @@ func TestComponentAlternativesAreCapped(t *testing.T) {
 		t.Fatalf("%v %+v", err, res)
 	}
 	var dto chunkDTO
-	if err := json.Unmarshal([]byte(mustJSON(res.StructuredContent)), &dto); err != nil {
+	if err := json.Unmarshal([]byte(mustJSON(structured(res))), &dto); err != nil {
 		t.Fatal(err)
 	}
 	if len(dto.Alternatives) != 20 || dto.AlternativesOmitted != 4 {
@@ -1017,4 +1017,29 @@ func TestNewServerDegradesWithoutRerankerKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanup()
+}
+
+// structured returns a tool result as a JSON object: the last line of the
+// text block, plus "rules" from the lines above it when there are any.
+func structured(res *sdkmcp.CallToolResult) any {
+	if res == nil || len(res.Content) == 0 {
+		return nil
+	}
+	tc, ok := res.Content[0].(*sdkmcp.TextContent)
+	if !ok {
+		return nil
+	}
+	text := tc.Text
+	rules := ""
+	if i := strings.LastIndex(text, "\n"); i >= 0 {
+		rules, text = text[:i], text[i+1:]
+	}
+	var m any
+	if json.Unmarshal([]byte(text), &m) != nil {
+		return nil
+	}
+	if obj, ok := m.(map[string]any); ok && rules != "" {
+		obj["rules"] = rules
+	}
+	return m
 }

@@ -203,20 +203,20 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns the symbol, a summary and the code of the best matches; the tail of the list is signatures only."}, h.search)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier or string you already know, like Grep over the index. For a description of behavior, call search."}, h.searchKeyword)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find_symbols instead of reading the whole file."}, h.component)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_references", Description: "Return chunks whose outbound references include the name."}, h.references)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_callees", Description: "Return the chunks a symbol calls, for names defined in this index."}, h.getCallees)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first. Use before changing a function to see what it can break."}, h.getImpact)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "find_symbols", Description: "Find definitions by name: a prefix, or a pattern with * and ?. Case-insensitive."}, h.findSymbols)
+	addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns the symbol, a summary and the code of the best matches; the tail of the list is signatures only."}, h.search)
+	addTool(srv, &sdkmcp.Tool{Name: "search_keyword", Description: "Find chunks whose text contains an identifier or string you already know, like Grep over the index. For a description of behavior, call search."}, h.searchKeyword)
+	addTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find_symbols instead of reading the whole file."}, h.component)
+	addTool(srv, &sdkmcp.Tool{Name: "get_references", Description: "Return chunks whose outbound references include the name."}, h.references)
+	addTool(srv, &sdkmcp.Tool{Name: "get_callees", Description: "Return the chunks a symbol calls, for names defined in this index."}, h.getCallees)
+	addTool(srv, &sdkmcp.Tool{Name: "get_impact", Description: "Return the chunks that call a symbol, directly and through callers, nearest first. Use before changing a function to see what it can break."}, h.getImpact)
+	addTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
+	addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
+	addTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
+	addTool(srv, &sdkmcp.Tool{Name: "find_symbols", Description: "Find definitions by name: a prefix, or a pattern with * and ?. Case-insensitive."}, h.findSymbols)
 	h.addPrompts(srv)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
-	sdkmcp.AddTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
+	addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
+	addTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
+	addTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
 	srv.AddResource(&sdkmcp.Resource{URI: "onfly://index", Name: "index", MIMEType: "text/plain"}, func(ctx context.Context, _ *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
 		n, err := store.Generation(ctx)
 		if err != nil {
@@ -629,6 +629,17 @@ func contentWithRules(text string, out any) *sdkmcp.CallToolResult {
 	raw, err := json.Marshal(out)
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}}}
+	}
+	// The rules are the text above the JSON; leave them out of it so they are
+	// not sent twice.
+	var box map[string]json.RawMessage
+	if json.Unmarshal(raw, &box) == nil {
+		if _, ok := box["rules"]; ok {
+			delete(box, "rules")
+			if slim, err := json.Marshal(box); err == nil {
+				raw = slim
+			}
+		}
 	}
 	return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text + "\n" + string(raw)}}}
 }
