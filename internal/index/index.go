@@ -504,6 +504,24 @@ func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResul
 	return nil, &res, err
 }
 
+// dropTypes removes chunks whose type is in skip (case-insensitive).
+func dropTypes(chunks []parser.Chunk, skip []string) []parser.Chunk {
+	if len(skip) == 0 {
+		return chunks
+	}
+	drop := make(map[string]bool, len(skip))
+	for _, t := range skip {
+		drop[strings.ToLower(strings.TrimSpace(t))] = true
+	}
+	out := chunks[:0:0]
+	for _, c := range chunks {
+		if !drop[strings.ToLower(c.Type)] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResult, error) {
 	rel = slash(rel)
 	body, early, err := s.readSource(ctx, rel)
@@ -523,6 +541,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		s.report("failed", rel)
 		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
+	chunks = dropTypes(chunks, s.cfg.Indexer.SkipTypes)
 	overlap := s.cfg.Embedder.MaxInputTokens * 12 / 100
 	chunks = split.Split(chunks, s.cfg.Embedder.MaxInputTokens, overlap, s.count)
 	for i := range chunks {

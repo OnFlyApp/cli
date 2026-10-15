@@ -309,3 +309,14 @@ func TestSummariesOverOpenAIChatWithConcurrency(t *testing.T) {
 		t.Fatalf("calls=%d peak concurrency=%d, want 6 calls overlapping up to 4", calls.Load(), peak.Load())
 	}
 }
+
+func TestDropTypes(t *testing.T) {
+	in := []parser.Chunk{{Type: "use"}, {Type: "class"}, {Type: "Use"}, {Type: "method"}}
+	got := dropTypes(in, []string{" USE "})
+	if len(got) != 2 || got[0].Type != "class" || got[1].Type != "method" {
+		t.Fatalf("%+v", got)
+	}
+	if len(dropTypes(in, nil)) != 4 {
+		t.Fatal("no skip list keeps everything")
+	}
+}

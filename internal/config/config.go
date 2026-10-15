@@ -152,6 +152,10 @@ type Indexer struct {
 	EmbedContext bool `yaml:"embed_context"`
 	// ParseTimeoutMS bounds one parser call; 0 uses the 5 s default.
 	ParseTimeoutMS int `yaml:"parse_timeout_ms"`
+	// SkipTypes drops chunks of these types (case-insensitive) after parsing,
+	// for example "use" or "import" statements that crowd out real code.
+	// "onfly stats" lists the types an index holds. Reindex to apply it.
+	SkipTypes []string `yaml:"skip_types"`
 	// Summaries has a chat model write a one-sentence description of each named
 	// chunk; it is embedded and searched with the code. Off when provider is empty.
 	Summaries Summaries `yaml:"summaries"`
@@ -505,6 +509,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Indexer.Summaries.Provider != "" {
 		out.Indexer.Summaries = child.Indexer.Summaries
+	}
+	if len(child.Indexer.SkipTypes) > 0 {
+		out.Indexer.SkipTypes = child.Indexer.SkipTypes
 	}
 	if child.Indexer.ParseTimeoutMS != 0 {
 		out.Indexer.ParseTimeoutMS = child.Indexer.ParseTimeoutMS

@@ -73,6 +73,7 @@ indexer:
   exclude: [vendor, node_modules, dist, build, target, .venv]
   debounce_ms: 2000              # onfly watch; default 2000
   parse_timeout_ms: 5000         # per parser call; default 5000
+  skip_types: [use]              # drop chunks of these types after parsing (see "onfly stats" for the types); reindex to apply
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
   # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
