@@ -86,6 +86,15 @@ type Searcher struct {
 	// earlier searches (Usage supplies the counts).
 	GraphWeight, UsageWeight float64
 	Usage                    *usage.Counter
+	// SummaryVector, SummaryKeyword and Alt turn on the lists fed by the
+	// "summary" vector slot, the summary keyword index and the "alt" vector
+	// slot (AltEmb embeds the query for it). The three weights scale them; nil
+	// takes the default and 0 turns the list off.
+	SummaryVector, SummaryKeyword bool
+	AltEmb                        embedder.Embedder
+	SummaryWeight, AltWeight      *float64
+	SummaryWordWeight             *float64
+	SectionWeight                 *float64
 	// Root is the project root, used for git-based recency and changed-since filters.
 	Root string
 
@@ -166,6 +175,12 @@ const (
 // many words they contain, so "retry 429 embedder" favours the chunk that has
 // all three. The whole-question keyword search rarely matches prose questions.
 func (s *Searcher) wordMatches(ctx context.Context, words []string, pool int, workspace string) []parser.Chunk {
+	return s.wordMatchesWith(ctx, words, pool, workspace, s.Store.SearchKeyword)
+}
+
+// wordMatchesWith is wordMatches over any keyword lookup (content or summaries).
+func (s *Searcher) wordMatchesWith(ctx context.Context, words []string, pool int, workspace string,
+	lookup func(context.Context, string, int, string) ([]parser.Chunk, error)) []parser.Chunk {
 	type acc struct {
 		chunk parser.Chunk
 		score float64
@@ -173,7 +188,7 @@ func (s *Searcher) wordMatches(ctx context.Context, words []string, pool int, wo
 	by := map[string]*acc{}
 	var order []string
 	for _, w := range words {
-		hits, err := s.Store.SearchKeyword(ctx, w, pool, workspace)
+		hits, err := lookup(ctx, w, pool, workspace)
 		if err != nil {
 			continue
 		}
@@ -256,7 +271,7 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := store.Init(ctx, cfg.Embedder.Dimensions); err != nil {
+	if err := vectorstore.InitAll(ctx, store, cfg); err != nil {
 		store.Close()
 		return nil, nil, err
 	}
@@ -275,12 +290,17 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 		store.Close()
 		return nil, nil, fmt.Errorf("search.expand: %w", err)
 	}
-	return NewSearcher(cfg, store, emb, rr, chat, slog.New(slog.NewTextHandler(os.Stderr, nil))), store.Close, nil
+	s, err := NewSearcher(cfg, store, emb, rr, chat, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	if err != nil {
+		store.Close()
+		return nil, nil, err
+	}
+	return s, store.Close, nil
 }
 
 // NewSearcher wires a Searcher from the project config; the command line and
 // the MCP server both build theirs here so every search setting applies to both.
-func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, chat embedder.Chat, logger *slog.Logger) *Searcher {
+func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, chat embedder.Chat, logger *slog.Logger) (*Searcher, error) {
 	s := &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
@@ -294,7 +314,19 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	if cfg.Server.UsageFile != "" && cfg.Search.UsageWeight > 0 {
 		s.Usage = &usage.Counter{Path: cfg.Server.UsageFile}
 	}
-	return s
+	slots := cfg.ExtraSlots()
+	_, s.SummaryVector = slots["summary"]
+	s.SummaryKeyword = cfg.Indexer.Summaries.Provider != ""
+	s.SummaryWeight, s.AltWeight, s.SummaryWordWeight = cfg.Search.SummaryWeight, cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
+	s.SectionWeight = cfg.Search.SectionWeight
+	if cfg.Embedder.Alt != nil {
+		alt, err := embedder.New(*cfg.Embedder.Alt)
+		if err != nil {
+			return nil, fmt.Errorf("embedder.alt: %w", err)
+		}
+		s.AltEmb = embedder.Cached(alt, EmbedCacheSize)
+	}
+	return s, nil
 }
 
 // Fuse merges ranked lists by reciprocal rank. A chunk in several lists

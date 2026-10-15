@@ -20,10 +20,16 @@ workspace: backend               # optional; stored on each chunk from this conf
 embedder:
   provider: ollama               # ollama, openai, or voyage
   endpoint: http://localhost:11434
-  model: qwen3-embedding:0.6b
-  dimensions: 1024               # required, at least 1
+  model: embeddinggemma-2
+  dimensions: 768                # required, at least 1
   max_input_tokens: 6000         # default 6000; split chunks above this
   # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY; voyage to VOYAGE_API_KEY
+  # query_prefix: "task: code retrieval | query: "   # prepended to every search query
+  # document_prefix: "title: none | text: "          # prepended to every indexed chunk; needs a fresh index
+  # alt:                         # a second embedder; both vector lists are fused (needs a fresh index)
+  #   provider: ollama
+  #   model: qwen3-embedding:0.6b
+  #   dimensions: 1024
 
 reranker:                        # optional, off by default (empty provider)
   provider: voyage               # voyage, cohere, jina, or ollama
@@ -45,6 +51,10 @@ search:                          # optional; how the result lists are fused (val
   recency_days: 30
   graph_weight: 0                # >0 adds a list of hits that call or are called by other hits
   usage_weight: 0                # >0 adds a list of chunks an assistant opened after earlier searches
+  section_weight: 1              # multiplier for documentation sections; below 1 demotes docs against code
+  summary_word_weight: 0.125     # keyword list over summaries and questions; 0 turns it off
+  summary_weight: 1              # list from the summary vectors (indexer.summary_vector)
+  alt_weight: 1                  # list from the second embedder (embedder.alt)
   # expand: {provider: ollama, model: qwen2.5-coder:7b, timeout_ms: 3000}   # query expansion, see below
 
 rules:
@@ -70,6 +80,7 @@ indexer:
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
   # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
   embed_neighbours: false        # add the names of nearby symbols to each embedded chunk
+  summary_vector: false          # embed each summary as a second vector (needs summaries; fresh index)
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
     - extensions: [".php", ".inc"]
@@ -168,6 +179,34 @@ If the embedder is unreachable, `search` logs a warning and answers from keyword
 
 `indexer.embed_context: true` embeds `path: <file>` and `symbol: <Receiver.Name>` ahead of each chunk, so a query naming a file or function can match its vector. Stored content is unchanged. Chunks already in the index keep their old vectors until their file changes, so reindex from scratch (delete `.onfly/vector.db`) to apply it everywhere, and compare with `onfly eval --baseline`.
 
+### Query and document prompts
+
+Some embedding models are trained with a task prompt in front of the text. EmbeddingGemma documents `task: code retrieval | query: ` for queries and `title: none | text: ` for documents. Onfly sends text unchanged unless you set them:
+
+```yaml
+embedder:
+  query_prefix: "task: code retrieval | query: "
+  document_prefix: "title: none | text: "
+```
+
+`query_prefix` goes in front of every search query (and expansion text), `document_prefix` in front of every chunk at index time, so changing the document prefix needs a fresh index (the summary cache keeps that cheap). On this repository the code-retrieval prompts raised MRR from 0.797 to 0.810, and the hand-written cases from 0.705 to 0.774. `task: search result | query: ` gave 0.806. Models without task prompts (Qwen3-Embedding takes an `Instruct: ... Query: ` prefix on the query side only) should be measured before setting any.
+
+### Second embedder
+
+`embedder.alt` adds a second embedding model. Each chunk is embedded by both, stored in a second vector slot, and search fuses the two vector lists (`search.alt_weight`, default 1). Models fail on different questions, so the union ranks better than either: embeddinggemma-2 with qwen3-embedding:0.6b as `alt` reached MRR 0.809 against 0.797 alone, and 0.816 together with the prompts above.
+
+```yaml
+embedder:
+  model: embeddinggemma-2
+  dimensions: 768
+  alt:
+    provider: ollama
+    model: qwen3-embedding:0.6b
+    dimensions: 1024
+```
+
+Only `provider`, `endpoint`, `model`, `dimensions`, `api_key`, `query_prefix`, `document_prefix` of `alt` are read. It costs a second embedding pass at index time and one more embedding per new query, and the index grows by one vector per chunk. Adding it to an existing database needs a reindex: delete `.onfly/vector.db` (the summary cache keeps the model work).
+
 ### Chunk summaries
 
 `indexer.summaries` asks a chat model for one plain sentence per named chunk (functions, methods, types, doc sections of at least 60 characters). The sentence is stored as the chunk's `summary`, embedded together with the code, used by the name list, and returned in search results. It targets conceptual questions whose words never appear in the code ("wait before trying again" finding a backoff loop).
@@ -181,7 +220,14 @@ indexer:
     # timeout_ms: 60000          # one call; default 60000
     # batch: 4                   # chunks of one file per call; 0 or 1 is one call per chunk
     # files: true                # also write one summarised "file" chunk per file
+    # questions: 3               # also ask for search-style questions per chunk (0 to 5; disables batching)
+    # cache: .onfly/summaries.jsonl   # model answers kept across indexes; "none" turns it off
+  # summary_vector: true         # embed the summary as a second vector (see below)
 ```
+
+**Cache.** Every answer is also appended to `.onfly/summaries.jsonl`, keyed by the model, the prompt version, the chunk's type and name and its exact text. Deleting the database, changing the embedder or a prefix, or rebuilding on another machine that has the file therefore does not call the model again: a full reindex of this repository dropped from 17 minutes to about a minute and a half. A different summary model or `questions` value has different keys and asks again. Keep the file out of git like `vector.db`.
+
+**Questions and a summary vector.** `questions: 3` asks the model for three search-style questions per chunk and embeds them with the summary; `summary_vector: true` embeds the summary and questions as a second vector per chunk and adds a list from it. Both were measured and neither helped on this repository (MRR 0.788 and 0.789 against 0.797 without; `questions` also cost 43 minutes of model time), so both are off by default. They are there for codebases whose questions look unlike their code.
 
 `batch` sends several chunks of a file in one prompt. On this repository it was about 28% faster and cost 0.03 MRR (0.751 to 0.722), so the default is one call per chunk. `files: true` adds a chunk of type `file` per file, listing the names it defines, with its own summary; it found no gain here (MRR 0.717 against 0.722 without) and is meant for large packages where the question is about a directory or file, not a symbol. A smaller model is the better way to cut index time: `qwen2.5-coder:3b` indexed this repository in 8 minutes against 12 for the 7B (both with `batch: 4`) and scored MRR 0.718 against 0.722.
 
@@ -245,6 +291,20 @@ Things to know:
 
 Use `onfly eval` to check that it improves your results before keeping it.
 
+### Ollama (scoring model)
+
+`provider: ollama-score` is for generative reranking models such as Qwen3-Reranker. Ollama has no rerank endpoint, so Onfly sends each candidate to `POST {endpoint}/api/generate` as a raw prompt in the model's own format ("does the document answer the query? yes or no"), asks for one token with log-probabilities, and ranks candidates by the probability of `yes` against `no`. Calls run four at a time. It needs an Ollama version that returns `logprobs`.
+
+```yaml
+reranker:
+  provider: ollama-score
+  model: dengcao/Qwen3-Reranker-4B:Q4_K_M
+  candidates: 20
+  timeout_ms: 60000
+```
+
+Not every community build of the reranker works under every Ollama release: `dengcao/Qwen3-Reranker-0.6B:Q8_0` answered with identical probabilities for every token here, the 4B build worked. Check a few calls by hand before measuring. It is slow: about 18 seconds per search on a laptop for 20 candidates with the 4B model, and on the hand-written cases it did not improve MRR (0.768 against 0.767); see [Evaluation](evaluation.md#third-round-prompts-second-embedder-summary-variants).
+
 ## Embedders
 
 Ollama: `POST {endpoint}/api/embed` with `{"model","input":[...]}`. The default endpoint is `http://localhost:11434`. The response field is `embeddings`. Each vector must have length `dimensions`.
@@ -254,6 +314,8 @@ OpenAI: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.op
 Voyage: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.voyageai.com`. The body sends `input_type` `query` for one search string and `document` for an index batch, and `output_dimension` from `dimensions`. The API key is `embedder.api_key` if set, otherwise `VOYAGE_API_KEY`.
 
 The HTTP timeout is 60 seconds. Batches are 32 texts, or 128 with `onfly index --ci`. HTTP 429, 502, 503 and 504, and network errors, are retried up to five times. `Retry-After` of 1–30 seconds replaces the backoff. Other status codes, including a plain 500, fail immediately.
+
+`embeddinggemma-2` (`ollama pull embeddinggemma-2`, 768 dimensions) was the best of six models tried here; see [Evaluation](evaluation.md#embedding-models).
 
 `dimensions` is stored in the database on first init. A later run with a different value fails and does not alter the schema. Point `dsn` at a new file or database if you change the model size.
 

@@ -91,3 +91,31 @@ func TestMineGroupsOpensByQuery(t *testing.T) {
 		t.Fatalf("mined file must load as a cases file: %v %v", back, err)
 	}
 }
+
+func TestExplainClassifiesWhatTookRankOne(t *testing.T) {
+	sec := parser.Chunk{FilePath: "docs/a.md", Type: "section", Content: "doc", Metadata: map[string]string{"name": "A"}}
+	other := parser.Chunk{FilePath: "x.go", Type: "function", Content: "x", Metadata: map[string]string{"name": "X"}}
+	want := parser.Chunk{FilePath: "y.go", Type: "function", Content: "y", Metadata: map[string]string{"name": "Y"}}
+	sib := parser.Chunk{FilePath: "y.go", Type: "function", Content: "z", Metadata: map[string]string{"name": "Z"}}
+	cases := []Case{
+		{Query: "first", Expect: []Expect{{File: "y.go", Symbol: "Y"}}},
+		{Query: "docs", Expect: []Expect{{File: "y.go", Symbol: "Y"}}},
+		{Query: "other", Expect: []Expect{{File: "y.go", Symbol: "Y"}}},
+		{Query: "sibling", Expect: []Expect{{File: "y.go", Symbol: "Y"}}},
+	}
+	res := map[string][]parser.Chunk{
+		"first":   {want},
+		"docs":    {sec, want},
+		"other":   {other, want},
+		"sibling": {sib, want},
+	}
+	got := Explain(cases, res, 5, false)
+	if len(got) != 3 || got[0].Reason != DocOverAPI || got[1].Reason != OtherCode || got[2].Reason != SameFile || got[0].Rank != 2 {
+		t.Fatalf("%+v", got)
+	}
+	var b strings.Builder
+	WriteExplain(&b, got, 4)
+	if !strings.Contains(b.String(), "3 of 4 cases were not first") || !strings.Contains(b.String(), "want: y.go#Y") {
+		t.Fatal(b.String())
+	}
+}

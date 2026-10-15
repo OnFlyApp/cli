@@ -63,6 +63,8 @@ type Session struct {
 	store    vectorstore.Store
 	emb      embedder.Embedder
 	chat     embedder.Chat // writes chunk summaries; nil when indexer.summaries is off
+	sums     *summaryCache
+	alt      embedder.Embedder // second embedder for the "alt" vector slot; nil when embedder.alt is unset
 	router   *parser.Router
 	filter   *ignore.Filter
 	count    func(string) int
@@ -97,6 +99,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 	var store vectorstore.Store
 	var emb embedder.Embedder
 	var chat embedder.Chat
+	var alt embedder.Embedder
 	if !opt.DryRun {
 		var err error
 		if chat, err = embedder.NewChat(cfg.Indexer.Summaries.LLM); err != nil {
@@ -107,7 +110,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		if err != nil {
 			return nil, err
 		}
-		if err := store.Init(ctx, cfg.Embedder.Dimensions); err != nil {
+		if err := vectorstore.InitAll(ctx, store, cfg); err != nil {
 			store.Close()
 			return nil, err
 		}
@@ -115,6 +118,12 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		if err != nil {
 			store.Close()
 			return nil, err
+		}
+		if cfg.Embedder.Alt != nil {
+			if alt, err = embedder.New(*cfg.Embedder.Alt); err != nil {
+				store.Close()
+				return nil, fmt.Errorf("embedder.alt: %w", err)
+			}
 		}
 	}
 	reportOpt(opt, "loading parsers")
@@ -133,6 +142,17 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		}
 		return nil, err
 	}
+	var sums *summaryCache
+	if chat != nil {
+		path := cfg.Indexer.Summaries.Cache
+		if path == "" {
+			path = filepath.Join(".onfly", "summaries.jsonl")
+		}
+		if path != "none" && !filepath.IsAbs(path) {
+			path = filepath.Join(cfg.ProjectRoot, path)
+		}
+		sums = openSummaryCache(path)
+	}
 	return &Session{
 		cfg:    cfg,
 		logger: logger,
@@ -140,6 +160,8 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 		store:  store,
 		emb:    emb,
 		chat:   chat,
+		alt:    alt,
+		sums:   sums,
 		router: router,
 		filter: filter,
 		count: func(s string) int {
@@ -549,6 +571,9 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		if err != nil {
 			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
 		}
+		if err := s.addExtraVectors(ctx, rel, embedded, prev); err != nil {
+			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
+		}
 		for i := range embedded {
 			embedded[i].Workspace = s.cfg.Workspace
 		}
@@ -687,7 +712,7 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 // path and symbol, so a query naming a file or function can match the vector.
 func embedText(c parser.Chunk, withContext bool) string {
 	summary := c.Metadata["summary"]
-	if !withContext && summary == "" && c.Metadata["neighbours"] == "" {
+	if !withContext && summary == "" && c.Metadata["neighbours"] == "" && c.Metadata["questions"] == "" {
 		return c.Content
 	}
 	var b strings.Builder
@@ -706,6 +731,9 @@ func embedText(c parser.Chunk, withContext bool) string {
 	}
 	if summary != "" {
 		b.WriteString("summary: " + summary + "\n")
+	}
+	if q := c.Metadata["questions"]; q != "" {
+		b.WriteString("questions: " + q + "\n")
 	}
 	b.WriteString("\n")
 	b.WriteString(c.Content)

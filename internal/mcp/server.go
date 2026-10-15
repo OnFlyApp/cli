@@ -170,7 +170,10 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		logger.Warn("query expansion disabled", "err", err)
 		chat = nil
 	}
-	h.searcher = query.NewSearcher(cfg, store, emb, rr, chat, logger)
+	h.searcher, err = query.NewSearcher(cfg, store, emb, rr, chat, logger)
+	if err != nil {
+		return nil, nil, err
+	}
 	h.usage = usage.New(cfg.Server.UsageFile)
 	if filter, err := ignore.LoadFilter(cfg.ProjectRoot, cfg.Indexer.Exclude); err != nil {
 		logger.Warn("gitignore", "err", err)
@@ -243,7 +246,7 @@ func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) 
 		return err
 	}
 	defer store.Close()
-	if err := store.Init(ctx, cfg.Embedder.Dimensions); err != nil {
+	if err := vectorstore.InitAll(ctx, store, cfg); err != nil {
 		return err
 	}
 	emb, err := embedder.New(cfg.Embedder)

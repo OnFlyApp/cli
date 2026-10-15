@@ -22,6 +22,14 @@ In order of effort: (1) keep the defaults, which weigh the semantic list above t
 
 Measure it. With a local chat model (`reranker.provider: ollama`) it raised recall@5 but lowered rank 1 and added seconds per search in the earlier measurement. A hosted cross-encoder (Voyage, Cohere, Jina) is the better candidate and is already supported; it was not measured here because it needs an API key. Run `onfly eval` with and without it on your own cases.
 
+### Which embedding model should I use?
+
+`embeddinggemma-2` (`ollama pull embeddinggemma-2`) was the best of six local models on this repository and indexes in under a minute. Add the code-retrieval prompts (`embedder.query_prefix`, `document_prefix`) and, if you can afford a second embedding pass, `embedder.alt`. See [Query and document prompts](configuration.md#query-and-document-prompts) and [Second embedder](configuration.md#second-embedder).
+
+### Is the model I use for summaries rebuilt every time?
+
+No. Answers are cached in `.onfly/summaries.jsonl` by chunk text and model, so deleting the database or changing the embedder does not call the model again. See [Chunk summaries](configuration.md#chunk-summaries).
+
 ### Which summary model should I use?
 
 `qwen2.5-coder:7b` gave the best scores; `qwen2.5-coder:3b` was within 0.004 MRR and indexed about a third faster. Both are local through Ollama. See [Chunk summaries](configuration.md#chunk-summaries).

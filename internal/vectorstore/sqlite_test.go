@@ -175,6 +175,7 @@ func TestSQLiteStore(t *testing.T) {
 	}
 	t.Cleanup(func() { st.Close() })
 	runStoreContract(t, st)
+	runExtraContract(t, st)
 }
 
 func TestSQLiteOptimizeKeepsRows(t *testing.T) {

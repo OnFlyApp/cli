@@ -16,11 +16,20 @@ import (
 // generated), fitted on half and checked on the other half: MRR 0.605 -> 0.678
 // on the held-out half against the old semantic=1 keyword=1 field=off rrf_k=60.
 const (
+	slotSummary = "summary"
+	slotAlt     = "alt"
+)
+
+const (
 	defaultSemanticWeight = 2.0
 	defaultKeywordWeight  = 0.5
 	defaultFieldWeight    = 0.5
 	defaultRRFK           = 20
 	defaultExpandWeight   = 0.5
+	defaultSummaryWeight  = 1.0
+	defaultAltWeight      = 1.0
+	// defaultSummaryWordWeight is absolute (the per-word list is relative to the keyword weight).
+	defaultSummaryWordWeight = 0.125
 	// secondChunkBonus is how much a file's second-best chunk adds to its score when grouping.
 	secondChunkBonus = 0.1
 )
@@ -29,20 +38,29 @@ const (
 // Tuning varies them without touching the store or the embedder again.
 type Params struct {
 	Semantic, Keyword, Word, Field, Recency, Expand, Graph float64
-	RRFK                                                   int
+	// Summary, Alt and SummaryWord weigh the summary-vector, second-embedder
+	// and summary-keyword lists.
+	Summary, Alt, SummaryWord float64
+	// Section multiplies the score of documentation sections (1 is neutral).
+	Section float64
+	RRFK    int
 }
 
 // Params returns the searcher's effective fusion numbers.
 func (s *Searcher) Params() Params {
 	p := Params{
-		Semantic: orDefault(s.SemanticWeight, defaultSemanticWeight),
-		Keyword:  orDefault(s.KeywordWeight, defaultKeywordWeight),
-		Word:     defaultWordWeight,
-		Field:    defaultFieldWeight,
-		Recency:  s.RecencyWeight,
-		Expand:   defaultExpandWeight,
-		Graph:    s.GraphWeight,
-		RRFK:     s.RRFK,
+		Semantic:    orDefault(s.SemanticWeight, defaultSemanticWeight),
+		Keyword:     orDefault(s.KeywordWeight, defaultKeywordWeight),
+		Word:        defaultWordWeight,
+		Field:       defaultFieldWeight,
+		Recency:     s.RecencyWeight,
+		Expand:      defaultExpandWeight,
+		Graph:       s.GraphWeight,
+		Summary:     defaultSummaryWeight,
+		Alt:         defaultAltWeight,
+		SummaryWord: defaultSummaryWordWeight,
+		Section:     1,
+		RRFK:        s.RRFK,
 	}
 	if s.WordWeight != nil {
 		p.Word = *s.WordWeight
@@ -52,6 +70,18 @@ func (s *Searcher) Params() Params {
 	}
 	if s.ExpandWeight > 0 {
 		p.Expand = s.ExpandWeight
+	}
+	if s.SectionWeight != nil {
+		p.Section = *s.SectionWeight
+	}
+	if s.SummaryWeight != nil {
+		p.Summary = *s.SummaryWeight
+	}
+	if s.AltWeight != nil {
+		p.Alt = *s.AltWeight
+	}
+	if s.SummaryWordWeight != nil {
+		p.SummaryWord = *s.SummaryWordWeight
 	}
 	if p.RRFK <= 0 {
 		p.RRFK = defaultRRFK
@@ -71,7 +101,10 @@ type Gathered struct {
 	ExpandSemantic []parser.Chunk
 	ExpandWords    []parser.Chunk
 	Recent         []parser.Chunk
-	req            Request
+	// SummaryVec, Alt and SummaryWords come from the summary slot, the second
+	// embedder and the summary keyword index; empty when those are not in use.
+	SummaryVec, Alt, SummaryWords []parser.Chunk
+	req                           Request
 }
 
 // Run embeds the query, merges semantic, keyword, name and expansion lists,
@@ -163,12 +196,32 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	if len(g.Terms) >= 2 { // a single word is already the whole-query keyword search
 		g.Words = s.wordMatches(ctx, g.Terms, pool, r.Workspace)
 	}
+	if embedErr == nil && s.SummaryVector {
+		if got, err := s.Store.SearchExtra(ctx, slotSummary, vec, pool, r.Workspace); err != nil {
+			s.logger().Warn("summary vectors", "err", err)
+		} else {
+			g.SummaryVec = got
+		}
+	}
+	if s.AltEmb != nil {
+		if av, err := s.AltEmb.Embed(ctx, r.Query); err != nil {
+			s.logger().Warn("alt embedder", "err", err)
+		} else if got, err := s.Store.SearchExtra(ctx, slotAlt, av, pool, r.Workspace); err != nil {
+			s.logger().Warn("alt vectors", "err", err)
+		} else {
+			g.Alt = got
+		}
+	}
+	if s.SummaryKeyword && len(g.Terms) > 0 {
+		g.SummaryWords = s.wordMatchesWith(ctx, g.Terms, pool, r.Workspace, s.Store.SearchSummary)
+	}
 	if exp != nil {
 		g.ExpandSemantic, g.ExpandWords = s.expandLists(ctx, exp, pool, r.Workspace)
 	}
 	if filtered {
 		g.Semantic, g.Keyword, g.Words = filterChunks(g.Semantic, keep), filterChunks(g.Keyword, keep), filterChunks(g.Words, keep)
 		g.ExpandSemantic, g.ExpandWords = filterChunks(g.ExpandSemantic, keep), filterChunks(g.ExpandWords, keep)
+		g.SummaryVec, g.Alt, g.SummaryWords = filterChunks(g.SummaryVec, keep), filterChunks(g.Alt, keep), filterChunks(g.SummaryWords, keep)
 	}
 	if s.RecencyWeight > 0 {
 		g.Recent = s.recentCandidates(ctx, g.Semantic, g.Keyword)
@@ -180,8 +233,17 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	lists := [][]parser.Chunk{g.Semantic, g.Keyword, g.Words}
 	weights := []float64{p.Semantic, p.Keyword, p.Word * p.Keyword}
+	if len(g.SummaryVec) > 0 && p.Summary > 0 {
+		lists, weights = append(lists, g.SummaryVec), append(weights, p.Summary)
+	}
+	if len(g.Alt) > 0 && p.Alt > 0 {
+		lists, weights = append(lists, g.Alt), append(weights, p.Alt)
+	}
+	if len(g.SummaryWords) > 0 && p.SummaryWord > 0 {
+		lists, weights = append(lists, g.SummaryWords), append(weights, p.SummaryWord)
+	}
 	if p.Field > 0 {
-		cands := union(g.Semantic, g.Keyword, g.Words, g.ExpandSemantic, g.ExpandWords)
+		cands := union(g.Semantic, g.Keyword, g.Words, g.ExpandSemantic, g.ExpandWords, g.SummaryVec, g.Alt, g.SummaryWords)
 		if f := fieldMatches(g.Terms, cands); len(f) > 0 {
 			lists, weights = append(lists, f), append(weights, p.Field*p.Keyword)
 		}
@@ -215,6 +277,14 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	group := s.GroupBy
 	if g.req.GroupBy != "" {
 		group = g.req.GroupBy
+	}
+	if p.Section != 1 && p.Section > 0 {
+		for i := range ranked {
+			if ranked[i].chunk.Type == "section" {
+				ranked[i].score *= p.Section
+			}
+		}
+		sortScored(ranked)
 	}
 	if s.Dedupe {
 		ranked = dedupe(ranked)

@@ -228,3 +228,66 @@ func containsPath(ss []string, want string) bool {
 	}
 	return false
 }
+
+// runExtraContract checks extra vector slots and the summary keyword index.
+// It runs after runStoreContract on the same store (dimension 4).
+func runExtraContract(t *testing.T, st Store) {
+	t.Helper()
+	ctx := context.Background()
+	if err := st.InitExtra(ctx, "Bad-Slot", 4); err == nil {
+		t.Fatal("slot names must be lowercase letters")
+	}
+	if err := st.InitExtra(ctx, "summary", 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.InitExtra(ctx, "summary", 4); err != nil {
+		t.Fatalf("InitExtra must be repeatable: %v", err)
+	}
+	if err := st.InitExtra(ctx, "summary", 8); !errors.Is(err, ErrDimensionMismatch) {
+		t.Fatalf("other dimensions must fail with ErrDimensionMismatch: %v", err)
+	}
+	a := parser.Chunk{FilePath: "x/a.go", Type: "function", Content: "func retryLoop() {}",
+		Metadata: map[string]string{"name": "retryLoop", "summary": "Waits and tries a request again.", "questions": "how do I retry"}}
+	b := parser.Chunk{FilePath: "x/b.go", Type: "function", Content: "func other() {}", Metadata: map[string]string{"name": "other"}}
+	err := saveChunks(ctx, st, []EmbeddedChunk{
+		{Chunk: a, Vector: []float32{1, 0, 0, 0}, Extra: map[string][]float32{"summary": {0, 0, 1, 0}}},
+		{Chunk: b, Vector: []float32{0, 1, 0, 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.SearchExtra(ctx, "summary", []float32{0, 0, 1, 0}, 5, "")
+	if err != nil || len(got) != 1 || got[0].FilePath != "x/a.go" {
+		t.Fatalf("only chunks with a vector in the slot are found: %+v %v", got, err)
+	}
+	if _, err := st.SearchExtra(ctx, "missing", []float32{0, 0, 1, 0}, 5, ""); err == nil {
+		t.Fatal("an uninitialised slot must fail")
+	}
+	vecs, err := st.ExtraVectorsByFile(ctx, "x/a.go", "summary")
+	if err != nil || len(vecs) != 1 || vecs[a.Content][2] != 1 {
+		t.Fatalf("%v %v", vecs, err)
+	}
+	got, err = st.SearchSummary(ctx, "tries a request", 5, "")
+	if err != nil || len(got) != 1 || got[0].FilePath != "x/a.go" {
+		t.Fatalf("summary keyword = %+v %v", got, err)
+	}
+	got, err = st.SearchSummary(ctx, "HOW DO I RETRY", 5, "")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("questions are searched too, case-insensitively: %+v %v", got, err)
+	}
+	if got, err = st.SearchSummary(ctx, "nothing like it", 5, ""); err != nil || len(got) != 0 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	// Replacing the file drops its old extra vector and summary text.
+	a2 := a
+	a2.Metadata = map[string]string{"name": "retryLoop"}
+	if err := saveChunks(ctx, st, []EmbeddedChunk{{Chunk: a2, Vector: []float32{1, 0, 0, 0}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = st.SearchExtra(ctx, "summary", []float32{0, 0, 1, 0}, 5, ""); len(got) != 0 {
+		t.Fatalf("stale slot vector: %+v", got)
+	}
+	if got, _ = st.SearchSummary(ctx, "tries a request", 5, ""); len(got) != 0 {
+		t.Fatalf("stale summary text: %+v", got)
+	}
+}

@@ -228,3 +228,45 @@ func TestBatchedSummariesAndFileChunk(t *testing.T) {
 		}
 	}
 }
+
+func TestSummaryCacheSurvivesDeletingTheDatabase(t *testing.T) {
+	var calls atomic.Int32
+	chat := fakeChat(t, &calls, 0)
+	defer chat.Close()
+	dir, stored := summaryProject(t, chat.URL)
+	cfg := mustLoad(t, dir)
+	cfg.Indexer.Summaries.Provider, cfg.Indexer.Summaries.Endpoint, cfg.Indexer.Summaries.Model = "ollama", chat.URL, "m"
+	ctx := context.Background()
+	if _, err := Run(ctx, cfg, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"vector.db", "vector.db-wal", "vector.db-shm"} {
+		os.Remove(filepath.Join(dir, ".onfly", f))
+	}
+	if _, err := Run(ctx, cfg, nil, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	got := stored(t)
+	if calls.Load() != 1 || len(got) != 1 || got[0].Chunk.Metadata["summary"] == "" {
+		t.Fatalf("a rebuilt index must take the summary from the cache: calls=%d %+v", calls.Load(), got)
+	}
+	cfg.Indexer.Summaries.Model = "other" // another model: a different key
+	os.Remove(filepath.Join(dir, ".onfly", "vector.db"))
+	if _, err := Run(ctx, cfg, nil, Options{}); err != nil || calls.Load() != 2 {
+		t.Fatalf("a new model must ask again: calls=%d %v", calls.Load(), err)
+	}
+}
+
+func TestParseGeneratedQuestions(t *testing.T) {
+	g := parseGenerated("```json\n{\"summary\": \"Retries a request.\", \"questions\": [\"how to retry\", \"  \", \"wait and try again\", \"third\"]}\n```", 2)
+	if g.Summary != "Retries a request." || len(g.Questions) != 2 || g.Questions[1] != "wait and try again" {
+		t.Fatalf("%+v", g)
+	}
+	if g := parseGenerated("Just a sentence.\nmore", 2); g.Summary != "Just a sentence." || len(g.Questions) != 0 {
+		t.Fatalf("a model that ignores the format still gives a summary: %+v", g)
+	}
+	c := parser.Chunk{Content: "x", Metadata: map[string]string{"questions": "a | b"}}
+	if got := embedText(c, false); got != "questions: a | b\n\nx" {
+		t.Fatalf("%q", got)
+	}
+}

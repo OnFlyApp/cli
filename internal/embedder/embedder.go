@@ -22,6 +22,14 @@ type Embedder interface {
 }
 
 func New(cfg config.Embedder) (Embedder, error) {
+	e, err := newProvider(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return WithPrefixes(e, cfg.QueryPrefix, cfg.DocumentPrefix), nil
+}
+
+func newProvider(cfg config.Embedder) (Embedder, error) {
 	switch cfg.Provider {
 	case "ollama":
 		return newOllama(cfg)

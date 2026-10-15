@@ -37,8 +37,11 @@ func NewReranker(cfg config.Reranker) (Reranker, error) {
 	if cfg.Provider == "" {
 		return nil, nil
 	}
-	if cfg.Provider == "ollama" {
+	switch cfg.Provider {
+	case "ollama":
 		return newOllamaReranker(cfg)
+	case "ollama-score":
+		return newOllamaScoreReranker(cfg)
 	}
 	api, ok := rerankAPIs[cfg.Provider]
 	if !ok {

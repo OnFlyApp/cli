@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 type Postgres struct {
 	pool       *pgxpool.Pool
 	dimensions int
+	extra      map[string]int // slot -> dimensions, set by InitExtra
 }
 
 func OpenPostgres(ctx context.Context, dsn string) (*Postgres, error) {
@@ -230,7 +232,7 @@ func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []E
 	if _, err := tx.Exec(ctx, `DELETE FROM chunks WHERE file_path = $1`, path); err != nil {
 		return err
 	}
-	if err := insertPGChunks(ctx, tx, chunks); err != nil {
+	if err := insertPGChunks(ctx, tx, chunks, p.extra); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO index_state(file_path, content_hash) VALUES ($1, $2)
@@ -244,15 +246,33 @@ func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []E
 }
 
 // insertPGChunks sends all rows in one round trip.
-func insertPGChunks(ctx context.Context, tx pgx.Tx, chunks []EmbeddedChunk) error {
+func insertPGChunks(ctx context.Context, tx pgx.Tx, chunks []EmbeddedChunk, extra map[string]int) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 	batch := &pgx.Batch{}
 	for _, c := range chunks {
-		batch.Queue(`INSERT INTO chunks(file_path, type, content, metadata, outbound, workspace, embedding)
-			VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::vector)`,
-			slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, vecLiteral(c.Vector))
+		cols := `file_path, type, content, metadata, outbound, workspace, embedding`
+		vals := `$1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::vector`
+		args := []any{slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, vecLiteral(c.Vector)}
+		slots := make([]string, 0, len(c.Extra))
+		for slot := range c.Extra {
+			slots = append(slots, slot)
+		}
+		sort.Strings(slots)
+		for _, slot := range slots {
+			dims, ok := extra[slot]
+			if !ok {
+				return fmt.Errorf("vectorstore: extra slot %q is not initialised", slot)
+			}
+			if len(c.Extra[slot]) != dims {
+				return fmt.Errorf("vectorstore: slot %q vector length %d, want %d", slot, len(c.Extra[slot]), dims)
+			}
+			args = append(args, vecLiteral(c.Extra[slot]))
+			cols += ", emb_" + slot
+			vals += fmt.Sprintf(", $%d::vector", len(args))
+		}
+		batch.Queue(`INSERT INTO chunks(`+cols+`) VALUES (`+vals+`)`, args...)
 	}
 	res := tx.SendBatch(ctx, batch)
 	for range chunks {
@@ -373,6 +393,105 @@ func (p *Postgres) SearchKeyword(ctx context.Context, keyword string, limit int,
 		ORDER BY (content ILIKE $1 ESCAPE '\') DESC,
 		         ts_rank(tsv, plainto_tsquery('simple', $2)) DESC
 		LIMIT $3`, likePattern(keyword), keyword, limit, workspace)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows)
+}
+
+func (p *Postgres) InitExtra(ctx context.Context, slot string, dimensions int) error {
+	if !validSlot(slot) {
+		return fmt.Errorf("vectorstore: invalid slot name %q", slot)
+	}
+	if dimensions < 1 || dimensions > 8192 {
+		return fmt.Errorf("vectorstore: dimensions %d out of range", dimensions)
+	}
+	col := "emb_" + slot
+	if _, err := p.pool.Exec(ctx, fmt.Sprintf(`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS %s vector(%d)`, col, dimensions)); err != nil {
+		return err
+	}
+	var typ string
+	err := p.pool.QueryRow(ctx, `SELECT format_type(a.atttypid, a.atttypmod) FROM pg_attribute a
+		WHERE a.attrelid = 'chunks'::regclass AND a.attname = $1 AND NOT a.attisdropped`, col).Scan(&typ)
+	if err != nil {
+		return err
+	}
+	if width, ok := vectorWidth(typ); ok && width != dimensions {
+		return fmt.Errorf("%w: slot %s has %d dimensions, config %d; rebuild the index", ErrDimensionMismatch, slot, width, dimensions)
+	}
+	if dimensions <= postgresHNSWMaxDim {
+		if _, err := p.pool.Exec(ctx, fmt.Sprintf(`CREATE INDEX IF NOT EXISTS chunks_%s_idx ON chunks USING hnsw (%s vector_cosine_ops)`, col, col)); err != nil {
+			return err
+		}
+	}
+	if p.extra == nil {
+		p.extra = map[string]int{}
+	}
+	p.extra[slot] = dimensions
+	return nil
+}
+
+func (p *Postgres) SearchExtra(ctx context.Context, slot string, queryVector []float32, limit int, workspace string) ([]parser.Chunk, error) {
+	dims, ok := p.extra[slot]
+	if !ok {
+		return nil, fmt.Errorf("vectorstore: extra slot %q is not initialised", slot)
+	}
+	if len(queryVector) != dims {
+		return nil, fmt.Errorf("vectorstore: vector length %d, want %d", len(queryVector), dims)
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("vectorstore: limit must be positive")
+	}
+	col := "emb_" + slot
+	rows, err := p.pool.Query(ctx, `
+		SELECT file_path, type, content, metadata::text, outbound::text
+		FROM chunks
+		WHERE `+col+` IS NOT NULL AND ($2 = '' OR $2 = '*' OR workspace = $2)
+		ORDER BY `+col+` <=> $1::vector
+		LIMIT $3`, vecLiteral(queryVector), workspace, limit)
+	if err != nil {
+		return nil, err
+	}
+	return collect(rows)
+}
+
+func (p *Postgres) ExtraVectorsByFile(ctx context.Context, path, slot string) (map[string][]float32, error) {
+	if _, ok := p.extra[slot]; !ok {
+		return nil, fmt.Errorf("vectorstore: extra slot %q is not initialised", slot)
+	}
+	rows, err := p.pool.Query(ctx, `SELECT content, emb_`+slot+`::text FROM chunks WHERE file_path = $1 AND emb_`+slot+` IS NOT NULL`, slashPath(path))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]float32{}
+	for rows.Next() {
+		var content, lit string
+		if err := rows.Scan(&content, &lit); err != nil {
+			return nil, err
+		}
+		v, err := parseVecLiteral(lit)
+		if err != nil {
+			return nil, err
+		}
+		out[content] = v
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) SearchSummary(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error) {
+	if strings.TrimSpace(keyword) == "" {
+		return nil, fmt.Errorf("vectorstore: empty keyword")
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("vectorstore: limit must be positive")
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT file_path, type, content, metadata::text, outbound::text
+		FROM chunks
+		WHERE (coalesce(metadata->>'summary', '') || ' | ' || coalesce(metadata->>'questions', '')) ILIKE $1 ESCAPE '\'
+		  AND ($3 = '' OR $3 = '*' OR workspace = $3)
+		LIMIT $2`, likePattern(keyword), limit, workspace)
 	if err != nil {
 		return nil, err
 	}

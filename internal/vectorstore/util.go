@@ -253,6 +253,31 @@ func checkVectors(chunks []EmbeddedChunk, dimensions int) error {
 	return nil
 }
 
+// validSlot reports whether name is safe to use inside an SQL identifier.
+func validSlot(name string) bool {
+	if name == "" || len(name) > 16 {
+		return false
+	}
+	for _, r := range name {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
+}
+
+// summaryText is what the summary keyword index holds for a chunk.
+func summaryText(meta map[string]string) string {
+	s, q := meta["summary"], meta["questions"]
+	switch {
+	case s != "" && q != "":
+		return s + " | " + q
+	case s != "":
+		return s
+	}
+	return q
+}
+
 func likePattern(keyword string) string {
 	keyword = strings.ReplaceAll(keyword, `\`, `\\`)
 	keyword = strings.ReplaceAll(keyword, `%`, `\%`)

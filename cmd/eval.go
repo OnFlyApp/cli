@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/axitdev/onfly/internal/config"
+	"github.com/axitdev/onfly/internal/embedder"
 	"github.com/axitdev/onfly/internal/eval"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/query"
@@ -16,6 +18,9 @@ var (
 	evalCases     []string
 	evalSplit     string
 	evalFileLevel bool
+	evalExplain   bool
+	evalJudge     string
+	evalJudgeURL  string
 	evalK         int
 	evalMinRecall float64
 	evalJSON      bool
@@ -47,8 +52,11 @@ var evalCmd = &cobra.Command{
 		}
 		defer closeStore()
 		ws := query.Scope(cfg.Workspace, "")
+		results := map[string][]parser.Chunk{}
 		rep, err := eval.RunLevel(cmd.Context(), cases, func(ctx context.Context, q string, limit int) ([]parser.Chunk, error) {
-			return s.Search(ctx, q, limit, ws)
+			got, err := s.Search(ctx, q, limit, ws)
+			results[q] = got
+			return got, err
 		}, evalK, evalFileLevel)
 		if err != nil {
 			return err
@@ -70,6 +78,29 @@ var evalCmd = &cobra.Command{
 			}
 			fmt.Fprintf(out, "recall@%d: %.2f (%d/%d)  mrr: %.3f\n", rep.K, rep.Recall, rep.Hits, rep.Total, rep.MRR)
 		}
+		if evalJudge != "" {
+			chat, err := embedder.NewChat(config.LLM{Provider: "ollama", Endpoint: evalJudgeURL, Model: evalJudge})
+			if err != nil {
+				return err
+			}
+			j, err := eval.Judge(cmd.Context(), chat, cases, results, evalFileLevel)
+			if err != nil {
+				return err
+			}
+			w := out
+			if evalJSON {
+				w = cmd.ErrOrStderr()
+			}
+			fmt.Fprintf(w, "judged by %s over the top %d: recall %.2f (strict %.2f)  mrr %.3f (strict %.3f)  %d of %d cases had a better-ranked valid answer\n",
+				evalJudge, eval.JudgeTop, j.Recall, j.StrictRecall, j.MRR, j.StrictMRR, j.Alternatives, j.Total)
+		}
+		if evalExplain {
+			w := out
+			if evalJSON {
+				w = cmd.ErrOrStderr()
+			}
+			eval.WriteExplain(w, eval.Explain(cases, results, evalK, evalFileLevel), len(cases))
+		}
 		if rep.Recall < evalMinRecall {
 			return fmt.Errorf("recall %.2f is below --min-recall %.2f", rep.Recall, evalMinRecall)
 		}
@@ -90,6 +121,9 @@ var evalCmd = &cobra.Command{
 func init() {
 	evalCmd.PersistentFlags().StringSliceVar(&evalCases, "cases", []string{".onfly/eval.yaml"}, "cases file, relative to the project root; repeat or comma-separate to combine several")
 	evalCmd.Flags().StringVar(&evalSplit, "split", "", "score only the even or odd cases (the halves \"eval tune\" fits and checks on)")
+	evalCmd.Flags().StringVar(&evalJudge, "judge", "", "chat model (Ollama) that decides whether better-ranked results also answer the question; adds judged recall and MRR")
+	evalCmd.Flags().StringVar(&evalJudgeURL, "judge-endpoint", "", "Ollama endpoint for --judge (default http://localhost:11434)")
+	evalCmd.Flags().BoolVar(&evalExplain, "explain", false, "list the cases whose expected chunk was not first, with what outranked it")
 	evalCmd.Flags().BoolVar(&evalFileLevel, "file-level", false, "count a hit when the file matches, whatever the symbol")
 	evalCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalCmd.Flags().Float64Var(&evalMinRecall, "min-recall", 0, "exit non-zero when recall is below this value")

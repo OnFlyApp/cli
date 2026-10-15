@@ -58,6 +58,12 @@ rules:
 
 # workspace: backend               # label stored on each chunk, for monorepos with several configs
 
+# embedder prompts and a second embedder, see docs/configuration.md:
+#   embedder:
+#     query_prefix: "task: code retrieval | query: "   # EmbeddingGemma
+#     document_prefix: "title: none | text: "
+#     alt: {provider: ollama, model: qwen3-embedding:0.6b, dimensions: 1024}
+
 # search:                          # how result lists are fused; measure changes with "onfly eval"
 #   semantic_weight: 2             # defaults shown; "onfly eval tune" finds numbers for your code
 #   keyword_weight: 0.5

@@ -358,3 +358,32 @@ func TestRetryable(t *testing.T) {
 		t.Fatal("plain error retried")
 	}
 }
+
+type recordEmb struct{ got []string }
+
+func (r *recordEmb) Embed(_ context.Context, t string) ([]float32, error) {
+	r.got = append(r.got, t)
+	return []float32{1}, nil
+}
+func (r *recordEmb) EmbedBatch(_ context.Context, ts []string) ([][]float32, error) {
+	r.got = append(r.got, ts...)
+	out := make([][]float32, len(ts))
+	for i := range out {
+		out[i] = []float32{1}
+	}
+	return out, nil
+}
+
+func TestWithPrefixesSplitsQueriesFromDocuments(t *testing.T) {
+	r := &recordEmb{}
+	e := WithPrefixes(r, "q: ", "d: ")
+	e.Embed(context.Background(), "find")
+	e.EmbedBatch(context.Background(), []string{"a", "b"})
+	want := []string{"q: find", "d: a", "d: b"}
+	if len(r.got) != 3 || r.got[0] != want[0] || r.got[1] != want[1] || r.got[2] != want[2] {
+		t.Fatalf("%v", r.got)
+	}
+	if WithPrefixes(r, "", "") != Embedder(r) {
+		t.Fatal("no prefixes must return the embedder unchanged")
+	}
+}

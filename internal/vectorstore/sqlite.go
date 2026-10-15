@@ -25,6 +25,7 @@ const schemaVersion = "2"
 type SQLite struct {
 	db         *sql.DB
 	dimensions int
+	extra      map[string]int // slot -> dimensions, set by InitExtra
 }
 
 func OpenSQLite(dsn string) (*SQLite, error) {
@@ -181,6 +182,9 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 			file_path TEXT PRIMARY KEY,
 			content_hash TEXT NOT NULL
 		)`,
+		// Generated summaries and questions, searchable by substring. It has its
+		// own copy of the text; rows share chunk_meta's rowid.
+		`CREATE VIRTUAL TABLE IF NOT EXISTS summary_fts USING fts5(summary, tokenize='trigram')`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
@@ -299,7 +303,7 @@ func (s *SQLite) CommitFile(ctx context.Context, path, hash string, chunks []Emb
 	if err := s.deleteChunkRows(ctx, tx, []string{path}); err != nil {
 		return err
 	}
-	if err := insertSQLiteChunks(ctx, tx, chunks); err != nil {
+	if err := insertSQLiteChunks(ctx, tx, chunks, s.extra); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO index_state(file_path, content_hash) VALUES (?, ?)
@@ -312,7 +316,7 @@ func (s *SQLite) CommitFile(ctx context.Context, path, hash string, chunks []Emb
 	return tx.Commit()
 }
 
-func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk) error {
+func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk, extra map[string]int) error {
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -326,6 +330,11 @@ func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk)
 		return err
 	}
 	defer vec.Close()
+	sum, err := tx.PrepareContext(ctx, `INSERT INTO summary_fts(rowid, summary) VALUES (?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer sum.Close()
 	for _, c := range chunks {
 		var id int64
 		if err := meta.QueryRowContext(ctx, slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content,
@@ -334,6 +343,23 @@ func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk)
 		}
 		if _, err := vec.ExecContext(ctx, id, vecLiteral(c.Vector)); err != nil {
 			return err
+		}
+		if text := summaryText(c.Chunk.Metadata); text != "" {
+			if _, err := sum.ExecContext(ctx, id, text); err != nil {
+				return err
+			}
+		}
+		for slot, v := range c.Extra {
+			dims, ok := extra[slot]
+			if !ok {
+				return fmt.Errorf("vectorstore: extra slot %q is not initialised", slot)
+			}
+			if len(v) != dims {
+				return fmt.Errorf("vectorstore: slot %q vector length %d, want %d", slot, len(v), dims)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO chunk_vecs_`+slot+`(rowid, embedding) VALUES (?, ?)`, id, vecLiteral(v)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -410,13 +436,40 @@ func (s *SQLite) deleteChunkBatch(ctx context.Context, tx *sql.Tx, paths []strin
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	tables, err := slotTables(ctx, tx)
+	if err != nil {
+		return err
+	}
 	for batch := range slices.Chunk(ids, sqliteBindBatch) {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM chunk_vecs WHERE rowid IN (`+placeholders(len(batch))+`)`, batch...); err != nil {
-			return err
+		for _, table := range tables {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE rowid IN (`+placeholders(len(batch))+`)`, batch...); err != nil {
+				return err
+			}
 		}
 	}
 	_, err = tx.ExecContext(ctx, `DELETE FROM chunk_meta WHERE file_path IN (`+in+`)`, args...)
 	return err
+}
+
+// slotTables lists the tables that hold one row per chunk rowid: the primary
+// vectors, the summary index, and every extra slot found in the database (not
+// only the ones this process initialised, so a delete never leaves orphans).
+func slotTables(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM sqlite_master
+		WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE chunk_vecs_%'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tables := []string{"chunk_vecs", "summary_fts"}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables = append(tables, name)
+	}
+	return tables, rows.Err()
 }
 
 func (s *SQLite) ListFiles(ctx context.Context) ([]string, error) {
@@ -500,6 +553,135 @@ func (s *SQLite) SearchKeyword(ctx context.Context, keyword string, limit int, w
 			  AND (? = '' OR ? = '*' OR workspace = ?)
 			LIMIT ?`, keyword, workspace, workspace, workspace, limit)
 	}
+	if err != nil {
+		return nil, err
+	}
+	return scanChunks(rows)
+}
+
+func (s *SQLite) InitExtra(ctx context.Context, slot string, dimensions int) error {
+	if !validSlot(slot) {
+		return fmt.Errorf("vectorstore: invalid slot name %q", slot)
+	}
+	if dimensions < 1 || dimensions > 8192 {
+		return fmt.Errorf("vectorstore: dimensions %d out of range", dimensions)
+	}
+	table := "chunk_vecs_" + slot
+	var create string
+	err := s.db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE name = ?`, table).Scan(&create)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`CREATE VIRTUAL TABLE %s USING vec0(embedding float[%d] distance_metric=cosine)`, table, dimensions)); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	default:
+		if !strings.Contains(create, fmt.Sprintf("float[%d]", dimensions)) {
+			return fmt.Errorf("%w: slot %s has other dimensions than %d; rebuild the index", ErrDimensionMismatch, slot, dimensions)
+		}
+	}
+	if s.extra == nil {
+		s.extra = map[string]int{}
+	}
+	s.extra[slot] = dimensions
+	return nil
+}
+
+func (s *SQLite) SearchExtra(ctx context.Context, slot string, queryVector []float32, limit int, workspace string) ([]parser.Chunk, error) {
+	dims, ok := s.extra[slot]
+	if !ok {
+		return nil, fmt.Errorf("vectorstore: extra slot %q is not initialised", slot)
+	}
+	if len(queryVector) != dims {
+		return nil, fmt.Errorf("vectorstore: vector length %d, want %d", len(queryVector), dims)
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("vectorstore: limit must be positive")
+	}
+	table := "chunk_vecs_" + slot
+	var rows *sql.Rows
+	var err error
+	if workspace != "" && workspace != "*" {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT m.file_path, m.type, m.content, m.metadata, m.outbound
+			FROM `+table+` v
+			JOIN chunk_meta m ON m.rowid = v.rowid
+			WHERE v.embedding MATCH ? AND k = ?
+			  AND v.rowid IN (SELECT rowid FROM chunk_meta WHERE workspace = ?)
+			ORDER BY distance
+			LIMIT ?`, vecLiteral(queryVector), limit, workspace, limit)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT m.file_path, m.type, m.content, m.metadata, m.outbound
+			FROM (
+				SELECT rowid, distance FROM `+table+`
+				WHERE embedding MATCH ?
+				ORDER BY distance
+				LIMIT ?
+			) v
+			JOIN chunk_meta m ON m.rowid = v.rowid
+			ORDER BY v.distance
+			LIMIT ?`, vecLiteral(queryVector), limit, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return scanChunks(rows)
+}
+
+func (s *SQLite) ExtraVectorsByFile(ctx context.Context, path, slot string) (map[string][]float32, error) {
+	if _, ok := s.extra[slot]; !ok {
+		return nil, fmt.Errorf("vectorstore: extra slot %q is not initialised", slot)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.content, v.embedding
+		FROM chunk_meta AS m JOIN chunk_vecs_`+slot+` AS v ON v.rowid = m.rowid
+		WHERE m.file_path = ?`, slashPath(path))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]float32{}
+	for rows.Next() {
+		var content string
+		var blob []byte
+		if err := rows.Scan(&content, &blob); err != nil {
+			return nil, err
+		}
+		if len(blob)%4 != 0 {
+			return nil, fmt.Errorf("embedding blob length %d is not a multiple of 4", len(blob))
+		}
+		v := make([]float32, len(blob)/4)
+		for i := range v {
+			v[i] = math.Float32frombits(binary.LittleEndian.Uint32(blob[i*4:]))
+		}
+		out[content] = v
+	}
+	return out, rows.Err()
+}
+
+// SearchSummary matches keyword against generated summaries and questions.
+// Keywords shorter than three characters match nothing: the trigram index
+// cannot answer them and a scan would not be worth it.
+func (s *SQLite) SearchSummary(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error) {
+	if strings.TrimSpace(keyword) == "" {
+		return nil, fmt.Errorf("vectorstore: empty keyword")
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("vectorstore: limit must be positive")
+	}
+	if utf8.RuneCountInString(keyword) < 3 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT m.file_path, m.type, m.content, m.metadata, m.outbound
+		FROM summary_fts
+		JOIN chunk_meta m ON m.rowid = summary_fts.rowid
+		WHERE summary_fts MATCH ?
+		  AND (? = '' OR ? = '*' OR m.workspace = ?)
+		ORDER BY summary_fts.rank
+		LIMIT ?`, ftsPhrase(keyword), workspace, workspace, workspace, limit)
 	if err != nil {
 		return nil, err
 	}

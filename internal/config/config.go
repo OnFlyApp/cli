@@ -39,6 +39,17 @@ type Embedder struct {
 	Dimensions     int    `yaml:"dimensions"`
 	APIKey         string `yaml:"api_key"`
 	MaxInputTokens int    `yaml:"max_input_tokens"`
+	// QueryPrefix and DocumentPrefix are prepended to every search query and to
+	// every indexed chunk. Some models are trained with task prompts, for example
+	// EmbeddingGemma: "task: code retrieval | query: " and "title: none | text: ".
+	// Changing DocumentPrefix needs a fresh index.
+	QueryPrefix    string `yaml:"query_prefix"`
+	DocumentPrefix string `yaml:"document_prefix"`
+	// Alt is a second embedder. Every chunk is embedded by both, and search
+	// fuses the two vector lists (search.alt_weight). Only the provider,
+	// endpoint, model, dimensions, api_key, prefixes and max_input_tokens of
+	// Alt are read. Needs a fresh index when added.
+	Alt *Embedder `yaml:"alt"`
 }
 
 type Reranker struct {
@@ -78,6 +89,28 @@ type Search struct {
 	// call or are called by other hits. Both are off at 0.
 	UsageWeight float64 `yaml:"usage_weight"`
 	GraphWeight float64 `yaml:"graph_weight"`
+	// SummaryWeight, AltWeight and SummaryWordWeight scale the summary-vector
+	// list (indexer.summary_vector), the second-embedder list (embedder.alt) and
+	// the summary keyword list. Unset takes the default; 0 turns the list off.
+	// SectionWeight multiplies the score of documentation sections: below 1
+	// demotes docs against code, above 1 promotes them. Unset or 1 is neutral.
+	SectionWeight     *float64 `yaml:"section_weight"`
+	SummaryWeight     *float64 `yaml:"summary_weight"`
+	AltWeight         *float64 `yaml:"alt_weight"`
+	SummaryWordWeight *float64 `yaml:"summary_word_weight"`
+}
+
+// ExtraSlots names the extra vector slots this configuration uses, with their
+// dimensions: "summary" for indexer.summary_vector and "alt" for embedder.alt.
+func (c Config) ExtraSlots() map[string]int {
+	out := map[string]int{}
+	if c.Indexer.SummaryVector && c.Indexer.Summaries.Provider != "" {
+		out["summary"] = c.Embedder.Dimensions
+	}
+	if c.Embedder.Alt != nil {
+		out["alt"] = c.Embedder.Alt.Dimensions
+	}
+	return out
 }
 
 // LLM names a chat model used for a side task (index summaries, query expansion).
@@ -103,7 +136,7 @@ func (r Reranker) Timeout() time.Duration {
 	if r.TimeoutMS > 0 {
 		return time.Duration(r.TimeoutMS) * time.Millisecond
 	}
-	if r.Provider == "ollama" {
+	if r.Provider == "ollama" || r.Provider == "ollama-score" {
 		return 30 * time.Second
 	}
 	return 0
@@ -124,6 +157,9 @@ type Indexer struct {
 	// Summaries has a chat model write a one-sentence description of each named
 	// chunk; it is embedded and searched with the code. Off when provider is empty.
 	Summaries Summaries `yaml:"summaries"`
+	// SummaryVector embeds each chunk's summary (and questions) as a second
+	// vector, searched beside the code vector. Needs summaries; fresh index.
+	SummaryVector bool `yaml:"summary_vector"`
 	// EmbedNeighbours adds the names of the other symbols in the same file to
 	// each embedded chunk, so a chunk carries a little of its surroundings.
 	EmbedNeighbours bool `yaml:"embed_neighbours"`
@@ -138,6 +174,12 @@ type Summaries struct {
 	// Batch is how many chunks of one file go in a single model call; 0 or 1
 	// means one call per chunk.
 	Batch int `yaml:"batch"`
+	// Questions asks for this many search-style questions per chunk besides the
+	// summary (0 to 5); they are embedded with it. It disables batching.
+	Questions int `yaml:"questions"`
+	// Cache is a JSON-lines file of model answers keyed by chunk text, reused by
+	// later indexes. Empty means .onfly/summaries.jsonl; "none" turns it off.
+	Cache string `yaml:"cache"`
 }
 
 type ParserConfig struct {
@@ -352,6 +394,12 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Embedder.APIKey != "" {
 		out.Embedder.APIKey = child.Embedder.APIKey
 	}
+	if child.Embedder.QueryPrefix != "" {
+		out.Embedder.QueryPrefix = child.Embedder.QueryPrefix
+	}
+	if child.Embedder.DocumentPrefix != "" {
+		out.Embedder.DocumentPrefix = child.Embedder.DocumentPrefix
+	}
 	if child.Embedder.MaxInputTokens != 0 {
 		out.Embedder.MaxInputTokens = child.Embedder.MaxInputTokens
 	}
@@ -373,6 +421,24 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Server.UsageFile != "" {
 		out.Server.UsageFile = child.Server.UsageFile
 	}
+	if child.Search.SectionWeight != nil {
+		out.Search.SectionWeight = child.Search.SectionWeight
+	}
+	if child.Search.SummaryWeight != nil {
+		out.Search.SummaryWeight = child.Search.SummaryWeight
+	}
+	if child.Search.AltWeight != nil {
+		out.Search.AltWeight = child.Search.AltWeight
+	}
+	if child.Search.SummaryWordWeight != nil {
+		out.Search.SummaryWordWeight = child.Search.SummaryWordWeight
+	}
+	if child.Indexer.SummaryVector {
+		out.Indexer.SummaryVector = true
+	}
+	if child.Embedder.Alt != nil {
+		out.Embedder.Alt = child.Embedder.Alt
+	}
 	if child.Search.UsageWeight != 0 {
 		out.Search.UsageWeight = child.Search.UsageWeight
 	}
@@ -384,6 +450,12 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Indexer.Summaries.Files {
 		out.Indexer.Summaries.Files = true
+	}
+	if child.Indexer.Summaries.Questions != 0 {
+		out.Indexer.Summaries.Questions = child.Indexer.Summaries.Questions
+	}
+	if child.Indexer.Summaries.Cache != "" {
+		out.Indexer.Summaries.Cache = child.Indexer.Summaries.Cache
 	}
 	if child.Indexer.Summaries.Batch != 0 {
 		out.Indexer.Summaries.Batch = child.Indexer.Summaries.Batch
@@ -566,6 +638,15 @@ func expand(cfg *Config) error {
 	if err != nil {
 		return err
 	}
+	if a := cfg.Embedder.Alt; a != nil {
+		alt := *a
+		for _, f := range []*string{&alt.Endpoint, &alt.APIKey, &alt.Model} {
+			if *f, err = expandOne(*f); err != nil {
+				return err
+			}
+		}
+		cfg.Embedder.Alt = &alt
+	}
 	cfg.Reranker.Endpoint, err = expandOne(cfg.Reranker.Endpoint)
 	if err != nil {
 		return err
@@ -644,9 +725,9 @@ func resolvePath(root, p string) string {
 
 func (c Config) validate() error {
 	switch c.Reranker.Provider {
-	case "", "voyage", "cohere", "jina", "ollama":
+	case "", "voyage", "cohere", "jina", "ollama", "ollama-score":
 	default:
-		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, jina, or ollama)", c.Reranker.Provider)
+		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, jina, ollama, or ollama-score)", c.Reranker.Provider)
 	}
 	if strings.TrimSpace(c.Embedder.Model) == "" {
 		return fmt.Errorf("embedder.model is required")
@@ -689,8 +770,25 @@ func (c Config) validate() error {
 			return fmt.Errorf("%s.model is required when a provider is set", name)
 		}
 	}
-	if c.Search.UsageWeight < 0 || c.Search.GraphWeight < 0 || c.Indexer.Summaries.Batch < 0 || c.Indexer.Summaries.Batch > 20 {
-		return fmt.Errorf("search.usage_weight and search.graph_weight must be >= 0, indexer.summaries.batch from 0 to 20")
+	if c.Search.UsageWeight < 0 || c.Search.GraphWeight < 0 || c.Indexer.Summaries.Batch < 0 || c.Indexer.Summaries.Batch > 20 ||
+		c.Indexer.Summaries.Questions < 0 || c.Indexer.Summaries.Questions > 5 {
+		return fmt.Errorf("search.usage_weight and search.graph_weight must be >= 0, indexer.summaries.batch from 0 to 20, indexer.summaries.questions from 0 to 5")
+	}
+	for name, w := range map[string]*float64{"summary_weight": c.Search.SummaryWeight, "alt_weight": c.Search.AltWeight, "summary_word_weight": c.Search.SummaryWordWeight, "section_weight": c.Search.SectionWeight} {
+		if w != nil && *w < 0 {
+			return fmt.Errorf("search.%s must be >= 0", name)
+		}
+	}
+	if a := c.Embedder.Alt; a != nil {
+		if a.Provider == "" || strings.TrimSpace(a.Model) == "" || a.Dimensions < 1 || a.Dimensions > 8192 {
+			return fmt.Errorf("embedder.alt needs provider, model and dimensions (1 to 8192)")
+		}
+		if a.Alt != nil {
+			return fmt.Errorf("embedder.alt cannot have its own alt")
+		}
+	}
+	if c.Indexer.SummaryVector && c.Indexer.Summaries.Provider == "" {
+		return fmt.Errorf("indexer.summary_vector needs indexer.summaries")
 	}
 	if c.Reranker.TimeoutMS < 0 {
 		return fmt.Errorf("reranker.timeout_ms must be >= 0")

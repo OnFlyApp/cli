@@ -143,3 +143,50 @@ func TestOllamaRerankerErrors(t *testing.T) {
 		t.Fatal("an answer with no ranking must be an error so the fused order is kept")
 	}
 }
+
+func TestOllamaScoreRerankerOrdersByYesProbability(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Prompt   string `json:"prompt"`
+			Raw      bool   `json:"raw"`
+			Logprobs bool   `json:"logprobs"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&in)
+		if r.URL.Path != "/api/generate" || !in.Raw || !in.Logprobs || !strings.Contains(in.Prompt, "<Query>: q") {
+			t.Errorf("path %s body %+v", r.URL.Path, in)
+		}
+		yes, no := -0.1, -2.5 // "good" documents
+		switch {
+		case strings.Contains(in.Prompt, "<Document>: bad"):
+			yes, no = -3.0, -0.05
+		case strings.Contains(in.Prompt, "<Document>: mid"):
+			yes, no = -0.7, -0.7
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"logprobs": []map[string]any{{"top_logprobs": []map[string]any{
+			{"token": "yes", "logprob": yes}, {"token": "no", "logprob": no}, {"token": ",", "logprob": -9},
+		}}}})
+	}))
+	defer srv.Close()
+	rr, err := NewReranker(config.Reranker{Provider: "ollama-score", Endpoint: srv.URL, Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := rr.Rerank(context.Background(), "q", []string{"bad", "good", "mid"}, 2)
+	if err != nil || len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := NewReranker(config.Reranker{Provider: "ollama-score"}); err == nil {
+		t.Fatal("a model is required")
+	}
+}
+
+func TestOllamaScoreRerankerNeedsLogprobs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"response": "yes"})
+	}))
+	defer srv.Close()
+	rr, _ := NewReranker(config.Reranker{Provider: "ollama-score", Endpoint: srv.URL, Model: "m"})
+	if _, err := rr.Rerank(context.Background(), "q", []string{"a"}, 1); err == nil {
+		t.Fatal("a server without logprobs must be an error so the fused order is kept")
+	}
+}

@@ -52,6 +52,7 @@ func TestPostgresStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	runStoreContract(t, st)
+	runExtraContract(t, st)
 }
 
 func TestPostgresOptimizeKeepsRows(t *testing.T) {

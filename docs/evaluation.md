@@ -25,8 +25,13 @@ A case hits at rank r when a returned chunk has a path ending in `expect.file` a
 
 ```
 onfly eval [--cases FILE[,FILE...]] [--k 10] [--split even|odd] [--file-level] [--min-recall 0] [--baseline FILE [--update-baseline]] [--json]
-onfly eval tune [--cases FILE[,FILE...]] [--k 10] [--file-level] [--top 5]
+onfly eval tune [--cases FILE[,FILE...]] [--k 10] [--file-level] [--top 5] [--learn]
+onfly eval mine [--usage FILE] [--out FILE]
 ```
+
+`--explain` lists every case whose expected chunk was not first, with the top three results, and counts what took rank 1: another file's code, another symbol of the right file, a docs section over code, or code over a docs section. Read it before changing anything: it says which kind of mistake dominates.
+
+`--judge MODEL` asks a local chat model (Ollama; `--judge-endpoint` to change the URL) whether any result ranked above the expected one also answers the question, and prints judged recall and MRR beside the strict ones. A single expected chunk understates quality, because a different chunk can be a correct answer. The judge is a model, so treat its numbers as an upper bound and compare them only with each other.
 
 `--cases` takes several files, repeated or comma-separated; they are scored as one list. `--split even` or `odd` scores every other case, the halves `tune` fits and checks on. `--file-level` counts a hit when the file matches, whatever the symbol, which is the fair measure when a file holds near-duplicate chunks.
 
@@ -59,6 +64,8 @@ Each recorded question becomes a case whose expected hit is the chunk the assist
 ## Tuning
 
 `onfly eval tune` finds fusion weights for your code. It retrieves every case once, then tries a grid of `semantic_weight`, `keyword_weight`, `word_weight`, `field_weight` and `rrf_k` by re-fusing the saved lists, so the whole grid takes seconds after the retrieval. It picks the best setting by MRR on the even-numbered cases, scores that setting and your current one on the odd-numbered cases, and prints the YAML to adopt only when the odd half gains at least 0.01 MRR. Use at least a few hundred cases; with 20 the check half is noise.
+
+`--learn` replaces the fixed grid with a coordinate ascent over every weight, including the summary, second-embedder, graph and docs-section ones (`search.section_weight`), 4 rounds at most, and reports the same fit and check halves. It adopts nothing by itself: it prints the YAML only when the check half gains at least 0.01 MRR.
 
 Large case lists can be generated: ask a local model for one question per sampled symbol, drop questions that contain the symbol name, and keep the symbol as the expectation. Such cases flatter retrieval, because the question was written from the code, so keep your hand-written cases as a separate file and look at both.
 
@@ -95,3 +102,38 @@ Second round, on an index with summaries (738 to 845 chunks, same cases):
 | One call per chunk + `graph_weight: 0.25` | 0.60 | 0.92 | 0.95 | 0.731 |
 
 With summaries on, `onfly eval tune` found no setting that beat the defaults by 0.01 MRR on the check half.
+
+## Third round: prompts, second embedder, summary variants
+
+Same 573 cases, embeddinggemma-2 with `qwen2.5-coder:7b` summaries, fresh index each time (the summary cache made them take one to two minutes), symbol-level:
+
+| Change | R@1 | R@5 | R@10 | MRR | human MRR |
+| --- | --- | --- | --- | --- | --- |
+| Baseline (no prompts, one embedder) | 0.698 | 0.935 | 0.969 | 0.797 | 0.705 |
+| Summary keyword list switched off | 0.689 | 0.932 | 0.970 | 0.794 | 0.699 |
+| Code-retrieval prompts | 0.712 | 0.934 | 0.963 | 0.810 | 0.774 |
+| "Search result" prompt | 0.703 | 0.949 | 0.972 | 0.806 | 0.711 |
+| Second embedder (qwen3-embedding:0.6b) | 0.716 | 0.928 | 0.972 | 0.809 | 0.737 |
+| Prompts + second embedder | **0.726** | **0.941** | 0.974 | **0.816** | 0.767 |
+| Prompts + second embedder with a Qwen instruct prefix | 0.714 | 0.939 | 0.974 | 0.811 | 0.759 |
+| Summary vector (`summary_vector`) | 0.702 | 0.908 | 0.955 | 0.789 | 0.717 |
+| Three questions per chunk (`questions: 3`) | 0.686 | 0.921 | 0.967 | 0.788 | 0.644 |
+
+The `ollama-score` reranker (Qwen3-Reranker-4B, 20 candidates) was measured on the 45 hand-written cases only, because it took 18 s per search: MRR 0.768 against 0.767 without it, R@3 0.89 against 0.82, R@1 0.62 against 0.67. It reorders the top three but does not improve the first hit, and costs more than the rest of the pipeline put together, so it stays off.
+
+`onfly eval tune --learn` on the best row found no weights that beat the defaults on the check half (-0.003 MRR). With `--explain`, 157 of 573 cases were not first: 85 behind another file's code, 33 behind another symbol of the right file, 23 behind a docs section, 16 the other way round. With `--judge qwen2.5-coder:7b`, 130 of those had a better-ranked result judged to answer the question, which lifts MRR from 0.812 to 0.947; most of the "misses" are valid answers that differ from the single expected chunk.
+
+## Embedding models
+
+Six models, summaries off, search defaults, same cases (index time from scratch):
+
+| Model | Dims | Index | R@1 | R@5 | R@10 | MRR | human MRR |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| embeddinggemma-2 | 768 | 32 s | 0.618 | 0.918 | 0.955 | **0.745** | 0.704 |
+| embeddinggemma | 768 | 21 s | 0.590 | 0.894 | 0.946 | 0.716 | 0.603 |
+| qwen3-embedding:0.6b | 1024 | 49 s | 0.511 | 0.859 | 0.932 | 0.658 | 0.520 |
+| bge-m3 | 1024 | 38 s | 0.518 | 0.834 | 0.899 | 0.649 | 0.680 |
+| nomic-embed-text | 768 | 20 s | 0.361 | 0.651 | 0.759 | 0.484 | 0.410 |
+| mxbai-embed-large | 1024 | 34 s | 0.251 | 0.475 | 0.546 | 0.345 | 0.332 |
+
+The model matters more than anything else in the pipeline short of summaries. Run your own comparison with a config per model and `onfly eval`.

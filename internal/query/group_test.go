@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
 func chunkIn(file, name, content string) parser.Chunk {
@@ -146,5 +147,47 @@ func TestUsedChunksOrdersByCount(t *testing.T) {
 	}
 	if usedChunks(nil, []parser.Chunk{a}) != nil {
 		t.Fatal("no counts, no list")
+	}
+}
+
+func TestSummaryKeywordListFindsChunkByItsSummary(t *testing.T) {
+	target := parser.Chunk{FilePath: "retry.go", Type: "function", Content: "func backoffLoop() { sleep }",
+		Metadata: map[string]string{"name": "backoffLoop", "summary": "Pauses between attempts to contact the server."}}
+	other := chunkIn("x.go", "other", "func other() {}")
+	s := searcherWith(t, other, target)
+	got, _ := s.Search(context.Background(), "pauses between attempts", 5, "")
+	for _, c := range got {
+		if c.FilePath == "retry.go" && got[0].FilePath == "retry.go" {
+			t.Skip("found without the summary index")
+		}
+	}
+	s.SummaryKeyword = true
+	got, err := s.Search(context.Background(), "pauses between attempts", 5, "")
+	if err != nil || len(got) == 0 || got[0].FilePath != "retry.go" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestSummaryVectorListUsesItsSlot(t *testing.T) {
+	// Both chunks have the same code vector (searcherWith); only the summary
+	// slot tells them apart, and it points at the second one.
+	a := chunkIn("a.go", "alpha", "func alpha() { widget }")
+	b := chunkIn("b.go", "beta", "func beta() { widget }")
+	s := searcherWith(t, a, b)
+	if err := s.Store.InitExtra(context.Background(), "summary", 4); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.CommitFile(context.Background(), "b.go", "h", []vectorstore.EmbeddedChunk{
+		{Chunk: b, Vector: []float32{1, 0, 0, 0}, Extra: map[string][]float32{"summary": {1, 0, 0, 0}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	zero := 0.0
+	s.FieldWeight, s.WordWeight = &zero, &zero
+	base, _ := s.Search(context.Background(), "widget", 5, "")
+	s.SummaryVector = true
+	got, err := s.Search(context.Background(), "widget", 5, "")
+	if err != nil || len(got) != 2 || got[0].FilePath != "b.go" {
+		t.Fatalf("the chunk with a summary vector must lead: base=%v got=%v err=%v", names(base), names(got), err)
 	}
 }

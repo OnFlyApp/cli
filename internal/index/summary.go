@@ -26,20 +26,44 @@ func summarizable(c parser.Chunk) bool {
 	return c.Type == fileChunkType || len([]rune(c.Content)) >= summaryMinRunes
 }
 
-// addSummaries sets Metadata["summary"] on the chunks of one file. A chunk
-// whose content the file already had keeps its stored summary, so a reindex
-// calls the model only for new or changed chunks. It returns prev without the
-// vectors of chunks that gained a new summary, so those are embedded again.
-// A model failure stops summarising this file and leaves the rest as they are:
-// indexing never fails because the summary model is down.
+// generated is what the model wrote for one chunk.
+type generated struct {
+	Summary   string
+	Questions []string
+}
+
+func (g generated) empty() bool { return g.Summary == "" && len(g.Questions) == 0 }
+
+// apply stores g on the chunk's metadata.
+func (g generated) apply(c *parser.Chunk) {
+	if g.Summary != "" {
+		c.Metadata["summary"] = g.Summary
+	}
+	if len(g.Questions) > 0 {
+		c.Metadata["questions"] = strings.Join(g.Questions, " | ")
+	}
+}
+
+// addSummaries sets Metadata["summary"] (and ["questions"]) on the chunks of
+// one file. A chunk is answered, in order, from what the file already stored,
+// from the summary cache, and only then from the model, so a reindex or an
+// embedder change calls the model only for chunks it has never seen. It
+// returns prev without the vectors of chunks that gained text, so those are
+// embedded again. A model failure stops summarising this file and leaves the
+// rest as they are: indexing never fails because the summary model is down.
 func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.Chunk, prev map[string][]float32) map[string][]float32 {
-	known := map[string]string{}
+	wantQ := s.cfg.Indexer.Summaries.Questions
+	stored := map[string]generated{}
 	if old, err := s.store.ChunksByFiles(ctx, []string{rel}); err != nil {
 		s.logger.Warn("summaries: stored chunks", "path", rel, "err", err)
 	} else {
 		for _, o := range old {
-			if sum := o.Chunk.Metadata["summary"]; sum != "" {
-				known[o.Chunk.Content] = sum
+			g := generated{Summary: o.Chunk.Metadata["summary"]}
+			if q := o.Chunk.Metadata["questions"]; q != "" {
+				g.Questions = strings.Split(q, " | ")
+			}
+			if g.Summary != "" && (wantQ == 0 || len(g.Questions) > 0) {
+				stored[o.Chunk.Content] = g
 			}
 		}
 	}
@@ -47,25 +71,38 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 	if timeout <= 0 {
 		timeout = defaultSummaryLimit
 	}
+	model := s.cfg.Indexer.Summaries.Model
+	key := func(c parser.Chunk) string { return summaryKey(model, wantQ, c) }
 	var todo []int
 	for i := range chunks {
 		c := &chunks[i]
 		if !summarizable(*c) {
 			continue
 		}
-		if sum, ok := known[c.Content]; ok {
-			c.Metadata["summary"] = sum
+		if g, ok := stored[c.Content]; ok {
+			g.apply(c)
+			s.sums.put(key(*c), g) // an index made before the cache existed seeds it
+			continue
+		}
+		if g, ok := s.sums.get(key(*c)); ok {
+			g.apply(c)
+			delete(prev, c.Content)
 			continue
 		}
 		todo = append(todo, i)
 	}
 	batch := max(s.cfg.Indexer.Summaries.Batch, 1)
+	if wantQ > 0 {
+		batch = 1 // questions need the model's full attention on one chunk
+	}
 	failed := false
-	set := func(i int, out string) {
-		if sum := cleanSummary(out); sum != "" {
-			chunks[i].Metadata["summary"] = sum
-			delete(prev, chunks[i].Content)
+	set := func(i int, g generated) {
+		if g.empty() {
+			return
 		}
+		g.apply(&chunks[i])
+		s.sums.put(key(chunks[i]), g)
+		delete(prev, chunks[i].Content)
 	}
 	ask := func(prompt string) (string, bool) {
 		cctx, cancel := context.WithTimeout(ctx, timeout)
@@ -93,7 +130,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 			}
 			if got := parseBatch(out, len(group)); got != nil {
 				for j, i := range group {
-					set(i, got[j])
+					set(i, generated{Summary: cleanSummary(got[j])})
 				}
 				continue
 			}
@@ -103,15 +140,43 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 			if failed {
 				break
 			}
-			if out, ok := ask(summaryPrompt(chunks[i])); ok {
-				set(i, out)
+			if out, ok := ask(summaryPrompt(chunks[i], wantQ)); ok {
+				set(i, parseGenerated(out, wantQ))
 			}
 		}
 	}
 	return prev
 }
 
-func summaryPrompt(c parser.Chunk) string {
+// parseGenerated reads one answer: JSON with "summary" and "questions" when
+// questions were asked for, otherwise (or when the model ignored the format)
+// the first line of the text is the summary.
+func parseGenerated(out string, wantQ int) generated {
+	if wantQ > 0 {
+		text := out
+		if i := strings.Index(text, "{"); i >= 0 {
+			if j := strings.LastIndex(text, "}"); j > i {
+				text = text[i : j+1]
+			}
+		}
+		var obj struct {
+			Summary   string   `json:"summary"`
+			Questions []string `json:"questions"`
+		}
+		if json.Unmarshal([]byte(text), &obj) == nil && strings.TrimSpace(obj.Summary) != "" {
+			g := generated{Summary: cleanSummary(obj.Summary)}
+			for _, q := range obj.Questions {
+				if q = strings.TrimSpace(q); q != "" && !strings.Contains(q, " | ") && len(g.Questions) < wantQ {
+					g.Questions = append(g.Questions, q)
+				}
+			}
+			return g
+		}
+	}
+	return generated{Summary: cleanSummary(out)}
+}
+
+func summaryPrompt(c parser.Chunk, questions int) string {
 	code := c.Content
 	if r := []rune(code); len(r) > summaryMaxInput {
 		code = string(r[:summaryMaxInput])
@@ -119,7 +184,13 @@ func summaryPrompt(c parser.Chunk) string {
 	var b strings.Builder
 	b.WriteString("Describe in one plain sentence (at most 30 words) what this code does or documents, ")
 	b.WriteString("in everyday words a developer might type into a search box. Do not quote the code or repeat its name. ")
-	b.WriteString("Answer with the sentence only.\n\n")
+	if questions > 0 {
+		fmt.Fprintf(&b, "Then write %d different short questions a developer might type into a search box that this code answers, "+
+			"in their own words, without the code's identifiers. ", questions)
+		b.WriteString("Answer with JSON only: {\"summary\": \"...\", \"questions\": [\"...\"]}\n\n")
+	} else {
+		b.WriteString("Answer with the sentence only.\n\n")
+	}
 	b.WriteString("File: " + c.FilePath + "\n")
 	if n := c.Metadata["name"]; n != "" {
 		b.WriteString("Name: " + n + "\n")

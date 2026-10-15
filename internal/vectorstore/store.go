@@ -11,6 +11,9 @@ type EmbeddedChunk struct {
 	Chunk     parser.Chunk
 	Vector    []float32
 	Workspace string
+	// Extra holds additional vectors by slot name (see InitExtra). A slot may
+	// be absent for a chunk; the store keeps only the ones given.
+	Extra map[string][]float32
 }
 
 var (
@@ -43,6 +46,17 @@ type Store interface {
 	FileHashes(ctx context.Context) (map[string]string, error)
 	// VectorsByFile maps chunk content to its stored vector for one file.
 	VectorsByFile(ctx context.Context, path string) (map[string][]float32, error)
+	// InitExtra makes the store keep an additional vector per chunk under slot
+	// (lowercase letters only, for example "summary" or "alt"). It is safe to
+	// call on every start; a slot that exists with other dimensions is an error.
+	InitExtra(ctx context.Context, slot string, dimensions int) error
+	// SearchExtra is SearchSemantic over a slot's vectors.
+	SearchExtra(ctx context.Context, slot string, queryVector []float32, limit int, workspace string) ([]parser.Chunk, error)
+	// ExtraVectorsByFile maps chunk content to its stored vector in slot for one file.
+	ExtraVectorsByFile(ctx context.Context, path, slot string) (map[string][]float32, error)
+	// SearchSummary is a case-insensitive substring match over the chunks'
+	// generated summary and questions (metadata "summary" and "questions").
+	SearchSummary(ctx context.Context, keyword string, limit int, workspace string) ([]parser.Chunk, error)
 	Generation(ctx context.Context) (int64, error)
 	Optimize(ctx context.Context) error
 	Close() error
