@@ -20,6 +20,7 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | `onfly eval tune` | Grid-search the fusion weights on half the cases and check them on the other half. `--learn` fits every weight by coordinate ascent instead. |
 | `onfly eval mine` | Turn the recorded usage file (`server.usage_file`) into eval cases. |
 | `onfly stats` | Print file and chunk counts, with breakdowns by chunk type, workspace, and extension. Prints `hint:` lines when data or generated files (`.json`, `.lock`, `.svg` and similar) take 15% or more of the indexed text, when the embedder reads fewer tokens than `embedder.max_input_tokens`, and when chunks are longer than about 2000 tokens. |
+| `onfly guide` | Print the tool-routing guidance sent to MCP clients. `--write` puts it into `CLAUDE.md` (or `--file PATH`) between `<!-- onfly:start -->` markers; run again to replace it. |
 | `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |
 | `onfly ext install go` | Download the published Go parser, check SHA-256, and add it to the config. |

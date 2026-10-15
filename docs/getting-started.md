@@ -112,6 +112,8 @@ onfly mcp-config claude-code > .mcp.json
 
 Run without the redirect to see the entry, and which file it belongs in. Use `cursor` or `vscode` instead of `claude-code` for those editors; the output goes in `.cursor/mcp.json` and `.vscode/mcp.json`. Restart the IDE. Ask it something about your code, such as "how is authentication handled?", and watch it call the `search` tool.
 
+Run `onfly guide --write` once to add a short "when to use which tool" block to `CLAUDE.md`. The server also sends it as instructions; the file copy helps clients that ignore them. Running it again replaces the block and leaves the rest of the file alone.
+
 To keep the index fresh while you work, start the server with `--watch` (add it to `args` in the MCP entry), or set `server.watch: true` in the config.
 
 ## 7. Check your setup

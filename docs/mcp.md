@@ -49,6 +49,8 @@ When `server.trace_file` is set, each tool call appends one JSON object to it (o
 
 When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `get_references`, `get_callees`, `get_impact`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
 
+The server instructions carry a short routing guide (`search` for behavior, `get_component_ast` for a known symbol, `get_impact` and `get_tests` before a change, `get_history` for risk). `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
+
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
 Tool failures are tool results with `isError` set. They are not protocol errors. The model can read the message and try again.
@@ -66,6 +68,7 @@ Finds code by what it does. Embeds `query` once and fuses semantic, keyword, per
 | `workspace` | no | Empty uses the config value. `*` searches every workspace. Any other value matches that workspace. |
 | `type` | no | Keep one chunk type, case-insensitive: `function`, `method`, `struct`, `section` (Markdown), and so on. Use `section` to search docs only, or any code type to leave docs out. |
 | `path` | no | Keep files matching a glob relative to the project root, such as `internal/**` or `docs/**`. An invalid glob is a tool error. |
+| `detail` | no | `auto` (default) keeps the code of the top 3 hits and reduces the rest to their first line (the signature) with `brief: true`; `full` keeps every body; `brief` reduces all. Fetch a brief hit's body with `get_component_ast`. Any other value is a tool error. |
 | `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. `type`, `path` and `changed_since` filter the top 50 candidates of each list, so a narrow filter can return fewer than `limit` hits. A ref starting with `-` is rejected. |
 
 If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights and the recency list come from `search` in [configuration.md](configuration.md#search-fusion).
@@ -120,6 +123,28 @@ Returns `{ "rules", "hits" }`. `hits` are the distinct chunks that call `name`, 
 | `depth` | no |
 | `receiver` | no |
 | `file_path` | no |
+
+### `get_tests`
+
+Finds the tests that mention a symbol. Tests are usually not indexed, so this scans the project's test files directly: a file counts as a test file by name (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.*` and `*.spec.*` for JS and TS, `*Test.php`, `*Test.java`, `*Test.kt`, `*Tests.cs`, `*Tests.swift`, `*_spec.rb`, `*_test.rb`, `*_test.rs`) or by living under a `tests`, `test`, `__tests__` or `spec` directory. Files ignored by `.gitignore` or `indexer.exclude` are skipped. Rust unit tests inside `src/` files are not found.
+
+Returns `{ "tests", "truncated" }`. Each test is `{file_path, line, enclosing, snippet}`: the matching line, and the nearest test declaration above it when one is recognised (`func Test`, `def test_`, `it(`, `describe(`, `#[test]`, `[Fact]`, `@Test` and similar). The match is a whole word, not a call, so a common name such as `Run` also finds unrelated text. At most 20 hits are returned and `truncated` is true when more existed or 2000 test files were scanned.
+
+| Argument | Required | Notes |
+| --- | --- | --- |
+| `name` | yes | |
+| `path` | no | Only scan test files matching this glob. |
+
+### `get_history`
+
+Returns the commits that touched a symbol's lines, newest first: `{ "file_path", "start_line", "end_line", "scope", "commits" }`, with `hash`, `author`, `date` and `subject` per commit. Uses `git log -L`, so it follows the lines, not the file. A definition without a line range falls back to the file's log and `scope` is `file`. Outside a git repository, or for a file that is not committed, it is a tool error.
+
+| Argument | Required | Notes |
+| --- | --- | --- |
+| `name` | yes | |
+| `receiver` | no | Picks one of several same-name definitions. |
+| `file_path` | no | Same. |
+| `limit` | no | 1 to 20, default 5. |
 
 ### `get_file_outline`
 

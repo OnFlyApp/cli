@@ -130,7 +130,7 @@ Tests are excluded from the index on purpose (they crowd out code), so "what tes
 - Modify: `internal/mcp/server.go` (register tool)
 
 **Interfaces:**
-- Produces: tool `get_tests` with input `{name string, path string?}` and output `{rules?, tests: [{file_path, line, enclosing, snippet}], truncated bool}`; `func isTestFile(rel string) bool`; `func findTests(root string, filter *ignore.Filter, name string, limit int) ([]testHit, bool, error)`.
+- Produces: tool `get_tests` with input `{name string, path string?}` and output `{rules?, tests: [{file_path, line, enclosing, snippet}], truncated bool}`; `func isTestFile(rel string) bool`; `func findTests(root string, filter *ignore.Filter, name, glob string, limit int) ([]testHit, bool, error)`.
 - Consumes: `SafePath`, `h.filter`, `h.root`, `ignore.Filter` (see `internal/ignore`).
 
 Rules: a file is a test file when its slash path matches one of `*_test.go`, `test_*.py`, `*_test.py`, `*.test.{js,jsx,ts,tsx}`, `*.spec.{js,jsx,ts,tsx}`, `*Test.{php,java,kt}`, `*Tests.{cs,swift,kt,java}`, `*_spec.rb`, `*_test.rb`, `*_test.rs`, or has a directory named `tests`, `test`, `__tests__` or `spec`. A line matches when `name` appears with word boundaries. `enclosing` is the nearest preceding line that looks like a test declaration (`func Test`, `def test_`, `it(`, `test(`, `describe(`, `@Test`, `[Fact]`, `[Test]`, `#[test]`, `fn test_`, `func test`, `public function test`), else empty. Cap 20 hits, stop reading after 2000 files; set `truncated` when either cap hit. Skip files over 1 MiB. Optional `path` is a doublestar glob that limits which test files are scanned.
@@ -155,7 +155,7 @@ func TestFindTestsReportsEnclosingTest(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "a_test.go"), "package a\n\nfunc TestRetry(t *testing.T) {\n\tgot := Retry(3)\n\t_ = got\n}\n")
 	write(t, filepath.Join(dir, "a.go"), "package a\nfunc Retry(n int) int { return n }\n")
-	got, trunc, err := findTests(dir, nil, "Retry", 20)
+	got, trunc, err := findTests(dir, nil, "Retry", "", 20)
 	if err != nil || trunc || len(got) != 1 {
 		t.Fatalf("%+v %v %v", got, trunc, err)
 	}
@@ -167,7 +167,7 @@ func TestFindTestsReportsEnclosingTest(t *testing.T) {
 func TestFindTestsCapsHits(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "a_test.go"), strings.Repeat("x := Run()\n", 50))
-	got, trunc, _ := findTests(dir, nil, "Run", 20)
+	got, trunc, _ := findTests(dir, nil, "Run", "", 20)
 	if len(got) != 20 || !trunc {
 		t.Fatalf("%d %v", len(got), trunc)
 	}
@@ -176,7 +176,7 @@ func TestFindTestsCapsHits(t *testing.T) {
 func TestFindTestsNoMatchIsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "a_test.go"), "package a\n")
-	got, trunc, err := findTests(dir, nil, "Nope", 20)
+	got, trunc, err := findTests(dir, nil, "Nope", "", 20)
 	if err != nil || trunc || len(got) != 0 {
 		t.Fatalf("%+v %v %v", got, trunc, err)
 	}
