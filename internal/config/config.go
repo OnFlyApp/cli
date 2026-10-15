@@ -56,12 +56,9 @@ type Reranker struct {
 type Search struct {
 	SemanticWeight    float64            `yaml:"semantic_weight"`
 	KeywordWeight     float64            `yaml:"keyword_weight"`
-	RecencyWeight     float64            `yaml:"recency_weight"`
-	RecencyDays       int                `yaml:"recency_days"`
 	WordWeight        *float64           `yaml:"word_weight"`
 	FieldWeight       *float64           `yaml:"field_weight"`
 	RRFK              int                `yaml:"rrf_k"`
-	UsageWeight       float64            `yaml:"usage_weight"`
 	SectionWeight     *float64           `yaml:"section_weight"`
 	TypeWeights       map[string]float64 `yaml:"type_weights"`
 	AltWeight         *float64           `yaml:"alt_weight"`
@@ -95,9 +92,6 @@ func (r Reranker) Timeout() time.Duration {
 	if r.TimeoutMS > 0 {
 		return time.Duration(r.TimeoutMS) * time.Millisecond
 	}
-	if r.Provider == "ollama" || r.Provider == "ollama-score" || r.Provider == "openai-score" {
-		return 30 * time.Second
-	}
 	return 0
 }
 
@@ -115,8 +109,6 @@ type Indexer struct {
 
 type Summaries struct {
 	LLM         `yaml:",inline"`
-	Files       bool   `yaml:"files"`
-	Context     bool   `yaml:"context"`
 	Concurrency int    `yaml:"concurrency"`
 	Cache       string `yaml:"cache"`
 }
@@ -385,17 +377,8 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Embedder.Alt != nil {
 		out.Embedder.Alt = child.Embedder.Alt
 	}
-	if child.Search.UsageWeight != 0 {
-		out.Search.UsageWeight = child.Search.UsageWeight
-	}
-	if child.Indexer.Summaries.Files {
-		out.Indexer.Summaries.Files = true
-	}
 	if child.Indexer.Summaries.Concurrency != 0 {
 		out.Indexer.Summaries.Concurrency = child.Indexer.Summaries.Concurrency
-	}
-	if child.Indexer.Summaries.Context {
-		out.Indexer.Summaries.Context = true
 	}
 	if child.Indexer.Summaries.Cache != "" {
 		out.Indexer.Summaries.Cache = child.Indexer.Summaries.Cache
@@ -434,12 +417,6 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Search.KeywordWeight != 0 {
 		out.Search.KeywordWeight = child.Search.KeywordWeight
-	}
-	if child.Search.RecencyWeight != 0 {
-		out.Search.RecencyWeight = child.Search.RecencyWeight
-	}
-	if child.Search.RecencyDays != 0 {
-		out.Search.RecencyDays = child.Search.RecencyDays
 	}
 	if child.Search.WordWeight != nil {
 		out.Search.WordWeight = child.Search.WordWeight
@@ -665,9 +642,9 @@ func resolvePath(root, p string) string {
 
 func (c Config) validate() error {
 	switch c.Reranker.Provider {
-	case "", "voyage", "cohere", "jina", "ollama", "ollama-score", "openai-score":
+	case "", "voyage", "cohere", "jina":
 	default:
-		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, jina, ollama, ollama-score, or openai-score)", c.Reranker.Provider)
+		return fmt.Errorf("reranker.provider %q is not available (voyage, cohere, or jina)", c.Reranker.Provider)
 	}
 	if strings.TrimSpace(c.Embedder.Model) == "" {
 		return fmt.Errorf("embedder.model is required")
@@ -690,8 +667,8 @@ func (c Config) validate() error {
 	if c.Indexer.ParseTimeoutMS < 0 {
 		return fmt.Errorf("indexer.parse_timeout_ms must be >= 0")
 	}
-	if w := c.Search; w.SemanticWeight < 0 || w.KeywordWeight < 0 || w.RecencyWeight < 0 || w.RecencyDays < 0 {
-		return fmt.Errorf("search weights and recency_days must be >= 0")
+	if w := c.Search; w.SemanticWeight < 0 || w.KeywordWeight < 0 {
+		return fmt.Errorf("search weights must be >= 0")
 	}
 	if w := c.Search; (w.WordWeight != nil && *w.WordWeight < 0) || (w.FieldWeight != nil && *w.FieldWeight < 0) || w.RRFK < 0 {
 		return fmt.Errorf("search.word_weight, search.field_weight and search.rrf_k must be >= 0")
@@ -707,8 +684,8 @@ func (c Config) validate() error {
 			return fmt.Errorf("%s.model is required when a provider is set", name)
 		}
 	}
-	if c.Search.UsageWeight < 0 || c.Indexer.Summaries.Concurrency < 0 || c.Indexer.Summaries.Concurrency > 64 {
-		return fmt.Errorf("search.usage_weight must be >= 0 and indexer.summaries.concurrency from 0 to 64")
+	if c.Indexer.Summaries.Concurrency < 0 || c.Indexer.Summaries.Concurrency > 64 {
+		return fmt.Errorf("indexer.summaries.concurrency must be from 0 to 64")
 	}
 	for typ, w := range c.Search.TypeWeights {
 		if w < 0 {

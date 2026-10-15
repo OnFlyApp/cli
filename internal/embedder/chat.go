@@ -47,7 +47,7 @@ func (c *ollamaChat) Complete(ctx context.Context, prompt string) (string, error
 		"messages": []map[string]string{{"role": "user", "content": prompt}},
 		"stream":   false,
 		"think":    false,
-		"options":  map[string]any{"temperature": 0, "num_ctx": ollamaNumCtx},
+		"options":  map[string]any{"temperature": 0, "num_ctx": ollamaChatNumCtx},
 	})
 	if err != nil {
 		return "", err
@@ -135,3 +135,5 @@ func (c *openaiChat) Complete(ctx context.Context, prompt string) (string, error
 	}
 	return out, nil
 }
+
+const ollamaChatNumCtx = 8192

@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"github.com/axitdev/onfly/internal/config"
 )
@@ -32,14 +29,6 @@ var rerankAPIs = map[string]rerankAPI{
 func NewReranker(cfg config.Reranker) (Reranker, error) {
 	if cfg.Provider == "" {
 		return nil, nil
-	}
-	switch cfg.Provider {
-	case "ollama":
-		return newOllamaReranker(cfg)
-	case "ollama-score":
-		return newOllamaScoreReranker(cfg)
-	case "openai-score":
-		return newOpenAIScoreReranker(cfg)
 	}
 	api, ok := rerankAPIs[cfg.Provider]
 	if !ok {
@@ -102,100 +91,4 @@ func (r *restReranker) Rerank(ctx context.Context, query string, docs []string, 
 
 type rerankHit struct {
 	Index int `json:"index"`
-}
-
-type ollamaReranker struct {
-	url, model string
-	client     *http.Client
-}
-
-const (
-	ollamaSnippetRunes = 500
-	ollamaNumCtx       = 8192
-)
-
-func newOllamaReranker(cfg config.Reranker) (Reranker, error) {
-	if cfg.Model == "" {
-		return nil, fmt.Errorf("reranker.model is required (a chat model, for example qwen2.5-coder:7b)")
-	}
-	endpoint := cfg.Endpoint
-	if endpoint == "" {
-		endpoint = "http://localhost:11434"
-	}
-	return &ollamaReranker{url: joinURL(endpoint, "/api/chat"), model: cfg.Model, client: newHTTP()}, nil
-}
-
-func (r *ollamaReranker) Rerank(ctx context.Context, query string, docs []string, topN int) ([]int, error) {
-	var b strings.Builder
-	b.WriteString("You rank code search results for a developer's query.\n")
-	b.WriteString("Query: " + query + "\n\nCandidates:\n")
-	for i, d := range docs {
-		if rs := []rune(d); len(rs) > ollamaSnippetRunes {
-			d = string(rs[:ollamaSnippetRunes]) + " ..."
-		}
-		fmt.Fprintf(&b, "[%d]\n%s\n\n", i+1, d)
-	}
-	fmt.Fprintf(&b, "List the candidate numbers from most to least relevant to the query. "+
-		"Use only numbers from 1 to %d. Answer with JSON only: {\"ranking\": [3, 1, 2]}", len(docs))
-	body, err := json.Marshal(map[string]any{
-		"model":    r.model,
-		"messages": []map[string]string{{"role": "user", "content": b.String()}},
-		"stream":   false,
-		"format":   "json",
-		"options":  map[string]any{"temperature": 0, "num_ctx": ollamaNumCtx},
-	})
-	if err != nil {
-		return nil, err
-	}
-	raw, err := postJSON(ctx, r.client, r.url, "", body)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("reranker: %w", err)
-	}
-	order := parseRanking(resp.Message.Content, len(docs))
-	if len(order) == 0 {
-		return nil, fmt.Errorf("reranker: model returned no ranking: %.200s", resp.Message.Content)
-	}
-	if topN > 0 && len(order) > topN {
-		order = order[:topN]
-	}
-	return order, nil
-}
-
-var intRe = regexp.MustCompile(`\d+`)
-
-func parseRanking(content string, n int) []int {
-	var nums []int
-	var obj struct {
-		Ranking []int `json:"ranking"`
-	}
-	switch {
-	case json.Unmarshal([]byte(content), &obj) == nil && len(obj.Ranking) > 0:
-		nums = obj.Ranking
-	case json.Unmarshal([]byte(content), &nums) == nil && len(nums) > 0:
-	default:
-		nums = nil
-		for _, m := range intRe.FindAllString(content, -1) {
-			if v, err := strconv.Atoi(m); err == nil {
-				nums = append(nums, v)
-			}
-		}
-	}
-	seen := make([]bool, n)
-	var out []int
-	for _, v := range nums {
-		if v < 1 || v > n || seen[v-1] {
-			continue
-		}
-		seen[v-1] = true
-		out = append(out, v-1)
-	}
-	return out
 }

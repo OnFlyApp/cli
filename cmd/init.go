@@ -67,11 +67,9 @@ rules:
 #   semantic_weight: 2             # defaults shown; "onfly eval tune" finds numbers for your code
 #   keyword_weight: 0.5
 #   field_weight: 0.5              # symbol-name / path / comment list; 0 turns it off
-#   recency_weight: 0              # >0 favours files changed in the last recency_days (git)
-#   usage_weight: 0                # >0 favours chunks an assistant opened after earlier searches (needs server.usage_file)
 
 # reranker:                        # optional second pass over the top results
-#   provider: voyage              # voyage, cohere, jina, or ollama (a chat model)
+#   provider: voyage              # voyage, cohere or jina
 #   model: rerank-2
 
 server:

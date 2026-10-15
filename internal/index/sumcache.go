@@ -12,12 +12,11 @@ import (
 
 const promptVersion = "v1"
 
-func summaryKey(model string, c parser.Chunk, context string) string {
-	key := promptVersion + "\x00" + model + "\x00" + "0" + "\x00" +
+const legacyQuestionCount = "0"
+
+func summaryKey(model string, c parser.Chunk) string {
+	key := promptVersion + "\x00" + model + "\x00" + legacyQuestionCount + "\x00" +
 		c.Type + "\x00" + c.Metadata["name"] + "\x00" + c.Content
-	if context != "" {
-		key += "\x00" + context
-	}
 	return ContentHash([]byte(key))
 }
 

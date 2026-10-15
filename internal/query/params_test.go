@@ -52,18 +52,6 @@ func names(cs []parser.Chunk) []string {
 	return out
 }
 
-func TestUsedChunksOrdersByCount(t *testing.T) {
-	a := parser.Chunk{FilePath: "a.go", Metadata: map[string]string{"name": "A"}}
-	b := parser.Chunk{FilePath: "b.go", Metadata: map[string]string{"name": "B"}}
-	got := usedChunks(map[string]int{"b.go\x00B": 3, "a.go\x00A": 1}, []parser.Chunk{a, b, {FilePath: "c.go"}})
-	if len(got) != 2 || got[0].FilePath != "b.go" {
-		t.Fatalf("%+v", got)
-	}
-	if usedChunks(nil, []parser.Chunk{a}) != nil {
-		t.Fatal("no counts, no list")
-	}
-}
-
 func TestSummaryKeywordListFindsChunkByItsSummary(t *testing.T) {
 	target := parser.Chunk{FilePath: "retry.go", Type: "function", Content: "func backoffLoop() { sleep }",
 		Metadata: map[string]string{"name": "backoffLoop", "summary": "Pauses between attempts to contact the server."}}

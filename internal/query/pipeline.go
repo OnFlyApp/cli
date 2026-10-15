@@ -3,12 +3,10 @@ package query
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
-	"github.com/axitdev/onfly/internal/usage"
 	"github.com/bmatcuk/doublestar/v4"
 )
 
@@ -29,10 +27,10 @@ const (
 )
 
 type Params struct {
-	Semantic, Keyword, Word, Field, Recency float64
-	Alt, SummaryWord                        float64
-	Section                                 float64
-	RRFK                                    int
+	Semantic, Keyword, Word, Field float64
+	Alt, SummaryWord               float64
+	Section                        float64
+	RRFK                           int
 }
 
 func (s *Searcher) Params() Params {
@@ -41,7 +39,6 @@ func (s *Searcher) Params() Params {
 		Keyword:     orDefault(s.KeywordWeight, defaultKeywordWeight),
 		Word:        defaultWordWeight,
 		Field:       defaultFieldWeight,
-		Recency:     s.RecencyWeight,
 		Alt:         defaultAltWeight,
 		SummaryWord: defaultSummaryWordWeight,
 		Section:     1,
@@ -176,9 +173,6 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 		g.Semantic, g.Keyword, g.Words = filterChunks(g.Semantic, keep), filterChunks(g.Keyword, keep), filterChunks(g.Words, keep)
 		g.Alt, g.SummaryWords = filterChunks(g.Alt, keep), filterChunks(g.SummaryWords, keep)
 	}
-	if s.RecencyWeight > 0 {
-		g.Recent = s.recentCandidates(ctx, g.Semantic, g.Keyword)
-	}
 	return g, nil
 }
 
@@ -196,14 +190,6 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 		if f := fieldMatches(g.Terms, cands); len(f) > 0 {
 			lists, weights = append(lists, f), append(weights, p.Field*p.Keyword)
 		}
-	}
-	if s.UsageWeight > 0 && s.Usage != nil {
-		if u := usedChunks(s.Usage.Counts(), union(g.Semantic, g.Keyword, g.Words)); len(u) > 0 {
-			lists, weights = append(lists, u), append(weights, s.UsageWeight)
-		}
-	}
-	if len(g.Recent) > 0 && p.Recency > 0 {
-		lists, weights = append(lists, g.Recent), append(weights, p.Recency)
 	}
 	var typeW func(parser.Chunk) float64
 	if len(s.TypeWeights) > 0 {
@@ -236,28 +222,6 @@ func union(lists ...[]parser.Chunk) []parser.Chunk {
 				out = append(out, c)
 			}
 		}
-	}
-	return out
-}
-
-func usedChunks(counts map[string]int, cands []parser.Chunk) []parser.Chunk {
-	if len(counts) == 0 {
-		return nil
-	}
-	type item struct {
-		c parser.Chunk
-		n int
-	}
-	var items []item
-	for _, c := range cands {
-		if n := counts[usage.Key(c.FilePath, c.Metadata["name"])]; n > 0 {
-			items = append(items, item{c, n})
-		}
-	}
-	sort.SliceStable(items, func(a, b int) bool { return items[a].n > items[b].n })
-	out := make([]parser.Chunk, len(items))
-	for i, it := range items {
-		out[i] = it.c
 	}
 	return out
 }

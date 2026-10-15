@@ -18,10 +18,10 @@ const (
 )
 
 func summarizable(c parser.Chunk) bool {
-	if c.Metadata["name"] == "" && c.Type != "section" && c.Type != fileChunkType {
+	if c.Metadata["name"] == "" && c.Type != "section" {
 		return false
 	}
-	return c.Type == fileChunkType || len([]rune(c.Content)) >= summaryMinRunes
+	return len([]rune(c.Content)) >= summaryMinRunes
 }
 
 type generated struct {
@@ -52,17 +52,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		timeout = defaultSummaryLimit
 	}
 	model := s.cfg.Indexer.Summaries.Model
-	var ctxOf func(i int) string
-	if s.cfg.Indexer.Summaries.Context {
-		ctxOf = contextFor(chunks)
-	}
-	ctxAt := func(i int) string {
-		if ctxOf == nil {
-			return ""
-		}
-		return ctxOf(i)
-	}
-	key := func(i int) string { return summaryKey(model, chunks[i], ctxAt(i)) }
+	key := func(i int) string { return summaryKey(model, chunks[i]) }
 	var todo []int
 	for i := range chunks {
 		c := &chunks[i]
@@ -103,7 +93,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 		if failed.Load() {
 			return nil
 		}
-		if out, ok := ask(summaryPrompt(chunks[i], ctxAt(i))); ok {
+		if out, ok := ask(summaryPrompt(chunks[i])); ok {
 			return []answer{{i, generated{Summary: cleanSummary(out)}}}
 		}
 		return nil
@@ -138,7 +128,7 @@ func (s *Session) addSummaries(ctx context.Context, rel string, chunks []parser.
 	return prev
 }
 
-func summaryPrompt(c parser.Chunk, context string) string {
+func summaryPrompt(c parser.Chunk) string {
 	code := c.Content
 	if r := []rune(code); len(r) > summaryMaxInput {
 		code = string(r[:summaryMaxInput])
@@ -150,9 +140,6 @@ func summaryPrompt(c parser.Chunk, context string) string {
 	b.WriteString("File: " + c.FilePath + "\n")
 	if n := c.Metadata["name"]; n != "" {
 		b.WriteString("Name: " + n + "\n")
-	}
-	if context != "" {
-		b.WriteString(context)
 	}
 	b.WriteString("\n" + code)
 	return b.String()
@@ -172,116 +159,4 @@ func cleanSummary(out string) string {
 		return l
 	}
 	return ""
-}
-
-const (
-	fileChunkType   = "file"
-	fileChunkSymbol = 40
-)
-
-func fileChunk(rel string, chunks []parser.Chunk) (parser.Chunk, bool) {
-	var names []string
-	seen := map[string]bool{}
-	for _, c := range chunks {
-		n := c.Metadata["name"]
-		if n == "" || seen[n] {
-			continue
-		}
-		seen[n] = true
-		names = append(names, n)
-		if len(names) == fileChunkSymbol {
-			break
-		}
-	}
-	if len(names) == 0 {
-		return parser.Chunk{}, false
-	}
-	return parser.Chunk{
-		FilePath: rel,
-		Type:     fileChunkType,
-		Content:  "file: " + rel + "\ndefines: " + strings.Join(names, ", "),
-		Metadata: map[string]string{},
-	}, true
-}
-
-const (
-	contextCalls   = 8
-	contextCallers = 6
-	contextNearby  = 6
-	contextSpan    = 3
-)
-
-func contextFor(chunks []parser.Chunk) func(i int) string {
-	defined := map[string]bool{}
-	for _, c := range chunks {
-		if n := c.Metadata["name"]; n != "" {
-			defined[n] = true
-		}
-	}
-	callers := map[string][]string{}
-	for _, c := range chunks {
-		self := c.Metadata["name"]
-		if self == "" {
-			continue
-		}
-		seen := map[string]bool{}
-		for _, callee := range c.Outbound {
-			callee = callee[strings.LastIndex(callee, ".")+1:]
-			if callee == self || !defined[callee] || seen[callee] {
-				continue
-			}
-			seen[callee] = true
-			callers[callee] = append(callers[callee], self)
-		}
-	}
-	return func(i int) string {
-		c := chunks[i]
-		self := c.Metadata["name"]
-		var b strings.Builder
-		var calls []string
-		seen := map[string]bool{self: true}
-		for _, callee := range c.Outbound {
-			callee = callee[strings.LastIndex(callee, ".")+1:]
-			if defined[callee] && !seen[callee] && len(calls) < contextCalls {
-				seen[callee] = true
-				calls = append(calls, callee)
-			}
-		}
-		if len(calls) > 0 {
-			b.WriteString("Calls (same file): " + strings.Join(calls, ", ") + "\n")
-		}
-		by := dedupeKeep(callers[self], self, contextCallers)
-		if len(by) > 0 {
-			b.WriteString("Called by (same file): " + strings.Join(by, ", ") + "\n")
-		}
-		var near []string
-		nseen := map[string]bool{self: true}
-		for d := 1; d <= contextSpan && len(near) < contextNearby; d++ {
-			for _, j := range []int{i - d, i + d} {
-				if j < 0 || j >= len(chunks) || len(near) >= contextNearby {
-					continue
-				}
-				if n := chunks[j].Metadata["name"]; n != "" && !nseen[n] {
-					nseen[n] = true
-					near = append(near, n)
-				}
-			}
-		}
-		if len(near) > 0 {
-			b.WriteString("Nearby: " + strings.Join(near, ", ") + "\n")
-		}
-		return b.String()
-	}
-}
-
-func dedupeKeep(in []string, skip string, limit int) []string {
-	var out []string
-	seen := map[string]bool{skip: true}
-	for _, s := range in {
-		if !seen[s] && len(out) < limit {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	return out
 }

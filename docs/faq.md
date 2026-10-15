@@ -28,7 +28,7 @@ Measure it. With a local chat model (`reranker.provider: ollama`) it raised reca
 
 ### Can I use vLLM, mlx_lm.server or LM Studio instead of Ollama?
 
-Yes, for every model role. Set `provider: openai` with the server's `endpoint` for embeddings, and for `indexer.summaries`; use `reranker.provider: openai-score` or a rerank endpoint for reranking. See [Other inference engines](configuration.md#other-inference-engines). Raise `indexer.summaries.concurrency` for servers that batch requests.
+Yes, for every model role. Set `provider: openai` with the server's `endpoint` for embeddings, and for `indexer.summaries`; use a rerank endpoint (`reranker.provider: cohere` or `jina` with `endpoint`) for reranking. See [Other inference engines](configuration.md#other-inference-engines). Raise `indexer.summaries.concurrency` for servers that batch requests.
 
 ### Which embedding model should I use?
 

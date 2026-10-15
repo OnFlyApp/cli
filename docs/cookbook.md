@@ -184,21 +184,11 @@ onfly search "retry policy" --path 'internal/**'
 
 The assistant gets the same options as the `type` and `path` arguments of `search`.
 
-## Favour recent work
-
-```yaml
-search:
-  recency_weight: 0.5     # 0 is off; 1 counts as much as keyword or semantic
-  recency_days: 14
-```
-
-Files changed in the last 14 days (from git) get a boost.
-
 ## Improve ranking with a reranker
 
 ```yaml
 reranker:
-  provider: voyage            # or cohere, jina, ollama
+  provider: voyage            # or cohere, jina
   model: rerank-2
   api_key: ${VOYAGE_API_KEY}
   timeout_ms: 3000
@@ -214,18 +204,6 @@ reranker:
   model: bge-reranker-v2-m3
   endpoint: http://localhost:8081
 ```
-
-To rerank with a local chat model through Ollama (no rerank server needed):
-
-```yaml
-reranker:
-  provider: ollama
-  model: qwen2.5-coder:7b
-  candidates: 20
-  timeout_ms: 30000
-```
-
-It is slower than the options above, so check it with `onfly eval` first.
 
 ## Tell if a change helped
 

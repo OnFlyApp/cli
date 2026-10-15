@@ -40,17 +40,6 @@ func ChangedSince(ctx context.Context, root, ref string) ([]string, error) {
 	return dedupe(append(changed, untracked...)), nil
 }
 
-func Recent(ctx context.Context, root string, days int) ([]string, error) {
-	if days < 1 {
-		days = 30
-	}
-	files, err := run(ctx, root, "log", "--since="+strconv.Itoa(days)+".days", "--relative", "--name-only", "--pretty=format:")
-	if err != nil {
-		return nil, err
-	}
-	return dedupe(files), nil
-}
-
 func dedupe(in []string) []string {
 	seen := make(map[string]bool, len(in))
 	out := in[:0:0]

@@ -75,7 +75,7 @@ Finds code by what it does. Embeds `query` once and fuses semantic, keyword, per
 | `detail` | no | `auto` (default) keeps the code of the top 3 hits and reduces the rest to their first line (the signature) with `brief: true`; `full` keeps every body; `brief` reduces all. Fetch a brief hit's body with `get_component_ast`. Any other value is a tool error. |
 | `changed_since` | no | A git ref. Keeps only files that differ from it in the working tree, untracked files included. `type`, `path` and `changed_since` filter the top 50 candidates of each list, so a narrow filter can return fewer than `limit` hits. A ref starting with `-` is rejected. |
 
-If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights and the recency list come from `search` in [configuration.md](configuration.md#search-fusion).
+If the embedder fails, the result is keyword hits only and a warning goes to the server log. Fusion weights come from `search` in [configuration.md](configuration.md#search-fusion).
 
 If `workspace` is omitted, `query` is a single identifier, and that exact metadata name is stored in two or more workspaces, the tool returns an elicitation instead of searching. For the query `User` the message is `Which workspace should be searched for "User"?`. Decline does not embed. `*` and an explicit workspace do not ask.
 

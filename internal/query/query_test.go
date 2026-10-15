@@ -199,10 +199,6 @@ func TestChangedSinceKeepsOnlyChangedFiles(t *testing.T) {
 	if _, err := s.Run(context.Background(), Request{Query: "x", ChangedSince: "--output=/tmp/x"}); err == nil {
 		t.Fatal("a ref starting with - must be rejected")
 	}
-	s.RecencyWeight = 1
-	if got, err := s.Search(context.Background(), "getUserId", 5, ""); err != nil || len(got) != 2 {
-		t.Fatalf("%+v %v", got, err)
-	}
 }
 
 func TestQueryWordsDropsStopWordsAndShortWords(t *testing.T) {

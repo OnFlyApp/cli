@@ -25,7 +25,7 @@ A case hits at rank r when a returned chunk has a path ending in `expect.file` a
 
 ```
 onfly eval [--cases FILE[,FILE...]] [--k 10] [--split even|odd] [--file-level] [--min-recall 0] [--baseline FILE [--update-baseline]] [--json]
-onfly eval tune [--cases FILE[,FILE...]] [--k 10] [--file-level] [--top 5] [--learn]
+onfly eval tune [--cases FILE[,FILE...]] [--k 10] [--file-level] [--top 5]
 onfly eval mine [--usage FILE] [--out FILE]
 ```
 
@@ -64,8 +64,6 @@ Each recorded question becomes a case whose expected hit is the chunk the assist
 ## Tuning
 
 `onfly eval tune` finds fusion weights for your code. It retrieves every case once, then tries a grid of `semantic_weight`, `keyword_weight`, `word_weight`, `field_weight` and `rrf_k` by re-fusing the saved lists, so the whole grid takes seconds after the retrieval. It picks the best setting by MRR on the even-numbered cases, scores that setting and your current one on the odd-numbered cases, and prints the YAML to adopt only when the odd half gains at least 0.01 MRR. Use at least a few hundred cases; with 20 the check half is noise.
-
-`--learn` replaces the fixed grid with a coordinate ascent over every weight, including the summary, second-embedder, graph and docs-section ones (`search.section_weight`), 4 rounds at most, and reports the same fit and check halves. It adopts nothing by itself: it prints the YAML only when the check half gains at least 0.01 MRR.
 
 Large case lists can be generated: ask a local model for one question per sampled symbol, drop questions that contain the symbol name, and keep the symbol as the expectation. Such cases flatter retrieval, because the question was written from the code, so keep your hand-written cases as a separate file and look at both.
 
@@ -119,11 +117,7 @@ Same 573 cases, embeddinggemma-2 with `qwen2.5-coder:7b` summaries, fresh index 
 | Summary vector (removed) | 0.702 | 0.908 | 0.955 | 0.789 | 0.717 |
 | Three questions per chunk (removed) | 0.686 | 0.921 | 0.967 | 0.788 | 0.644 |
 
-The `ollama-score` reranker (Qwen3-Reranker-4B, 20 candidates) was measured on the 45 hand-written cases only, because it took 18 s per search: MRR 0.768 against 0.767 without it, R@3 0.89 against 0.82, R@1 0.62 against 0.67. It reorders the top three but does not improve the first hit, and costs more than the rest of the pipeline put together, so it stays off.
-
-The summary prompt with same-file context (`summaries.context`) scored MRR 0.810 against 0.816 for the final configuration (hand-written 0.793 against 0.756); no chunk in this repository is long enough to be cut by the embedder (longest about 1900 tokens, 99th percentile 838).
-
-`onfly eval tune --learn` on the best row found no weights that beat the defaults on the check half (-0.003 MRR). With `--explain`, 157 of 573 cases were not first: 85 behind another file's code, 33 behind another symbol of the right file, 23 behind a docs section, 16 the other way round. With `--judge qwen2.5-coder:7b`, 130 of those had a better-ranked result judged to answer the question, which lifts MRR from 0.812 to 0.947; most of the "misses" are valid answers that differ from the single expected chunk.
+With `--explain`, 157 of 573 cases were not first: 85 behind another file's code, 33 behind another symbol of the right file, 23 behind a docs section, 16 the other way round. With `--judge qwen2.5-coder:7b`, 130 of those had a better-ranked result judged to answer the question, which lifts MRR from 0.812 to 0.947; most of the "misses" are valid answers that differ from the single expected chunk.
 
 ## Embedding models
 

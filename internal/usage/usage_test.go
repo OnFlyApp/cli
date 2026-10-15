@@ -21,10 +21,6 @@ func TestOpenAfterSearchIsRecordedOncePerHit(t *testing.T) {
 	if err != nil || len(ev) != 2 || ev[0].Rank != 2 || ev[0].Symbol != "prune" || ev[1].File != "a.go" || ev[1].Rank != 1 {
 		t.Fatalf("%+v %v", ev, err)
 	}
-	c := &Counter{Path: path}
-	if got := c.Counts(); got[Key("internal/index.go", "prune")] != 1 || len(got) != 2 {
-		t.Fatalf("%v", got)
-	}
 }
 
 func TestOpenOutsideWindowAndNilLog(t *testing.T) {

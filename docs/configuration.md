@@ -46,9 +46,6 @@ search:                          # optional; how the result lists are fused (val
   word_weight: 0.25              # per-word keyword list, relative to keyword_weight; 0 turns it off
   field_weight: 0.5              # symbol-name, path and comment list, relative to keyword_weight; 0 turns it off
   rrf_k: 20                      # reciprocal-rank constant; lower favours the top of each list
-  recency_weight: 0              # >0 adds a list of files changed in the last recency_days (git), newest first
-  recency_days: 30
-  usage_weight: 0                # >0 adds a list of chunks an assistant opened after earlier searches
   section_weight: 1              # multiplier for documentation sections; below 1 demotes docs against code
   type_weights: {}               # score multiplier per chunk type, e.g. {trait_use: 0.3, property: 0.6}; unlisted types keep 1
   summary_word_weight: 0.125     # keyword list over summaries; 0 turns it off
@@ -168,8 +165,6 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 3. **Fuse.** Every list scores `weight / (rrf_k + rank)` and the scores add up. Defaults: `semantic_weight` 2, `keyword_weight` 0.5, `word_weight` 0.25 and `field_weight` 0.5 (both relative to `keyword_weight`), `rrf_k` 20. A zero value takes the default, except `word_weight` and `field_weight`, where 0 turns the list off.
 `search.type_weights` multiplies a chunk's fused score by its type (`onfly stats` lists the types). Use it where small declarations such as PHP `trait_use`, `property` or `enum_case` chunks match a question's words and outrank the class that holds them: a weight of 0.3 sends them below the definition without deleting them, unlike `indexer.skip_types`. A chunk with weight `w` contributes `w` of its reciprocal rank and takes only `w` of a position in each list, so the chunks behind it rank almost as if it were absent; a weight near 0 approaches deleting the type from search while keeping it findable. With any type weight set, each list also reads three times as many candidates (up to 150), because demoted chunks would otherwise fill the slots that real definitions need. It needs no reindex. Measure with `onfly eval` before keeping a value.
 
-`search.recency_weight` above 0 adds another list of candidates whose files were committed within `search.recency_days` (default 30), most recent first, read from `git log` in the project root and cached for 30 seconds. Outside a git repository the signal is skipped with a warning.
-
 The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half of 573 cases and checked on the other half, where MRR rose from 0.605 to 0.678. Your code may prefer other numbers: run `onfly eval tune` on your own cases before changing them.
 
 If the embedder is unreachable, `search` logs a warning and answers from keyword results alone instead of failing. A cancelled request still fails. Query vectors are cached in memory (256 entries), so a repeated query does not call the embedder again.
@@ -218,28 +213,20 @@ indexer:
     # endpoint: http://localhost:11434
     # timeout_ms: 60000          # one call; default 60000
     # concurrency: 8             # chunks of one file in flight at once (default 1)
-    # files: true                # also write one summarised "file" chunk per file
-    # context: true             # tell the model which symbols of the same file the chunk calls, is called by, sits next to
     # cache: .onfly/summaries.jsonl   # model answers kept across indexes; "none" turns it off
 ```
 
 **Cache.** Every answer is also appended to `.onfly/summaries.jsonl`, keyed by the model, the prompt version, the chunk's type and name and its exact text. Deleting the database, changing the embedder or a prefix, or rebuilding on another machine that has the file therefore does not call the model again: a full reindex of this repository dropped from 17 minutes to about a minute and a half. A different summary model has different keys and asks again. Keep the file out of git like `vector.db`.
 
-**Context.** `context: true` adds three lines to each prompt, built from the chunk's own file only: `Calls (same file)`, `Called by (same file)` and `Nearby`. A chunk's role often shows in who uses it, and the model otherwise sees only the body. The text is part of the cache key, so turning it on asks the model again for every chunk, and the cache entries made without it stay valid for when it is off. Cross-file callers are not used on purpose: they change as the index grows, which would invalidate summaries on every run. Measured on this repository it made no difference overall (MRR 0.810 against 0.816, within noise; hand-written cases 0.793 against 0.756) and took 20 minutes of model time, so it is off by default. Try it on a codebase whose files hold many small cooperating functions.
-
-`files: true` adds a chunk of type `file` per file, listing the names it defines, with its own summary; it found no gain here (MRR 0.717 against 0.722 without) and is meant for large packages where the question is about a directory or file, not a symbol. A smaller model is the way to cut index time: `qwen2.5-coder:3b` indexed this repository in about two thirds of the time of the 7B for a loss of 0.004 MRR.
-
 Summaries are written during indexing, one model call per new or changed chunk. A chunk whose text did not change keeps its stored summary, so a reindex calls the model only for what changed. The first index of a project is slower: on this repository (about 730 chunks) it took 16 minutes with a 7B model on a laptop instead of under a minute; it raised MRR from 0.663 to 0.751 in the [measurement](evaluation.md#measured-effect). If the model is unreachable, indexing logs a warning, skips the rest of that file's summaries and still completes. Turning summaries on does not touch chunks that are already indexed until their file changes; delete the database and reindex to apply them everywhere.
 
-### Usage list
+### Usage log
 
-Off by default. It adds one more list to the fusion.
-
-- `search.usage_weight` ranks hits that an assistant opened after an earlier search, most often first. It needs `server.usage_file`: with it set, the MCP server appends one JSON line (`ts`, `query`, `file`, `symbol`, `rank`) whenever a tool opens a chunk that the most recent `search` returned, within ten minutes of it. Nothing is recorded without it, and the file holds your questions in plain text, so keep it out of git. Read the file counts back as a prior with `usage_weight`, or turn it into eval cases with [`onfly eval mine`](evaluation.md#real-questions).
+With `server.usage_file` set, the MCP server appends one JSON line (`ts`, `query`, `file`, `symbol`, `rank`) whenever a tool opens a chunk that the most recent `search` returned, within ten minutes of it. Nothing is recorded without it, and the file holds your questions in plain text, so keep it out of git. Turn it into eval cases with [`onfly eval mine`](evaluation.md#real-questions).
 
 ### Removed options
 
-Earlier builds had `search.expand`, `search.group_by`, `search.dedupe`, `search.graph_weight`, `indexer.summaries.batch`, `indexer.summaries.questions`, `indexer.summary_vector` and `indexer.embed_neighbours`. Each was measured and none beat the defaults on the final configuration (see [evaluation](evaluation.md#removed-options)), so they were deleted. A config file that still names them loads; the keys are ignored.
+Earlier builds had the `ollama`, `ollama-score` and `openai-score` rerankers, `search.recency_weight`, `search.usage_weight`, `indexer.summaries.files`, `indexer.summaries.context`, `search.expand`, `search.group_by`, `search.dedupe`, `search.graph_weight`, `indexer.summaries.batch`, `indexer.summaries.questions`, `indexer.summary_vector` and `indexer.embed_neighbours`. Each was measured and none beat the defaults on the final configuration (see [evaluation](evaluation.md#removed-options)), so they were deleted. A config file that still names them loads; the keys are ignored.
 
 ## Other inference engines
 
@@ -249,7 +236,6 @@ Onfly needs three things from a model server: embeddings, short chat answers (su
 | --- | --- | --- |
 | Embeddings | `embedder.provider: openai` | `POST {endpoint}/v1/embeddings` |
 | Summaries, `eval --judge` | `provider: openai` under `indexer.summaries` | `POST {endpoint}/v1/chat/completions` |
-| Scoring reranker | `reranker.provider: openai-score` | `POST {endpoint}/v1/completions` with `logprobs` |
 | Rerank endpoint (vLLM `/v1/rerank`) | `reranker.provider: cohere` or `jina` with `endpoint` | `POST {endpoint}/v2/rerank` or `/v1/rerank` |
 
 `endpoint` is the server's base URL without `/v1`. An API key is optional for a custom endpoint (leave it out for a local server) and required for the hosted OpenAI endpoint. Two behaviours differ for custom endpoints: `dimensions` is not sent with embedding requests (most local servers reject it for models that cannot shorten vectors; set `embedder.send_dimensions: true` if yours accepts it), and chat requests carry `chat_template_kwargs: {"enable_thinking": false}`, which vLLM honours for reasoning models (servers that do not know it ignore it). Text inside `<think>...</think>` in an answer is removed.
@@ -308,41 +294,6 @@ The reranker is off by default. When `reranker.provider` is set, each search sen
 | `jina` | `https://api.jina.ai` | `/v1/rerank` | `JINA_API_KEY` |
 
 A hosted endpoint needs a key. With a custom `endpoint` the key is optional, so a self-hosted server works unauthenticated. Servers that copy the Cohere or Jina request shape (vLLM, llama.cpp with `--reranking`, Infinity, LiteLLM) can be used this way. Pick `cohere` or `jina` to match the path the server exposes.
-
-### Ollama (LLM-based)
-
-`provider: ollama` needs no rerank endpoint. Onfly sends the query and the candidates (each cut to 500 characters) to a chat model through `POST {endpoint}/api/chat` (default `http://localhost:11434`) and asks for a JSON ranking, with `temperature: 0` and `num_ctx: 8192`. One call covers all candidates.
-
-```yaml
-reranker:
-  provider: ollama
-  model: qwen2.5-coder:7b
-  candidates: 20               # fewer candidates is faster and fits the context
-  timeout_ms: 30000
-```
-
-Things to know:
-
-- `model` is a chat model, not an embedding model. Use an instruction-tuned model of about 7B parameters or more; very small models often ignore the format.
-- It is slower than a rerank endpoint, typically seconds per search on a laptop. The default timeout is 30 s, and on timeout or an unusable answer the fused order is kept.
-- Numbers out of range, repeats, and extra text in the answer are ignored; candidates the model leaves out stay after the ranked ones in fused order.
-- Everything stays on your machine, unlike the hosted providers.
-
-Use `onfly eval` to check that it improves your results before keeping it.
-
-### Ollama (scoring model)
-
-`provider: ollama-score` is for generative reranking models such as Qwen3-Reranker. Ollama has no rerank endpoint, so Onfly sends each candidate to `POST {endpoint}/api/generate` as a raw prompt in the model's own format ("does the document answer the query? yes or no"), asks for one token with log-probabilities, and ranks candidates by the probability of `yes` against `no`. Calls run four at a time. It needs an Ollama version that returns `logprobs`.
-
-```yaml
-reranker:
-  provider: ollama-score
-  model: dengcao/Qwen3-Reranker-4B:Q4_K_M
-  candidates: 20
-  timeout_ms: 60000
-```
-
-`provider: openai-score` does the same through `POST {endpoint}/v1/completions` with `max_tokens: 1` and `logprobs: 20`, so a Qwen3-Reranker served by vLLM or `llama-server` works unchanged (`endpoint`, `model`; no key for a local server). Not every community build of the reranker works under every Ollama release: `dengcao/Qwen3-Reranker-0.6B:Q8_0` answered with identical probabilities for every token here, the 4B build worked. Check a few calls by hand before measuring. It is slow: about 18 seconds per search on a laptop for 20 candidates with the 4B model, and on the hand-written cases it did not improve MRR (0.768 against 0.767); see [Evaluation](evaluation.md#third-round-prompts-second-embedder-summary-variants).
 
 ## Embedders
 

@@ -552,11 +552,6 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		}
 		return FileResult{Chunks: len(chunks), Tokens: n}, nil
 	}
-	if s.chat != nil && s.cfg.Indexer.Summaries.Files {
-		if fc, ok := fileChunk(rel, chunks); ok {
-			chunks = append(chunks, fc)
-		}
-	}
 	var embedded []vectorstore.EmbeddedChunk
 	reused := 0
 	if len(chunks) > 0 {

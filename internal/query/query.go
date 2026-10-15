@@ -8,15 +8,12 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
-	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
-	"github.com/axitdev/onfly/internal/usage"
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
@@ -53,29 +50,22 @@ func Scope(def, arg string) string {
 }
 
 type Searcher struct {
-	Store                                        vectorstore.Store
-	Emb                                          embedder.Embedder
-	Logger                                       *slog.Logger
-	Rerank                                       embedder.Reranker
-	Candidates                                   int
-	RerankTimeout                                time.Duration
-	SemanticWeight, KeywordWeight, RecencyWeight float64
-	RecencyDays                                  int
-	WordWeight, FieldWeight                      *float64
-	RRFK                                         int
-	UsageWeight                                  float64
-	Usage                                        *usage.Counter
-	SummaryKeyword                               bool
-	AltEmb                                       embedder.Embedder
-	AltWeight                                    *float64
-	SummaryWordWeight                            *float64
-	SectionWeight                                *float64
-	TypeWeights                                  map[string]float64
-	Root                                         string
-
-	recentMu   sync.Mutex
-	recentAt   time.Time
-	recentList []string
+	Store                         vectorstore.Store
+	Emb                           embedder.Embedder
+	Logger                        *slog.Logger
+	Rerank                        embedder.Reranker
+	Candidates                    int
+	RerankTimeout                 time.Duration
+	SemanticWeight, KeywordWeight float64
+	WordWeight, FieldWeight       *float64
+	RRFK                          int
+	SummaryKeyword                bool
+	AltEmb                        embedder.Embedder
+	AltWeight                     *float64
+	SummaryWordWeight             *float64
+	SectionWeight                 *float64
+	TypeWeights                   map[string]float64
+	Root                          string
 }
 
 type Request struct {
@@ -190,39 +180,6 @@ func filterChunks(in []parser.Chunk, keep func(parser.Chunk) bool) []parser.Chun
 	return out
 }
 
-func (s *Searcher) recentCandidates(ctx context.Context, cands ...[]parser.Chunk) []parser.Chunk {
-	if s.Root == "" {
-		return nil
-	}
-	s.recentMu.Lock()
-	if time.Since(s.recentAt) > 30*time.Second {
-		files, err := gitx.Recent(ctx, s.Root, s.RecencyDays)
-		if err != nil {
-			s.logger().Warn("recency", "err", err)
-			files = nil
-		}
-		s.recentList, s.recentAt = files, time.Now()
-	}
-	files := s.recentList
-	s.recentMu.Unlock()
-	rank := make(map[string]int, len(files))
-	for i, f := range files {
-		rank[f] = i
-	}
-	var out []parser.Chunk
-	seen := map[string]bool{}
-	for _, list := range cands {
-		for _, c := range list {
-			if _, ok := rank[c.FilePath]; ok && !seen[ChunkKey(c)] {
-				seen[ChunkKey(c)] = true
-				out = append(out, c)
-			}
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return rank[out[i].FilePath] < rank[out[j].FilePath] })
-	return out
-}
-
 func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, error) {
 	store, err := vectorstore.New(ctx, cfg.Database)
 	if err != nil {
@@ -254,14 +211,9 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	s := &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
-		RecencyWeight: cfg.Search.RecencyWeight, RecencyDays: cfg.Search.RecencyDays,
 		WordWeight: cfg.Search.WordWeight, FieldWeight: cfg.Search.FieldWeight, RRFK: cfg.Search.RRFK,
-		UsageWeight: cfg.Search.UsageWeight,
-		Root:        cfg.ProjectRoot,
-		Logger:      logger}
-	if cfg.Server.UsageFile != "" && cfg.Search.UsageWeight > 0 {
-		s.Usage = &usage.Counter{Path: cfg.Server.UsageFile}
-	}
+		Root:   cfg.ProjectRoot,
+		Logger: logger}
 	s.SummaryKeyword = cfg.Indexer.Summaries.Provider != ""
 	s.AltWeight, s.SummaryWordWeight = cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
 	s.SectionWeight = cfg.Search.SectionWeight

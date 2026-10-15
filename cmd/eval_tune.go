@@ -10,8 +10,7 @@ import (
 )
 
 var (
-	evalTuneTop   int
-	evalTuneLearn bool
+	evalTuneTop int
 )
 
 var evalTuneCmd = &cobra.Command{
@@ -46,9 +45,6 @@ var evalTuneCmd = &cobra.Command{
 			if gathered[i], err = s.Gather(cmd.Context(), query.Request{Query: c.Query, Limit: evalK, Workspace: ws}); err != nil {
 				return fmt.Errorf("query %q: %w", c.Query, err)
 			}
-		}
-		if evalTuneLearn {
-			return learnWeights(out, s, cases, gathered)
 		}
 		settings := tuneGrid(s.Params())
 		tuner := eval.Tuner{
@@ -118,68 +114,7 @@ func printTune(out io.Writer, r eval.Result, best query.Params, n, k int) {
 
 func init() {
 	evalTuneCmd.Flags().IntVar(&evalTuneTop, "top", 5, "settings to list")
-	evalTuneCmd.Flags().BoolVar(&evalTuneLearn, "learn", false, "coordinate ascent over every weight (including alt, summary-keyword and docs-section factors) instead of the fixed grid")
 	evalTuneCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalTuneCmd.Flags().BoolVar(&evalFileLevel, "file-level", false, "count a hit when the file matches, whatever the symbol")
 	evalCmd.AddCommand(evalTuneCmd)
-}
-
-func learnWeights(out io.Writer, s *query.Searcher, cases []eval.Case, gathered []*query.Gathered) error {
-	cur := s.Params()
-	names := []string{"semantic_weight", "keyword_weight", "word_weight", "field_weight", "alt_weight", "summary_word_weight", "section_weight", "rrf_k"}
-	vec := func(p query.Params) []float64 {
-		return []float64{p.Semantic, p.Keyword, p.Word, p.Field, p.Alt, p.SummaryWord, p.Section, float64(p.RRFK)}
-	}
-	params := func(v []float64) query.Params {
-		p := cur
-		p.Semantic, p.Keyword, p.Word, p.Field, p.Alt, p.SummaryWord, p.Section = v[0], v[1], v[2], v[3], v[4], v[5], v[6]
-		p.RRFK = int(v[7] + 0.5)
-		return p
-	}
-	fit, check := eval.SplitIdx(len(cases))
-	mrr := func(v []float64, idx []int) (recall, m float64) {
-		p := params(v)
-		ranks := make([]int, len(idx))
-		for j, ix := range idx {
-			ranks[j] = eval.Rank(cases[ix], s.Fuse(gathered[ix], p), evalK, evalFileLevel)
-		}
-		return eval.Score(ranks)
-	}
-	candidates := func(i int, v float64) []float64 {
-		switch i {
-		case 7:
-			return []float64{10, 20, 30, 40, 60, 100}
-		case 6:
-			return []float64{0.5, 0.7, 0.85, 1, 1.2, 1.5}
-		}
-		if v == 0 {
-			return []float64{0.1, 0.25, 0.5, 1}
-		}
-		return []float64{0, v * 0.5, v * 0.7, v * 1.4, v * 2}
-	}
-	start := vec(cur)
-	_, startFit := mrr(start, fit)
-	res := eval.Ascend(start, 4, 1e-4, candidates, func(v []float64) float64 {
-		_, m := mrr(v, fit)
-		return m
-	})
-	rf, mf := mrr(res.Values, fit)
-	rc, mc := mrr(res.Values, check)
-	r0c, m0c := mrr(start, check)
-	r0f, _ := mrr(start, fit)
-	fmt.Fprintf(out, "fit on %d cases, check on %d (k=%d), %d evaluations\n\n", len(fit), len(check), evalK, res.Evals)
-	fmt.Fprintf(out, "%-9s %-6s %-7s %-6s %-7s\n", "", "fit R", "fit MRR", "chk R", "chk MRR")
-	fmt.Fprintf(out, "%-9s %-6.2f %-7.3f %-6.2f %-7.3f\n", "current", r0f, startFit, r0c, m0c)
-	fmt.Fprintf(out, "%-9s %-6.2f %-7.3f %-6.2f %-7.3f\n\n", "learned", rf, mf, rc, mc)
-	if mc-m0c < 0.01 {
-		fmt.Fprintf(out, "the learned weights do not beat the current ones on the check half by 0.01 MRR (%+.3f); keep your configuration.\n", mc-m0c)
-		return nil
-	}
-	fmt.Fprintf(out, "learned weights gain %+.3f MRR on the check half. To adopt them:\n\nsearch:\n", mc-m0c)
-	for i, n := range names {
-		if res.Values[i] != start[i] {
-			fmt.Fprintf(out, "  %s: %g\n", n, res.Values[i])
-		}
-	}
-	return nil
 }
