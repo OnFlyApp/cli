@@ -143,3 +143,7 @@ The model matters more than anything else in the pipeline short of summaries. Ru
 ## Removed options
 
 These were options in earlier builds. Each was measured above and none improved on the final configuration, so the code was deleted: `search.expand` (query expansion: +0.016 MRR for 3 s per new query), `search.group_by` and `search.dedupe` (no gain or a loss at symbol level), `search.graph_weight` (helped hand-written cases, hurt generated ones; `eval tune` never picked it), `indexer.summaries.batch` (28% faster, -0.03 MRR), `indexer.summaries.questions` and `indexer.summary_vector` (-0.009 MRR, 43 minutes of model time) and `indexer.embed_neighbours` (+0.010 MRR only with batching, nothing without). The tables above keep their rows for the record.
+
+## A PHP project
+
+A Laravel and Livewire application (107 files, 632 chunks, embeddinggemma-2, no summaries), 100 hand-written cases, file-level hits: recall@10 1.00, MRR 0.838; 73 cases ranked first. The misses put a neighbouring file first. The chunks that outranked the right file were small ones: `trait_use`, `enum_case` and `property`. They are the reason for `search.type_weights`, which demotes a type without removing it; `indexer.skip_types` is for chunks, such as `use` and `namespace`, that have no search value at all. `onfly stats` lists the types an index holds.

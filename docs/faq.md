@@ -20,7 +20,7 @@ They can be. Ollama's default window is 4096 tokens and longer input is cut sile
 
 ### The right file is found but ranked 2nd to 4th. How do I sharpen it?
 
-In order of effort: (1) keep the defaults, which weigh the semantic list above the keyword list and add a symbol-name list; (2) run `onfly eval tune` on your own cases and adopt its numbers if the check half improves; (3) turn on [chunk summaries](configuration.md#chunk-summaries) for questions that use none of the code's words. A reranker trades latency for recall; measure it with `onfly eval` first.
+In order of effort: (1) keep the defaults, which weigh the semantic list above the keyword list and add a symbol-name list; (2) run `onfly eval tune` on your own cases and adopt its numbers if the check half improves; (3) if small declarations (PHP `property`, `enum_case`, `trait_use`) outrank the class that holds them, lower them with `search.type_weights`; (4) turn on [chunk summaries](configuration.md#chunk-summaries) for questions that use none of the code's words. A reranker trades latency for recall; measure it with `onfly eval` first.
 
 ### Should I add a reranker on top of summaries?
 
