@@ -224,13 +224,14 @@ func (h *tools) graph(ctx context.Context, _ *sdkmcp.CallToolRequest, in graphIn
 	return h.finishGraph(ctx, "graph", in, start, chunks, err)
 }
 
-func (h *tools) finishGraph(_ context.Context, tool string, in any, start time.Time, chunks []parser.Chunk, err error) (*sdkmcp.CallToolResult, hitList, error) {
+func (h *tools) finishGraph(ctx context.Context, tool string, in any, start time.Time, chunks []parser.Chunk, err error) (*sdkmcp.CallToolResult, hitList, error) {
 	if err != nil {
 		h.record(tool, in, start, nil, 0)
 		return nil, hitList{}, err
 	}
 	budget, text := h.fitBudget(chunkQuery(chunks))
 	hits, err := fitHits(chunks, budget, "full")
+	h.markStale(ctx, hits)
 	h.record(tool, in, start, hits, len(hits))
 	out := hitList{Rules: text, Hits: hits}
 	if out.Hits == nil {

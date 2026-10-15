@@ -9,4 +9,4 @@ const Guidance = `## Code search (onfly)
 - Before changing a function: graph (callers) and get_tests (what covers it).
 - To judge risk or why code looks odd: get_history.
 - Search hits marked brief show only a signature; fetch the body with get_component_ast.
-- If a result looks stale, the index may be behind: say so rather than guess.`
+- A hit marked stale changed on disk after indexing: Read the file before trusting its lines.`

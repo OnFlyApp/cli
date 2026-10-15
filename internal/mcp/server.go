@@ -73,6 +73,9 @@ type hitDTO struct {
 	// Brief marks a hit whose Lines holds only the first line (the signature);
 	// get_component_ast returns the body.
 	Brief bool `json:"brief,omitempty"`
+	// Stale marks a hit whose file changed on disk since it was indexed; its
+	// line numbers may be off, so read the file before relying on them.
+	Stale bool `json:"stale,omitempty"`
 }
 
 type hitList struct {
@@ -339,6 +342,7 @@ func (h *tools) finishSearch(ctx context.Context, in semanticIn, workspace strin
 	if err != nil {
 		return nil, hitList{}, err
 	}
+	h.markStale(ctx, hits)
 	logged := in
 	logged.Workspace = workspace
 	h.record("search", logged, start, hits, len(hits))
@@ -377,6 +381,7 @@ func (h *tools) searchKeyword(ctx context.Context, _ *sdkmcp.CallToolRequest, in
 	}
 	budget, text := h.fitBudget(chunkQuery(chunks))
 	hits, err := fitHits(chunks, budget, "full")
+	h.markStale(ctx, hits)
 	h.record("find", in, start, hits, len(hits))
 	out := hitList{Rules: text, Hits: hits}
 	if out.Hits == nil {
