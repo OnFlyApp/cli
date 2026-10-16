@@ -46,7 +46,7 @@ internal/rules/         rule frontmatter, templates, token budget, fallback file
 
 ## Store interface
 
-`CommitFile` takes a path, a content hash, and `[]EmbeddedChunk` (each a `parser.Chunk`, a `[]float32`, and a workspace string). It replaces that file's chunks and records the hash in one transaction. The store also has `DeleteFiles`, `ListFiles`, `FileHash`, `FileHashes`, `ChunksByFiles`, `Names`, `ListChunks`, `UpdateOutbound`, `GetReferences`, `Generation`, and `Optimize`. Tests that need a populated store call `storetest.Save`.
+`CommitFile` takes a path, a content hash, and `[]EmbeddedChunk` (each a `parser.Chunk`, a `[]float32`, and a workspace string). It replaces that file's chunks and records the hash in one transaction. The store also has `DeleteFiles`, `ListFiles`, `FileHash`, `FileHashes`, `ChunksByFiles`, `Names`, `ListChunks`, `UpdateOutbound`, `GetReferences`, `ComponentsByNames` and `ReferencesByNames` (the batched forms the MCP blast radius uses), `Generation`, and `Optimize`. Tests that need a populated store call `storetest.Save`.
 
 `Init` records `dimensions`. A different size returns `ErrDimensionMismatch` and leaves the tables in place.
 

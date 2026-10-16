@@ -129,6 +129,7 @@ func postgresSchema(dimensions int) []string {
 		`ALTER TABLE chunks ADD COLUMN IF NOT EXISTS workspace TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX IF NOT EXISTS chunks_file_idx ON chunks (file_path)`,
 		`CREATE INDEX IF NOT EXISTS chunks_name_idx ON chunks ((metadata->>'name'))`,
+		`CREATE INDEX IF NOT EXISTS chunks_outbound_idx ON chunks USING gin (outbound)`,
 		`CREATE INDEX IF NOT EXISTS chunks_tsv_idx ON chunks USING gin (tsv)`,
 		`CREATE TABLE IF NOT EXISTS index_state (
 			file_path TEXT PRIMARY KEY,
@@ -527,6 +528,62 @@ func (p *Postgres) GetComponents(ctx context.Context, name string) ([]parser.Chu
 		return nil, err
 	}
 	return assembleComponents(chunks)
+}
+
+func (p *Postgres) ComponentsByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error) {
+	names = uniqueNames(names)
+	if len(names) == 0 {
+		return map[string][]parser.Chunk{}, nil
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT metadata->>'name', file_path, type, content, metadata::text, outbound::text
+		FROM chunks
+		WHERE metadata->>'name' = ANY($1)
+		ORDER BY id`, names)
+	if err != nil {
+		return nil, err
+	}
+	byName, err := collectNamed(rows, 0)
+	if err != nil {
+		return nil, err
+	}
+	return groupComponents(byName)
+}
+
+func (p *Postgres) ReferencesByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error) {
+	names = uniqueNames(names)
+	if len(names) == 0 {
+		return map[string][]parser.Chunk{}, nil
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT r.name, c.file_path, c.type, c.content, c.metadata::text, c.outbound::text
+		FROM chunks AS c, jsonb_array_elements_text(c.outbound) AS r(name)
+		WHERE c.outbound ?| $1 AND r.name = ANY($1)
+		ORDER BY c.file_path, c.id`, names)
+	if err != nil {
+		return nil, err
+	}
+	return collectNamed(rows, referenceLimit)
+}
+
+func collectNamed(rows pgx.Rows, limit int) (map[string][]parser.Chunk, error) {
+	defer rows.Close()
+	out := map[string][]parser.Chunk{}
+	for rows.Next() {
+		var name, filePath, typ, content, meta, outbound string
+		if err := rows.Scan(&name, &filePath, &typ, &content, &meta, &outbound); err != nil {
+			return nil, err
+		}
+		if limit > 0 && len(out[name]) >= limit {
+			continue
+		}
+		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = append(out[name], ch)
+	}
+	return out, rows.Err()
 }
 
 func (p *Postgres) ListChunks(ctx context.Context) ([]StoredChunk, error) {

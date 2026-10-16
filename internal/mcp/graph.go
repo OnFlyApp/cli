@@ -102,11 +102,6 @@ func (h *tools) callees(ctx context.Context, in calleesIn) ([]parser.Chunk, erro
 type definition struct{ name, file string }
 
 func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error) {
-	depth := in.Depth
-	if depth < 1 {
-		depth = defaultDepth
-	}
-	depth = min(depth, maxDepth)
 	target := definition{name: in.Name}
 	if in.Receiver != "" || in.FilePath != "" {
 		defs, err := h.store.GetComponents(ctx, in.Name)
@@ -119,20 +114,46 @@ func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error)
 		}
 		target.file = d.FilePath
 	}
-	seenDef := map[definition]bool{target: true}
+	return h.impactFrom(ctx, []definition{target}, in.Depth)
+}
+
+// impactFrom walks callers level by level. Each level costs two queries, one
+// for the references to every name on the frontier and one for their
+// definitions, however many targets there are.
+func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int) ([]parser.Chunk, error) {
+	if depth < 1 {
+		depth = defaultDepth
+	}
+	depth = min(depth, maxDepth)
+	seenDef := map[definition]bool{}
+	for _, t := range targets {
+		seenDef[t] = true
+	}
 	seenChunk := map[string]bool{}
-	frontier := []definition{target}
+	frontier := targets
 	var out []parser.Chunk
 	for level := 0; level < depth && len(frontier) > 0 && len(out) < maxImpact; level++ {
-		var next []definition
+		names := make([]string, 0, len(frontier))
+		attribute := false
 		for _, t := range frontier {
-			refs, err := h.store.GetReferences(ctx, t.name)
-			if err != nil {
+			names = append(names, t.name)
+			attribute = attribute || t.file != ""
+		}
+		refsBy, err := h.store.ReferencesByNames(ctx, names)
+		if err != nil {
+			return nil, err
+		}
+		var defsBy map[string][]parser.Chunk
+		if attribute {
+			if defsBy, err = h.store.ComponentsByNames(ctx, names); err != nil {
 				return nil, err
 			}
-			refs, err = h.attributed(ctx, t, refs)
-			if err != nil {
-				return nil, err
+		}
+		var next []definition
+		for _, t := range frontier {
+			refs := refsBy[t.name]
+			if t.file != "" {
+				refs = attributedWith(defsBy[t.name], t, refs)
 			}
 			for _, c := range refs {
 				key := query.ChunkKey(c)
@@ -158,14 +179,7 @@ func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error)
 	return out, nil
 }
 
-func (h *tools) attributed(ctx context.Context, t definition, refs []parser.Chunk) ([]parser.Chunk, error) {
-	if t.file == "" {
-		return refs, nil
-	}
-	defs, err := h.store.GetComponents(ctx, t.name)
-	if err != nil {
-		return nil, err
-	}
+func attributedWith(defs []parser.Chunk, t definition, refs []parser.Chunk) []parser.Chunk {
 	var out []parser.Chunk
 	for _, c := range refs {
 		own := pathCloseness(c.FilePath, t.file)
@@ -180,7 +194,7 @@ func (h *tools) attributed(ctx context.Context, t definition, refs []parser.Chun
 			out = append(out, c)
 		}
 	}
-	return out, nil
+	return out
 }
 
 type graphIn struct {

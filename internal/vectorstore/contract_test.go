@@ -49,6 +49,17 @@ func runStoreContract(t *testing.T, st Store) {
 	if refs[0].Outbound[0] != "OrderService.Execute" {
 		t.Fatalf("outbound = %+v", refs[0].Outbound)
 	}
+	batch, err := st.ComponentsByNames(ctx, []string{"User", "Other", "missing", "User"})
+	if err != nil || len(batch) != 2 || len(batch["User"]) != 1 || batch["User"][0].FilePath != "a.php" || batch["Other"][0].FilePath != "b.php" {
+		t.Fatalf("components by names = %+v %v", batch, err)
+	}
+	byRef, err := st.ReferencesByNames(ctx, []string{"OrderService.Execute", "nothing"})
+	if err != nil || len(byRef) != 1 || len(byRef["OrderService.Execute"]) != 1 || byRef["OrderService.Execute"][0].FilePath != "a.php" {
+		t.Fatalf("references by names = %+v %v", byRef, err)
+	}
+	if none, err := st.ReferencesByNames(ctx, nil); err != nil || len(none) != 0 {
+		t.Fatalf("no names = %+v %v", none, err)
+	}
 	got, err = st.SearchKeyword(ctx, "getUserId", 10, "frontend")
 	if err != nil || len(got) != 0 {
 		t.Fatalf("workspace filter = %+v %v", got, err)

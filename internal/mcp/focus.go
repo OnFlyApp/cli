@@ -15,6 +15,7 @@ const (
 	defaultFocus   = 5
 	maxFocus       = 20
 	maxFocusDeps   = 12
+	maxFocusRefs   = 60
 	focusBodyLimit = 6000
 )
 
@@ -60,26 +61,20 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 		fmt.Fprintf(&b, "<symbol name=%q at=\"%s\">\n%s\n</symbol>\n", c.Metadata["name"], location(c), body)
 	}
 	b.WriteString("</symbols>\n<related>\n")
-	seen := map[string]bool{}
+	defs, src := h.referencedDefinitions(ctx, top, maxFocusRefs)
 	n := 0
-	for _, c := range top {
-		for _, ref := range c.Outbound {
-			if n >= maxFocusDeps || seen[ref] {
-				continue
-			}
-			seen[ref] = true
-			defs, err := h.store.GetComponents(ctx, ref)
-			if err != nil || len(defs) == 0 {
-				continue
-			}
-			d := nearestDefinition(defs, c)
-			if inTop[d.Metadata["name"]+"|"+d.FilePath] {
-				continue
-			}
-			files[d.FilePath] = true
-			fmt.Fprintf(&b, "- %s [%s]\n", signature(d), location(d))
-			n++
+	for _, ref := range src.order {
+		cands := defs[ref]
+		if len(cands) == 0 || n >= maxFocusDeps {
+			continue
 		}
+		d := nearestDefinition(cands, src.by[ref])
+		if inTop[d.Metadata["name"]+"|"+d.FilePath] {
+			continue
+		}
+		files[d.FilePath] = true
+		fmt.Fprintf(&b, "- %s [%s]\n", signature(d), location(d))
+		n++
 	}
 	b.WriteString("</related>\n")
 	raw := 0

@@ -38,6 +38,10 @@ type Store interface {
 	GetComponentAST(ctx context.Context, name string) (*parser.Chunk, error)
 	GetComponents(ctx context.Context, name string) ([]parser.Chunk, error)
 	GetReferences(ctx context.Context, name string) ([]parser.Chunk, error)
+	// ComponentsByNames and ReferencesByNames answer GetComponents and
+	// GetReferences for many names in one query. A name with no match is absent.
+	ComponentsByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error)
+	ReferencesByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error)
 	WorkspacesForName(ctx context.Context, name string) ([]string, error)
 	FileHash(ctx context.Context, path string) (string, bool, error)
 	FileHashes(ctx context.Context) (map[string]string, error)

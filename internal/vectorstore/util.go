@@ -294,3 +294,30 @@ func addExt(by map[string]ExtStat, file string, chunks, bytes int) {
 	st.Bytes += bytes
 	by[e] = st
 }
+
+const referenceLimit = 100
+
+// groupComponents assembles the chunks of each name the way GetComponents does.
+func groupComponents(byName map[string][]parser.Chunk) (map[string][]parser.Chunk, error) {
+	out := make(map[string][]parser.Chunk, len(byName))
+	for name, chunks := range byName {
+		comps, err := assembleComponents(chunks)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = comps
+	}
+	return out, nil
+}
+
+func uniqueNames(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}

@@ -20,6 +20,7 @@ const (
 	collapseOver  = 10
 	maxXrayEdges  = 15
 	maxXrayNames  = 20
+	maxXrayRefs   = 100
 	maxDirEntries = 40
 )
 
@@ -110,59 +111,83 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int) (*sd
 	return h.finishMacro(ctx, "onfly_xray", rel, len(src), fmt.Sprintf("target=%q", rel), b.String(), text, n), nil
 }
 
+// blastRadius needs a fixed number of queries whatever the size of the file:
+// one for the definitions of everything it references and, per caller level,
+// two for the references to its symbols.
 func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chunk, depth int) (string, string) {
-	if depth < 1 {
-		depth = 1
-	}
 	var calls, calledBy strings.Builder
-	seen := map[string]bool{}
-	nOut := 0
-	for _, c := range chunks {
-		for _, ref := range c.Outbound {
-			if seen[ref] || nOut >= maxXrayEdges {
-				continue
-			}
-			seen[ref] = true
-			defs, err := h.store.GetComponents(ctx, ref)
-			if err != nil || len(defs) == 0 {
-				continue
-			}
-			d := nearestDefinition(defs, c)
-			if d.FilePath == rel {
-				continue
-			}
-			fmt.Fprintf(&calls, "- %s [%s]\n", signature(d), location(d))
-			nOut++
-		}
-	}
-	seenIn := map[string]bool{}
-	names, nIn := 0, 0
+	h.writeCalls(ctx, &calls, rel, chunks)
+	var targets []definition
+	seenName := map[string]bool{}
 	for _, c := range chunks {
 		name := c.Metadata["name"]
-		if name == "" || names >= maxXrayNames || nIn >= maxXrayEdges {
+		if name == "" || seenName[name] || len(targets) >= maxXrayNames {
 			continue
 		}
 		switch c.Type {
 		case "function", "method", "class", "struct", "interface", "trait":
-		default:
-			continue
-		}
-		names++
-		refs, err := h.impact(ctx, impactIn{Name: name, Depth: depth, Receiver: c.Metadata["receiver"], FilePath: rel})
-		if err != nil {
-			continue
-		}
-		for _, r := range refs {
-			key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
-			if r.FilePath == rel || seenIn[key] || nIn >= maxXrayEdges {
-				continue
-			}
-			seenIn[key] = true
-			fmt.Fprintf(&calledBy, "- %s [%s]\n", signature(r), location(r))
-			nIn++
+			seenName[name] = true
+			targets = append(targets, definition{name, rel})
 		}
 	}
+	refs, err := h.impactFrom(ctx, targets, max(depth, 1))
+	if err != nil {
+		return calls.String(), ""
+	}
+	seen := map[string]bool{}
+	n := 0
+	for _, r := range refs {
+		key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
+		if r.FilePath == rel || seen[key] || n >= maxXrayEdges {
+			continue
+		}
+		seen[key] = true
+		fmt.Fprintf(&calledBy, "- %s [%s]\n", signature(r), location(r))
+		n++
+	}
 	return calls.String(), calledBy.String()
+}
+
+func (h *tools) writeCalls(ctx context.Context, w *strings.Builder, rel string, chunks []parser.Chunk) {
+	defs, from := h.referencedDefinitions(ctx, chunks, maxXrayRefs)
+	n := 0
+	for _, ref := range from.order {
+		cands := defs[ref]
+		if len(cands) == 0 || n >= maxXrayEdges {
+			continue
+		}
+		d := nearestDefinition(cands, from.by[ref])
+		if d.FilePath == rel {
+			continue
+		}
+		fmt.Fprintf(w, "- %s [%s]\n", signature(d), location(d))
+		n++
+	}
+}
+
+type refSources struct {
+	order []string
+	by    map[string]parser.Chunk
+}
+
+// referencedDefinitions resolves the names the chunks call with one query. It
+// also returns, for each name, the first chunk that called it.
+func (h *tools) referencedDefinitions(ctx context.Context, chunks []parser.Chunk, limit int) (map[string][]parser.Chunk, refSources) {
+	src := refSources{by: map[string]parser.Chunk{}}
+	for _, c := range chunks {
+		for _, ref := range c.Outbound {
+			if _, ok := src.by[ref]; ok || len(src.order) >= limit {
+				continue
+			}
+			src.by[ref] = c
+			src.order = append(src.order, ref)
+		}
+	}
+	defs, err := h.store.ComponentsByNames(ctx, src.order)
+	if err != nil {
+		return nil, refSources{by: map[string]parser.Chunk{}}
+	}
+	return defs, src
 }
 
 func (h *tools) xrayDir(ctx context.Context, rel string, files []string) (*sdkmcp.CallToolResult, error) {

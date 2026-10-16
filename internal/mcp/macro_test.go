@@ -164,3 +164,75 @@ func openSessionAs(t *testing.T, cfg config.Config) *sdkmcp.ClientSession {
 	t.Cleanup(func() { session.Close() })
 	return session
 }
+
+type countingStore struct {
+	vectorstore.Store
+	single, batched int
+}
+
+func (c *countingStore) GetComponents(ctx context.Context, name string) ([]parser.Chunk, error) {
+	c.single++
+	return c.Store.GetComponents(ctx, name)
+}
+
+func (c *countingStore) GetReferences(ctx context.Context, name string) ([]parser.Chunk, error) {
+	c.single++
+	return c.Store.GetReferences(ctx, name)
+}
+
+func (c *countingStore) ComponentsByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error) {
+	c.batched++
+	return c.Store.ComponentsByNames(ctx, names)
+}
+
+func (c *countingStore) ReferencesByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error) {
+	c.batched++
+	return c.Store.ReferencesByNames(ctx, names)
+}
+
+func TestBlastRadiusUsesBatchedQueries(t *testing.T) {
+	root := t.TempDir()
+	var src strings.Builder
+	src.WriteString("package big\n")
+	store := openTestStore(t)
+	vec := []float32{1, 0, 0, 1}
+	var chunks []vectorstore.EmbeddedChunk
+	for i := 0; i < 40; i++ {
+		name := "F" + strconv.Itoa(i)
+		src.WriteString("func " + name + "() {}\n")
+		out := []string{"Ext" + strconv.Itoa(i), "Missing" + strconv.Itoa(i)}
+		chunks = append(chunks,
+			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "big.go", Type: "function", Content: "func " + name + "() {}", Metadata: map[string]string{"name": name, "start_line": strconv.Itoa(i + 2), "end_line": strconv.Itoa(i + 2)}, Outbound: out}, Vector: vec},
+			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "ext.go", Type: "function", Content: "func Ext" + strconv.Itoa(i) + "() {}", Metadata: map[string]string{"name": "Ext" + strconv.Itoa(i)}}, Vector: vec},
+			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "use.go", Type: "function", Content: "func Use" + strconv.Itoa(i) + "() { " + name + "() }", Metadata: map[string]string{"name": "Use" + strconv.Itoa(i)}, Outbound: []string{name}}, Vector: vec},
+		)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.go"), []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := storetest.Save(context.Background(), store, chunks); err != nil {
+		t.Fatal(err)
+	}
+	counted := &countingStore{Store: store}
+	session := openServer(t, config.Config{ProjectRoot: root, Server: config.Server{MaxTokens: 8192}}, counted, fakeEmbedder{})
+	out := callText(t, session, "onfly_xray", map[string]any{"target": "big.go", "depth": 2})
+	if !strings.Contains(out, "func Ext0() {}") || !strings.Contains(out, "func Use0() { F0() }") {
+		t.Fatalf("blast radius missing:\n%s", out)
+	}
+	if counted.single != 0 {
+		t.Fatalf("%d per-name queries; the blast radius must use batched ones", counted.single)
+	}
+	if counted.batched > 1+2*2 {
+		t.Fatalf("%d batched queries for depth 2, want at most 5", counted.batched)
+	}
+}
+
+func TestRuleDedupIsPerServerAndInMemory(t *testing.T) {
+	cfg, store, _ := macroFixture(t)
+	for i := 0; i < 2; i++ {
+		session := openServer(t, cfg, store, fakeEmbedder{})
+		if out := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go"}); !strings.Contains(out, "Use the repository layer.") {
+			t.Fatalf("server %d: a new server starts with no rules sent:\n%s", i, out)
+		}
+	}
+}

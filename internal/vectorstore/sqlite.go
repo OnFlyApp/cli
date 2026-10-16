@@ -163,6 +163,7 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 	}
 	stmts := []string{
 		`CREATE INDEX IF NOT EXISTS idx_chunk_meta_file ON chunk_meta(file_path)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunk_meta_name ON chunk_meta(json_extract(metadata, '$.name'))`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS chunk_fts USING fts5(
 			content, file_path, content='chunk_meta', content_rowid='rowid', tokenize='trigram'
 		)`,
@@ -696,6 +697,69 @@ func (s *SQLite) GetComponents(ctx context.Context, name string) ([]parser.Chunk
 		return nil, err
 	}
 	return assembleComponents(chunks)
+}
+
+func (s *SQLite) ComponentsByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error) {
+	byName := map[string][]parser.Chunk{}
+	for batch := range slices.Chunk(uniqueNames(names), sqliteBindBatch) {
+		args := make([]any, len(batch))
+		for i, n := range batch {
+			args[i] = n
+		}
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT json_extract(metadata, '$.name'), file_path, type, content, metadata, outbound FROM chunk_meta
+			WHERE json_extract(metadata, '$.name') IN (`+placeholders(len(batch))+`)
+			ORDER BY rowid`, args...)
+		if err != nil {
+			return nil, err
+		}
+		if err := scanNamed(rows, byName, 0); err != nil {
+			return nil, err
+		}
+	}
+	return groupComponents(byName)
+}
+
+func (s *SQLite) ReferencesByNames(ctx context.Context, names []string) (map[string][]parser.Chunk, error) {
+	byName := map[string][]parser.Chunk{}
+	for batch := range slices.Chunk(uniqueNames(names), sqliteBindBatch) {
+		args := make([]any, len(batch))
+		for i, n := range batch {
+			args[i] = n
+		}
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT json_each.value, m.file_path, m.type, m.content, m.metadata, m.outbound
+			FROM chunk_meta AS m, json_each(m.outbound)
+			WHERE json_each.value IN (`+placeholders(len(batch))+`)
+			ORDER BY m.file_path, m.rowid`, args...)
+		if err != nil {
+			return nil, err
+		}
+		if err := scanNamed(rows, byName, referenceLimit); err != nil {
+			return nil, err
+		}
+	}
+	return byName, nil
+}
+
+// scanNamed reads rows whose first column is the name a chunk was found under.
+func scanNamed(rows *sql.Rows, into map[string][]parser.Chunk, limit int) error {
+	defer rows.Close()
+	for rows.Next() {
+		var name, filePath, typ, content, meta, outbound string
+		if err := rows.Scan(&name, &filePath, &typ, &content, &meta, &outbound); err != nil {
+			return err
+		}
+		if limit > 0 && len(into[name]) >= limit {
+			continue
+		}
+		ch, err := chunkFrom(filePath, typ, content, meta, outbound)
+		if err != nil {
+			return err
+		}
+		into[name] = append(into[name], ch)
+	}
+	return rows.Err()
 }
 
 func (s *SQLite) ListChunks(ctx context.Context) ([]StoredChunk, error) {
