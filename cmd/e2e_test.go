@@ -85,6 +85,7 @@ func TestE2EGoParser(t *testing.T) {
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("%v %+v", err, hits)
 	}
+	cfg.Server.AtomicTools = true
 	emb, err := embedder.New(cfg.Embedder)
 	if err != nil {
 		t.Fatal(err)

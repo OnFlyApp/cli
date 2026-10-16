@@ -40,7 +40,7 @@ func TestSearchDetailAutoShrinksTail(t *testing.T) {
 func TestInstructionsAndToolDescriptions(t *testing.T) {
 	store := seedUsers(t)
 	session := openServer(t, config.Config{}, store, fakeEmbedder{})
-	if got := session.InitializeResult().Instructions; !strings.Contains(got, "graph") || !strings.Contains(got, "get_tests") {
+	if got := session.InitializeResult().Instructions; !strings.Contains(got, "onfly_xray") || !strings.Contains(got, "get_tests") {
 		t.Fatalf("instructions must route to the graph tools: %q", got)
 	}
 	res, err := session.ListTools(context.Background(), nil)

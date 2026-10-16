@@ -49,7 +49,7 @@ When `server.trace_file` is set, each tool call appends one JSON object to it (o
 
 When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `graph`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
 
-The server instructions carry a short routing guide (`search` for behavior, `get_component_ast` for a known symbol, `graph` and `get_tests` before a change, `get_history` for risk). `onfly mcp-config claude-code --allow` prints the `.claude/settings.json` rule (`mcp__onfly`) that lets the read-only tools run without a prompt. `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
+The server instructions carry a short routing guide (`onfly_xray` before reading a large file, `onfly_focus` for a flow, `get_tests` before a change, `get_history` for risk). `onfly setup claude` registers the server in `.mcp.json` and writes that guide into `CLAUDE.md` in one step. `onfly mcp-config claude-code --allow` prints the `.claude/settings.json` rule (`mcp__onfly`) that lets the read-only tools run without a prompt. `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
 
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
@@ -61,7 +61,39 @@ Tool failures are tool results with `isError` set. They are not protocol errors.
 
 ## Tools
 
-### `search`
+By default the server registers `onfly_xray`, `onfly_focus`, `get_tests` and `get_history`. The single-purpose tools (`search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules`) are registered when `server.atomic_tools: true`; they overlap with an assistant's own `Read` and `Grep` and cost context on every session. The rest of this page describes the tool by name; those marked atomic need the flag.
+
+### `onfly_xray`
+
+Inspects a file, a directory or a symbol with far fewer tokens than reading it. `target` is a project-relative file, a directory, or a symbol name (which resolves to its file and keeps that symbol expanded). `focus_symbol` keeps one method fully expanded. `depth` (1 to 4, default 1) is how many caller levels `called_by` follows.
+
+For a file the result is one text block:
+
+```xml
+<onfly_context target="app/Services/PaymentService.php" tokens_saved="3420">
+<skeleton>the file with every function or method body longer than 10 lines replaced by
+// ... [body omitted: lines 12-58, ~410 tokens] ...</skeleton>
+<blast_radius>
+<calls>- signature [file:line]  (what the file uses, defined in other files)</calls>
+<called_by>- signature [file:line]  (who calls the file's symbols, up to depth)</called_by>
+</blast_radius>
+<architectural_rules>project rules that match the path or chunk types</architectural_rules>
+</onfly_context>
+```
+
+A directory lists each indexed file with its symbol names. The skeleton is cut to `server.max_tokens`. A target that is not indexed is a tool error that names `onfly index`.
+
+Each rule is sent once per MCP session, however many files match it, so the second call about the same directory carries no rules.
+
+### `onfly_focus`
+
+Searches by meaning and by name (the same fusion as `search`) and returns a bundle: `<symbols>` with the full code of the top `limit` matches (default 5, at most 20), `<related>` with one-line signatures of what they use, and the matching rules once per session.
+
+### Telemetry
+
+Both tools append one row per call to `telemetry.db` beside `server.log_file`: tool, target, the size of the files the answer replaced, the size of the answer, and the number of rules sent. `tokens_saved` in the result is the difference at four bytes per token. `onfly stats` totals them: requests, tokens saved and the share they represent, dollars at $3 per million input tokens, and rules enforced. The file holds sizes and paths only.
+
+### `search` (atomic)
 
 Finds code by what it does. Embeds `query` once and fuses semantic, keyword, per-word keyword and symbol-name lists, plus the lists of any second embedder, summary vector or summary keyword index that the project enables. Each side reads a candidate pool of `limit` raised to at least 20 and capped at 50. Rank in a list starts at 1. A repeated chunk keeps its first rank. The score is the sum of `weight / (rrf_k + rank)` over the lists; weights and `rrf_k` are in [configuration.md](configuration.md#search-fusion). Hits are sorted by score, then path, then text. A hit carries `summary` when the chunk has a generated one. The structured result is `{ "rules", "hits", "callers", "tests" }`. `hits` has `limit` entries. When the first hit is a named code chunk shown with its code, `callers` lists up to 5 chunks that reference it (one level, signatures only) and `tests` up to 5 test-file lines that mention its name, so a question about what uses or covers it needs no second call; both are omitted when empty. `rules` is omitted when nothing matches. An empty or whitespace `query` is a tool error and does not embed. A keyword error leaves the semantic hits in place.
 

@@ -204,6 +204,29 @@ func (e *Engine) Inject(q Query, maxTokens int) string {
 	return fitText(parts, e.budget(maxTokens))
 }
 
+func (e *Engine) InjectNew(q Query, maxTokens int, seen map[string]bool) (string, int) {
+	if e == nil {
+		return "", 0
+	}
+	var parts []string
+	var keys []string
+	for _, rule := range e.rules {
+		if rule.Err != nil || seen[rule.Path] || !rule.matches(q) {
+			continue
+		}
+		parts = append(parts, rule.text())
+		keys = append(keys, rule.Path)
+	}
+	text := fitText(parts, e.budget(maxTokens))
+	if text == "" {
+		return "", 0
+	}
+	for _, k := range keys {
+		seen[k] = true
+	}
+	return text, len(keys)
+}
+
 type Report struct {
 	Tokens  int
 	Budget  int

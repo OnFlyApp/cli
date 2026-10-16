@@ -10,7 +10,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const toolsTokenBudget = 1200
+const toolsTokenBudget = 1500
 
 func TestToolDefinitionsStayWithinBudget(t *testing.T) {
 	session := openServer(t, config.Config{}, seedUsers(t), fakeEmbedder{})

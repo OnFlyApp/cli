@@ -21,6 +21,7 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/query"
 	"github.com/axitdev/onfly/internal/rules"
+	"github.com/axitdev/onfly/internal/telemetry"
 	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/usage"
 	"github.com/axitdev/onfly/internal/vectorstore"
@@ -134,6 +135,9 @@ type tools struct {
 	trace     io.Writer
 	usage     *usage.Log
 	traceMu   sync.Mutex
+	tel       *telemetry.Log
+	seenMu    sync.Mutex
+	seen      map[string]bool
 }
 
 func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, logger *slog.Logger) (*sdkmcp.Server, func(), error) {
@@ -171,13 +175,20 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		logger.Warn("rules", "err", msg)
 	}
 	closer := func() {}
+	if tel, err := telemetry.Open(cfg.Server.TelemetryPath()); err != nil {
+		logger.Warn("telemetry disabled", "err", err)
+	} else {
+		h.tel = tel
+		closer = func() { tel.Close() }
+	}
 	if cfg.Server.TraceFile != "" {
 		f, err := os.OpenFile(cfg.Server.TraceFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
 			return nil, nil, err
 		}
 		h.trace = f
-		closer = func() { f.Close() }
+		prev := closer
+		closer = func() { f.Close(); prev() }
 	}
 	instructions := "Search the indexed project. stdout is JSON-RPC only.\n\n" + Guidance
 	if text := h.engine.Inject(rules.Query{}, maxTokens); text != "" {
@@ -189,19 +200,23 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
-	addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns symbols, summaries and code; hits past the third are signatures."}, h.search)
-	addTool(srv, &sdkmcp.Tool{Name: "find", Description: "Exact lookup. kind text: chunks containing a string or identifier, like Grep over the index. kind symbol: definitions by name; * and ? are wildcards."}, h.find)
-	addTool(srv, &sdkmcp.Tool{Name: "graph", Description: "Follow calls from a symbol: callers (what breaks if it changes), callees (what it uses) or references (where its name appears)."}, h.graph)
-	addTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find instead of reading the whole file."}, h.component)
-	addTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
+	addTool(srv, &sdkmcp.Tool{Name: "onfly_xray", Description: "Inspect a file, directory or symbol cheaply: skeleton with long bodies collapsed, what it calls and what calls it, and the project rules for that path. Prefer it to Read for unfamiliar files or files over 100 lines."}, h.xray)
+	addTool(srv, &sdkmcp.Tool{Name: "onfly_focus", Description: "Search by meaning and name. Returns a ready bundle: full code of the best matches, signatures of what they use, and the project rules. Use it for flows and business logic instead of several Grep calls."}, h.focus)
 	addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
 	addTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
+	if cfg.Server.AtomicTools {
+		addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns symbols, summaries and code; hits past the third are signatures."}, h.search)
+		addTool(srv, &sdkmcp.Tool{Name: "find", Description: "Exact lookup. kind text: chunks containing a string or identifier, like Grep over the index. kind symbol: definitions by name; * and ? are wildcards."}, h.find)
+		addTool(srv, &sdkmcp.Tool{Name: "graph", Description: "Follow calls from a symbol: callers (what breaks if it changes), callees (what it uses) or references (where its name appears)."}, h.graph)
+		addTool(srv, &sdkmcp.Tool{Name: "get_component_ast", Description: "Return the full code of one symbol by name. Use after search or find instead of reading the whole file."}, h.component)
+		addTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
+		addTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
+	}
 	h.addPrompts(srv)
 	if cfg.Server.FileTools {
 		addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
 		addTool(srv, &sdkmcp.Tool{Name: "list_directory", Description: "List one directory level inside the project."}, h.listDir)
 	}
-	addTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
 	srv.AddResource(&sdkmcp.Resource{URI: "onfly://index", Name: "index", MIMEType: "text/plain"}, func(ctx context.Context, _ *sdkmcp.ReadResourceRequest) (*sdkmcp.ReadResourceResult, error) {
 		n, err := store.Generation(ctx)
 		if err != nil {

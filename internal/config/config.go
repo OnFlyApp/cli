@@ -131,6 +131,17 @@ type Server struct {
 	UsageFile string `yaml:"usage_file"`
 	Watch     bool   `yaml:"watch"`
 	FileTools bool   `yaml:"file_tools"`
+	// AtomicTools registers the single-purpose tools (search, find, graph, ...)
+	// beside onfly_xray and onfly_focus.
+	AtomicTools bool `yaml:"atomic_tools"`
+}
+
+// TelemetryPath is the file that records the bytes each tool call saved.
+func (s Server) TelemetryPath() string {
+	if s.LogFile == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(s.LogFile), "telemetry.db")
 }
 
 type RulesEngine struct {
@@ -358,6 +369,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Server.FileTools {
 		out.Server.FileTools = true
+	}
+	if child.Server.AtomicTools {
+		out.Server.AtomicTools = true
 	}
 	if child.Server.UsageFile != "" {
 		out.Server.UsageFile = child.Server.UsageFile

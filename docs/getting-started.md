@@ -107,10 +107,11 @@ Each line is a file, a line range, and the symbol. If this finds the right place
 ## 6. Connect your IDE
 
 ```sh
-onfly mcp-config claude-code > .mcp.json
+onfly setup claude          # registers the server in .mcp.json and writes the guide into CLAUDE.md
+# or by hand: onfly mcp-config claude-code > .mcp.json
 ```
 
-Run without the redirect to see the entry, and which file it belongs in. Use `cursor` or `vscode` instead of `claude-code` for those editors; the output goes in `.cursor/mcp.json` and `.vscode/mcp.json`. Restart the IDE. Ask it something about your code, such as "how is authentication handled?", and watch it call the `search` tool.
+Run without the redirect to see the entry, and which file it belongs in. Use `cursor` or `vscode` instead of `claude-code` for those editors; the output goes in `.cursor/mcp.json` and `.vscode/mcp.json`. Restart the IDE. Ask it something about your code, such as "how is authentication handled?", and watch it call `onfly_xray` or `onfly_focus`.
 
 Run `onfly guide --write` once to add a short "when to use which tool" block to `CLAUDE.md`. The server also sends it as instructions; the file copy helps clients that ignore them. Running it again replaces the block and leaves the rest of the file alone.
 

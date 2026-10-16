@@ -66,7 +66,7 @@ func TestTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{ProjectRoot: root, Rules: []string{rules}, Server: config.Server{FileTools: true}}
+	cfg := config.Config{ProjectRoot: root, Rules: []string{rules}, Server: config.Server{FileTools: true, AtomicTools: true}}
 	srv, cleanup, err := NewServer(cfg, store, fakeEmbedder{}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -147,6 +147,7 @@ func TestServeStdoutIsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.Server.AtomicTools = true
 	clientToServerR, clientToServerW := io.Pipe()
 	serverToClientR, serverToClientW := io.Pipe()
 	var stdout bytes.Buffer
@@ -220,6 +221,7 @@ func openServer(t *testing.T, cfg config.Config, store vectorstore.Store, emb em
 
 func openSession(t *testing.T, cfg config.Config, store vectorstore.Store, emb embedder.Embedder, opts *sdkmcp.ClientOptions) *sdkmcp.ClientSession {
 	t.Helper()
+	cfg.Server.AtomicTools = true
 	srv, cleanup, err := NewServer(cfg, store, emb, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -504,7 +506,7 @@ func TestGenerationNotify(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := make(chan string, 4)
-	srv, cleanup, err := NewServer(config.Config{}, store, fakeEmbedder{}, nil)
+	srv, cleanup, err := NewServer(config.Config{Server: config.Server{AtomicTools: true}}, store, fakeEmbedder{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

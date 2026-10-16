@@ -1,9 +1,7 @@
 package mcp
 
-const Guidance = `## Code search (onfly)
-- Question about behavior, or "where is X done": call search first; use Grep only for exact strings.
-- Have a symbol name: get_component_ast, not Read of the whole file.
-- Before changing a function: graph (callers) and get_tests (what covers it).
-- To judge risk or why code looks odd: get_history.
-- Search hits marked brief show only a signature; fetch the body with get_component_ast.
-- A hit marked stale changed on disk after indexing: Read the file before trusting its lines.`
+const Guidance = `## Codebase exploration (onfly)
+- Before Read on a code file over 100 lines, call onfly_xray(target): skeleton, callers and callees, and the project rules for that path at a fraction of the tokens. Pass focus_symbol to keep one method expanded.
+- To find a flow or business logic, call onfly_focus(query) instead of several Grep calls: full code of the best matches, signatures of what they use, and the rules.
+- Before changing a function: onfly_xray (called_by) and get_tests. To judge risk: get_history.
+- Rules arrive with these results once per session; do not ask for them separately.`

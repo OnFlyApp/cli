@@ -106,6 +106,9 @@ var initCmd = &cobra.Command{
 			return err
 		}
 		printInitReport(cmd.OutOrStdout(), created, initCI)
+		if !initCI {
+			bootstrapProject(cmd.Context(), cmd.OutOrStdout(), wd)
+		}
 		return nil
 	},
 }

@@ -206,3 +206,18 @@ func writeRule(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestInjectNewSendsEachRuleOnce(t *testing.T) {
+	dir := t.TempDir()
+	writeRule(t, dir, "a.md", "---\nname: A\nscope: [\"*\"]\n---\nALPHA\n")
+	cfg := config.Config{ProjectRoot: dir, RulesEngine: config.RulesEngine{MaxTokenBudgetPercent: 100}}
+	eng := Load(cfg)
+	seen := map[string]bool{}
+	first, n := eng.InjectNew(Query{}, 10000, seen)
+	if !strings.Contains(first, "ALPHA") || n != 1 {
+		t.Fatalf("first %q %d", first, n)
+	}
+	if second, n := eng.InjectNew(Query{}, 10000, seen); second != "" || n != 0 {
+		t.Fatalf("second %q %d", second, n)
+	}
+}

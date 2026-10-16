@@ -95,6 +95,7 @@ server:
   max_tokens: 8192               # search result budget; serve --max-tokens overrides when > 0
   watch: false                   # reindex changed files while serving; same as serve --watch
   # trace_file: .onfly/mcp_trace.jsonl   # off by default; appends one JSON line per tool call
+  # atomic_tools: true                  # also register search, find, graph, get_component_ast, get_file_outline, get_project_rules
   # file_tools: true                    # also register read_file_raw and list_directory (duplicates of an assistant's own file tools)
   # usage_file: .onfly/usage.jsonl       # off by default; records which hit an assistant opens after a search
 ```

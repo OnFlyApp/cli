@@ -1,0 +1,86 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/axitdev/onfly/internal/ext"
+)
+
+var manifestLanguages = []struct{ file, parser string }{
+	{"go.mod", "go"},
+	{"composer.json", "php"},
+	{"package.json", "typescript"},
+	{"Cargo.toml", "rust"},
+	{"pyproject.toml", "python"},
+	{"requirements.txt", "python"},
+	{"Gemfile", "ruby"},
+	{"pom.xml", "java"},
+	{"build.gradle", "java"},
+}
+
+func detectLanguages(dir string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range manifestLanguages {
+		if seen[m.parser] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, m.file)); err == nil {
+			seen[m.parser] = true
+			out = append(out, m.parser)
+		}
+	}
+	return out
+}
+
+// ensureGitignore adds .onfly/ to the project's .gitignore when the project is
+// a git repository (or already has a .gitignore) and does not list it yet.
+func ensureGitignore(dir string) (bool, error) {
+	path := filepath.Join(dir, ".gitignore")
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	if os.IsNotExist(err) {
+		if _, gerr := os.Stat(filepath.Join(dir, ".git")); gerr != nil {
+			return false, nil
+		}
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		switch strings.TrimSpace(line) {
+		case ".onfly", ".onfly/", "/.onfly", "/.onfly/":
+			return false, nil
+		}
+	}
+	text := string(raw)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return true, os.WriteFile(path, []byte(text+".onfly/\n"), 0o644)
+}
+
+var installParser = func(ctx context.Context, dir, name string) error {
+	opt := extOptions(dir)
+	opt.Yes = true
+	return ext.Install(ctx, opt, name)
+}
+
+func bootstrapProject(ctx context.Context, w io.Writer, dir string) {
+	if added, err := ensureGitignore(dir); err != nil {
+		fmt.Fprintf(w, "could not update .gitignore: %v\n", err)
+	} else if added {
+		fmt.Fprintln(w, "added .onfly/ to .gitignore")
+	}
+	for _, lang := range detectLanguages(dir) {
+		if err := installParser(ctx, dir, lang); err != nil {
+			fmt.Fprintf(w, "no %s parser installed (%v); try: onfly ext install %s\n", lang, err, lang)
+			continue
+		}
+		fmt.Fprintf(w, "installed the %s parser\n", lang)
+	}
+}

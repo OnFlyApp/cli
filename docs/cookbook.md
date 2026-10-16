@@ -170,7 +170,7 @@ onfly init --ci        # writes .github/workflows/onfly-index.yml
 onfly search "error handling" --changed-since main
 ```
 
-The assistant gets the same option through the `changed_since` argument of `search`. Handy for reviews.
+The assistant gets the same option through the `changed_since` argument of `search` (with `server.atomic_tools`). Handy for reviews.
 
 ## Search only code, or only docs
 
@@ -182,7 +182,7 @@ onfly search "how are secrets handled" --type section      # Markdown only
 onfly search "retry policy" --path 'internal/**'
 ```
 
-The assistant gets the same options as the `type` and `path` arguments of `search`.
+The assistant gets the same options as the `type` and `path` arguments of `search` (with `server.atomic_tools`).
 
 ## Improve ranking with a reranker
 

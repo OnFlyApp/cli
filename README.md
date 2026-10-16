@@ -48,6 +48,7 @@ Not a Go project? `onfly init` already enables the built-in text parser, so Mark
 Connect your IDE:
 
 ```sh
+onfly setup claude                          # Claude Code: .mcp.json and CLAUDE.md in one step
 onfly mcp-config claude-code > .mcp.json      # or: cursor, vscode
 onfly guide --write                           # tell the assistant when to use which tool (CLAUDE.md)
 ```
@@ -60,15 +61,13 @@ New here? [Getting started](docs/getting-started.md) walks through each step and
 
 | Tool | Use it to |
 | --- | --- |
-| `search` | Find code by what it does. |
-| `find` | Exact lookup: a string or identifier, or definitions by name (`Save*`). |
-| `get_file_outline` | See what a file defines, without reading it. |
-| `get_component_ast` | Fetch one function or type with its full code. |
-| `graph` | Follow calls: who uses it, what it uses, what breaks. |
+| `onfly_xray` | Inspect a file, folder or symbol: skeleton with long bodies collapsed, who calls it, what it calls, and the project rules for that path. |
+| `onfly_focus` | Search by meaning and name; get the code of the best matches, signatures of what they use, and the rules. |
 | `get_tests`, `get_history` | Which tests mention a symbol, and which commits touched it. |
+| `search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules` | Opt-in (`server.atomic_tools: true`): the single-purpose tools. |
 | `read_file_raw`, `list_directory` | Opt-in (`server.file_tools: true`): read a file or browse a folder. |
 
-Two ready-made prompts, `explain-component` and `review-impact`, chain these for you. Details are in [MCP server](docs/mcp.md).
+Two ready-made prompts, `explain-component` and `review-impact`, chain these for you. `onfly setup claude` registers the server and writes the usage guide into `CLAUDE.md`; `onfly stats` then shows the tokens the two main tools saved. Details are in [MCP server](docs/mcp.md).
 
 ## Everyday commands
 

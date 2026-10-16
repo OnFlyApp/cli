@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/axitdev/onfly/internal/telemetry"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	"github.com/spf13/cobra"
 )
@@ -46,8 +48,34 @@ var statsCmd = &cobra.Command{
 		if s.Files == 0 {
 			fmt.Fprintln(out, "the index is empty. Run: onfly index")
 		}
-		return nil
+		return printTelemetry(cmd.Context(), out, cfg.Server.TelemetryPath())
 	},
+}
+
+const usdPerMillionInputTokens = 3.0
+
+// printTelemetry shows what onfly_xray and onfly_focus kept out of the model's
+// context. It stays silent until the server has recorded a call.
+func printTelemetry(ctx context.Context, w io.Writer, path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	tel, err := telemetry.Open(path)
+	if err != nil {
+		return err
+	}
+	defer tel.Close()
+	s, err := tel.Summary(ctx)
+	if err != nil || s.Requests == 0 {
+		return err
+	}
+	saved := s.Saved()
+	fmt.Fprintf(w, "\ntelemetry (estimated at 4 bytes per token)\n")
+	fmt.Fprintf(w, "requests served: %d\n", s.Requests)
+	fmt.Fprintf(w, "tokens saved: %d (%.0f%% smaller than reading the files)\n", saved, s.Ratio()*100)
+	fmt.Fprintf(w, "usd saved: $%.2f at $%.0f per million input tokens\n", float64(saved)/1e6*usdPerMillionInputTokens, usdPerMillionInputTokens)
+	fmt.Fprintf(w, "rules injected: %d\n", s.Rules)
+	return nil
 }
 
 func formatStats(w io.Writer, s vectorstore.IndexStats) {
