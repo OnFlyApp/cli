@@ -1,5 +1,11 @@
 # Onfly
 
+> **Experimental, test repository.** Measured with Claude Code on five repositories (three runs per task; details in [docs/evaluation.md](docs/evaluation.md)):
+>
+> - Best case, on two medium repositories with questions about behavior: about 10% fewer turns and less time, 12 to 16% fewer output tokens, 6% less context sent to the model.
+> - On the other three there was no gain: the assistant rarely called Onfly and found answers with Grep or Read.
+> - Cost savings were not measured reliably (prompt caching dominates) and are unproven.
+
 **Give your AI coding assistant a searchable map of your codebase.**
 
 Onfly reads your project, splits it into meaningful pieces (functions, types, doc sections), and builds a local search index. Your IDE's assistant (Claude Code, Cursor, VS Code, anything that speaks [MCP](https://modelcontextprotocol.io)) then asks Onfly instead of guessing or reading whole files.
@@ -13,7 +19,7 @@ Assistant:  asks Onfly → internal/billing/webhook.go:42-71  VerifySignature
 ## Why use it
 
 - **Finds code by meaning**, not only by exact words. "retry with backoff" finds the retry helper even if it never says "backoff".
-- **Cheap on tokens.** The assistant gets the 10 right chunks, not 40 files.
+- **Small answers.** The assistant gets the 10 right chunks, not 40 files (see Status for what that saved in practice).
 - **Knows your conventions.** Short rule files you write are attached to results.
 - **Stays on your machine** if you use a local embedder such as Ollama.
 - **Understands relationships**: who calls this function, what does it call, what breaks if I change it.
