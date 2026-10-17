@@ -159,8 +159,9 @@ func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, 
 			n++
 		}
 	}
-	return fmt.Sprintf("<definition at=%q>\n%s\n<calls>\n%s</calls>\n<called_by>\n%s</called_by>\n</definition>\n",
-		location(d), signature(d), calls.String(), calledBy.String()), len(deps)
+	impls := h.implementationsBlock(ctx, []parser.Chunk{d})
+	return fmt.Sprintf("<definition at=%q>\n%s\n<calls>\n%s</calls>\n<called_by>\n%s</called_by>\n%s</definition>\n",
+		location(d), signature(d), calls.String(), calledBy.String(), impls), len(deps)
 }
 
 // xraySymbols answers a name that has several definitions with a block for

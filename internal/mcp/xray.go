@@ -123,6 +123,9 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	if symbols != "" {
 		b.WriteString("<definitions>\n" + symbols + "</definitions>\n")
 	}
+	if symbols == "" {
+		b.WriteString(h.implementationsBlock(ctx, chunks))
+	}
 	text, n := h.rulesOnce(chunkQuery(chunks))
 	// Without onfly the assistant reads the file and spends about 150 tokens of
 	// grep and read context on each file it depends on or that depends on it.
