@@ -107,3 +107,15 @@ func TestDemoteTestsKeepsImplementationFirstUnlessAskedAboutTests(t *testing.T) 
 		t.Fatalf("a query about tests keeps their order: %v", got)
 	}
 }
+
+func TestDemoteBoilerplateMovesImportsAndNamespacesLast(t *testing.T) {
+	ranked := []parser.Chunk{
+		chunk("use Symfony\\Component\\Console\\Question;", "use", "use Symfony\\Component\\Console\\Question;"),
+		chunk("Illuminate\\Notifications", "namespace", "namespace Illuminate\\Notifications;"),
+		chunk("verify", "method", "public function verify($x)\n{\n    a();\n    b();\n    c();\n}"),
+	}
+	got := demoteBoilerplate(ranked, []string{"verify"})
+	if got[0].Metadata["name"] != "verify" {
+		t.Fatalf("code leads imports: %v", got)
+	}
+}

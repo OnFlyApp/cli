@@ -78,3 +78,30 @@ func BenchmarkSplitLongLine(b *testing.B) {
 		Split([]parser.Chunk{{Content: text}}, 1000, 100, count)
 	}
 }
+
+// Counting tokens is the expensive step, and the overlap used to count the
+// whole previous part once per rune dropped.
+func TestOverlapCountsTokensAFewTimesPerPart(t *testing.T) {
+	var calls, bytes int
+	count := func(s string) int {
+		calls++
+		bytes += len(s)
+		return (len(s) + 3) / 4
+	}
+	var b strings.Builder
+	for b.Len() < 400_000 {
+		b.WriteString("func handle() { run(x) } // some words to fill the line\n")
+	}
+	got := Split([]parser.Chunk{{Content: b.String(), Metadata: map[string]string{}}}, 512, 60, count)
+	if len(got) < 100 {
+		t.Fatalf("the chunk should split into many parts: %d", len(got))
+	}
+	for _, p := range got {
+		if count(p.Content) > 512 {
+			t.Fatalf("a part exceeds the limit: %d", count(p.Content))
+		}
+	}
+	if perPart := bytes / len(got); perPart > 60_000 {
+		t.Fatalf("%d bytes counted per part (%d calls): the overlap is tokenizing whole chunks", perPart, calls)
+	}
+}

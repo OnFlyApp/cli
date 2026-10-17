@@ -104,7 +104,10 @@ type Indexer struct {
 	EmbedContext   bool           `yaml:"embed_context"`
 	ParseTimeoutMS int            `yaml:"parse_timeout_ms"`
 	SkipTypes      []string       `yaml:"skip_types"`
-	Summaries      Summaries      `yaml:"summaries"`
+	// IndexGenerated keeps machine-generated files (Go "Code generated ... DO NOT
+	// EDIT", protobuf stubs, zz_generated) in the index; by default they are left out.
+	IndexGenerated bool      `yaml:"index_generated"`
+	Summaries      Summaries `yaml:"summaries"`
 }
 
 type Summaries struct {
@@ -474,6 +477,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Indexer.ParseTimeoutMS != 0 {
 		out.Indexer.ParseTimeoutMS = child.Indexer.ParseTimeoutMS
+	}
+	if child.Indexer.IndexGenerated {
+		out.Indexer.IndexGenerated = true
 	}
 	if child.Indexer.Concurrency != 0 {
 		out.Indexer.Concurrency = child.Indexer.Concurrency

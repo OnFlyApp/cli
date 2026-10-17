@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -516,7 +517,22 @@ func (s *Session) readSource(ctx context.Context, rel string) ([]byte, *FileResu
 		s.report("failed", rel)
 		return nil, &FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
+	if !s.cfg.Indexer.IndexGenerated && isGenerated(rel, body) {
+		return s.omitEarly(ctx, rel)
+	}
 	return body, nil, nil
+}
+
+// isGenerated recognises machine-written files: they repeat the shape of the
+// code they come from, are not written by anyone, and in a large repository
+// they are a fifth of the chunks (Kubernetes: zz_generated, protobuf stubs).
+func isGenerated(rel string, body []byte) bool {
+	base := strings.ToLower(path.Base(rel))
+	if strings.HasPrefix(base, "zz_generated") || strings.HasSuffix(base, ".pb.go") || strings.HasSuffix(base, ".pb.gw.go") {
+		return true
+	}
+	head := strings.ToLower(string(body[:min(len(body), 1024)]))
+	return strings.Contains(head, "code generated") && strings.Contains(head, "do not edit") || strings.Contains(head, "@generated")
 }
 
 func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResult, error) {

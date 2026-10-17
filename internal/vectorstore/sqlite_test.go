@@ -542,3 +542,100 @@ func TestSQLiteReopensAReplacedDatabaseFile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSQLiteReferenceIndexFollowsInsertsUpdatesDeletesAndBackfills(t *testing.T) {
+	ctx := context.Background()
+	st, err := OpenSQLite(filepath.Join(t.TempDir(), "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	c := EmbeddedChunk{Chunk: parser.Chunk{FilePath: "a.go", Type: "function", Content: "x", Metadata: map[string]string{"name": "A"}, Outbound: []string{"Foo"}}, Vector: []float32{1, 0, 0, 0}}
+	if err := saveChunks(ctx, st, []EmbeddedChunk{c}); err != nil {
+		t.Fatal(err)
+	}
+	has := func(name string) bool {
+		t.Helper()
+		got, err := st.ReferencesByNames(ctx, []string{name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(got[name]) == 1
+	}
+	if !has("Foo") {
+		t.Fatal("an inserted chunk's references are indexed")
+	}
+	stored, _ := st.ChunksByFiles(ctx, []string{"a.go"})
+	if err := st.UpdateOutbound(ctx, map[int64][]string{stored[0].ID: {"Bar"}}); err != nil {
+		t.Fatal(err)
+	}
+	if has("Foo") || !has("Bar") {
+		t.Fatal("an updated outbound list replaces the old references")
+	}
+	// An index made before the table existed gets it filled on the next Init.
+	for _, q := range []string{`DROP TRIGGER chunk_refs_ai`, `DROP TRIGGER chunk_refs_ad`, `DROP TRIGGER chunk_refs_au`, `DROP TABLE chunk_refs`} {
+		if _, err := st.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	if !has("Bar") {
+		t.Fatal("existing chunks are backfilled")
+	}
+	if err := st.DeleteFiles(ctx, []string{"a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	if has("Bar") {
+		t.Fatal("deleting a file drops its references")
+	}
+}
+
+func TestSQLiteDocFreqCountsWordsAndCapsCommonOnes(t *testing.T) {
+	ctx := context.Background()
+	st, err := OpenSQLite(filepath.Join(t.TempDir(), "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	var chunks []EmbeddedChunk
+	for i := 0; i < 500; i++ {
+		content := "func common() { alpha() }"
+		if i == 0 {
+			content = "func rare() { zebra() }"
+		}
+		chunks = append(chunks, EmbeddedChunk{Chunk: parser.Chunk{FilePath: fmt.Sprintf("f%03d.go", i), Type: "function", Content: content, Metadata: map[string]string{"name": fmt.Sprint(i)}}, Vector: []float32{1, 0, 0, 0}})
+	}
+	if err := saveChunks(ctx, st, chunks); err != nil {
+		t.Fatal(err)
+	}
+	if df, n, err := st.DocFreq(ctx, "zebra", ""); err != nil || df != 1 || n != 500 {
+		t.Fatalf("df=%d n=%d %v", df, n, err)
+	}
+	if df, _, _ := st.DocFreq(ctx, "alpha", ""); df != 200 {
+		t.Fatalf("a word in 499 chunks counts up to the cap (max(200, n/20)): %d", df)
+	}
+	// The total follows the index: a new chunk changes the generation.
+	more := EmbeddedChunk{Chunk: parser.Chunk{FilePath: "new.go", Type: "function", Content: "func z() {}", Metadata: map[string]string{"name": "z"}}, Vector: []float32{1, 0, 0, 0}}
+	if err := saveChunks(ctx, st, []EmbeddedChunk{more}); err != nil {
+		t.Fatal(err)
+	}
+	if _, n, _ := st.DocFreq(ctx, "zebra", ""); n != 501 {
+		t.Fatalf("the cached total must follow the index: %d", n)
+	}
+	// Prose is left out of the counts when asked.
+	md := EmbeddedChunk{Chunk: parser.Chunk{FilePath: "doc.md", Type: "section", Content: "zebra zebra", Metadata: map[string]string{"name": "d"}}, Vector: []float32{1, 0, 0, 0}}
+	if err := saveChunks(ctx, st, []EmbeddedChunk{md}); err != nil {
+		t.Fatal(err)
+	}
+	if df, n, _ := st.DocFreq(WithoutProse(ctx), "zebra", ""); df != 1 || n != 501 {
+		t.Fatalf("df=%d n=%d", df, n)
+	}
+}

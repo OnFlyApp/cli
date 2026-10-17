@@ -9,6 +9,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/axitdev/onfly/internal/parser"
 )
@@ -48,6 +49,101 @@ func names(list ...string) map[string]bool {
 	for _, n := range list {
 		m[n] = true
 	}
+	return m
+}
+
+type phpCall struct {
+	qual  string
+	isNew bool
+}
+
+var (
+	phpMatchCache = map[string][]phpCall{}
+)
+
+// phpUsesOf lists how a chunk's text uses a name: after which qualifier, and
+// whether with new. One chunk is asked about the same name once per candidate
+// definition, so the answer is kept.
+func phpUsesOf(name, content string) []phpCall {
+	key := name + "\x00" + content
+	cacheMu.Lock()
+	if m, ok := phpMatchCache[key]; ok {
+		cacheMu.Unlock()
+		return m
+	}
+	cacheMu.Unlock()
+	re := cachedRegexp("php|"+name, func() string {
+		return `(?:(\$?[\\\w]+)\s*(::|->|\?->)\s*)?(\bnew\s+)?\\?\b` + regexp.QuoteMeta(name) + `\b`
+	})
+	var out []phpCall
+	for _, m := range re.FindAllStringSubmatchIndex(content, -1) {
+		u := phpCall{isNew: m[6] >= 0}
+		if m[2] >= 0 {
+			u.qual = content[m[2]:m[3]]
+		}
+		out = append(out, u)
+	}
+	cacheMu.Lock()
+	if len(phpMatchCache) >= cacheLimit*16 {
+		phpMatchCache = map[string][]phpCall{}
+	}
+	phpMatchCache[key] = out
+	cacheMu.Unlock()
+	return out
+}
+
+// Resolving one file's calls asks the same questions about the same source and
+// the same names thousands of times, so the parsed imports and the compiled
+// patterns are kept. The caches are cleared when they grow, so a long-running
+// server does not hold on to every file it has seen.
+const cacheLimit = 256
+
+var (
+	cacheMu     sync.Mutex
+	reCache     = map[string]*regexp.Regexp{}
+	useCache    = map[string]map[string]string{}
+	importCache = map[string]map[string]string{}
+)
+
+func cachedRegexp(key string, pattern func() string) *regexp.Regexp {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if re, ok := reCache[key]; ok {
+		return re
+	}
+	if len(reCache) >= cacheLimit*8 {
+		reCache = map[string]*regexp.Regexp{}
+	}
+	re := regexp.MustCompile(pattern())
+	reCache[key] = re
+	return re
+}
+
+func cachedUses(src string) map[string]string {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if m, ok := useCache[src]; ok {
+		return m
+	}
+	if len(useCache) >= cacheLimit {
+		useCache = map[string]map[string]string{}
+	}
+	m := phpUses(src)
+	useCache[src] = m
+	return m
+}
+
+func cachedImports(src string) map[string]string {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if m, ok := importCache[src]; ok {
+		return m
+	}
+	if len(importCache) >= cacheLimit {
+		importCache = map[string]map[string]string{}
+	}
+	m := goImports(src)
+	importCache[src] = m
 	return m
 }
 
@@ -102,15 +198,49 @@ func importsDir(p, dir string) bool {
 	return p == dir || strings.HasSuffix(p, "/"+dir)
 }
 
-func goAccepts(src string, caller, def parser.Chunk, name string) bool {
-	imports := goImports(src)
-	use := regexp.MustCompile(`(?:\b([A-Za-z_]\w*)\s*\.\s*)?\b` + regexp.QuoteMeta(name) + `\b`)
-	for _, m := range use.FindAllStringSubmatchIndex(caller.Content, -1) {
-		q := ""
+type goCall struct {
+	qual  string
+	paren bool // the name is followed by "("
+}
+
+var goMatchCache = map[string][]goCall{}
+
+// goUsesOf lists how a chunk's text uses a name: after which qualifier, and
+// whether it is called. One chunk is asked once per candidate definition.
+func goUsesOf(name, content string) []goCall {
+	key := name + "\x00" + content
+	cacheMu.Lock()
+	if m, ok := goMatchCache[key]; ok {
+		cacheMu.Unlock()
+		return m
+	}
+	cacheMu.Unlock()
+	re := cachedRegexp("go|"+name, func() string { return `(?:\b([A-Za-z_]\w*)\s*\.\s*)?\b` + regexp.QuoteMeta(name) + `\b` })
+	var out []goCall
+	for _, m := range re.FindAllStringSubmatchIndex(content, -1) {
+		c := goCall{paren: strings.HasPrefix(strings.TrimLeft(content[m[1]:], " \t"), "(")}
 		if m[2] >= 0 {
-			q = caller.Content[m[2]:m[3]]
+			c.qual = content[m[2]:m[3]]
 		}
-		isMethod := def.Metadata["receiver"] != ""
+		out = append(out, c)
+	}
+	cacheMu.Lock()
+	if len(goMatchCache) >= cacheLimit*16 {
+		goMatchCache = map[string][]goCall{}
+	}
+	goMatchCache[key] = out
+	cacheMu.Unlock()
+	return out
+}
+
+func goAccepts(src string, caller, def parser.Chunk, name string) bool {
+	if !strings.Contains(caller.Content, name) {
+		return false
+	}
+	imports := cachedImports(src)
+	isMethod := def.Metadata["receiver"] != ""
+	for _, m := range goUsesOf(name, caller.Content) {
+		q := m.qual
 		switch {
 		case q == "":
 			if !isMethod && path.Dir(caller.FilePath) == path.Dir(def.FilePath) {
@@ -121,8 +251,7 @@ func goAccepts(src string, caller, def parser.Chunk, name string) bool {
 				return true
 			}
 		default:
-			rest := strings.TrimLeft(caller.Content[m[1]:], " \t")
-			if isMethod && strings.HasPrefix(rest, "(") && (!goUbiquitous[name] || def.FilePath == caller.FilePath) {
+			if isMethod && m.paren && (!goUbiquitous[name] || def.FilePath == caller.FilePath) {
 				return true
 			}
 		}
@@ -167,18 +296,34 @@ func phpClass(q string, uses map[string]string, ns string) string {
 	return ns + `\` + q
 }
 
+// phpRelated says whether a method called on a value of unknown type can
+// belong to def's class: the class is the caller's own, one it imports (a
+// parent, a trait, an interface, a collaborator), or lives in its namespace. A
+// method that merely shares its name with one of an unrelated class is not.
+func phpRelated(def, caller parser.Chunk, uses map[string]string, ns string) bool {
+	if def.FilePath == caller.FilePath {
+		return true
+	}
+	class := def.Metadata["receiver"]
+	for _, full := range uses {
+		if full == class {
+			return true
+		}
+	}
+	return ns != "" && def.Metadata["namespace"] == ns
+}
+
 func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
-	uses := phpUses(src)
+	uses := cachedUses(src)
 	ns := caller.Metadata["namespace"]
 	defClass := def.Metadata["receiver"]
 	isMethod := defClass != ""
 	classLike := !isMethod && def.Metadata["fqn"] != ""
-	use := regexp.MustCompile(`(?:(\$?[\\\w]+)\s*(::|->|\?->)\s*)?(\bnew\s+)?\\?\b` + regexp.QuoteMeta(name) + `\b`)
-	for _, m := range use.FindAllStringSubmatchIndex(caller.Content, -1) {
-		qual, isNew := "", m[6] >= 0
-		if m[2] >= 0 {
-			qual = caller.Content[m[2]:m[3]]
-		}
+	if !strings.Contains(caller.Content, name) {
+		return false
+	}
+	for _, m := range phpUsesOf(name, caller.Content) {
+		qual, isNew := m.qual, m.isNew
 		switch {
 		case qual == "" && isNew:
 			if classLike && phpClass(name, uses, ns) == def.Metadata["fqn"] {
@@ -192,7 +337,7 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 				return true
 			}
 		case strings.HasPrefix(qual, "$") || qual == "self" || qual == "static" || qual == "parent":
-			if isMethod && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
+			if isMethod && phpRelated(def, caller, uses, ns) && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
 				return true
 			}
 		default:

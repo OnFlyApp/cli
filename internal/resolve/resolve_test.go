@@ -106,6 +106,8 @@ func TestPHPResolution(t *testing.T) {
 		{"a method is not called bare", "save()", method("save", `App\Models\Story`), false},
 		{"handle() on a variable does not cross files", "$job->handle()", method("handle", `App\Jobs\Send`), false},
 		{"count() is not a user method", "count($a)", method("count", `App\Models\Story`), false},
+		{"a value's method is not an unrelated class's method of that name", "$this->getName()", ch("src/Auth/SessionGuard.php", "", map[string]string{"name": "getName", "receiver": `Auth\SessionGuard`, "namespace": `Auth`}), false},
+		{"a method of a class in the caller's namespace", "$this->boot()", ch("app/Http/Base.php", "", map[string]string{"name": "boot", "receiver": `App\Http\Base`, "namespace": `App\Http`}), true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

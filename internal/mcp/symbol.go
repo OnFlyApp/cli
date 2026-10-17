@@ -150,7 +150,7 @@ func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, 
 		n := 0
 		for _, r := range refs {
 			key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
-			if seen[key] || n >= maxXrayEdges {
+			if seen[key] || n >= maxXrayEdges || vectorstore.IsProse(r.FilePath) {
 				continue
 			}
 			seen[key] = true

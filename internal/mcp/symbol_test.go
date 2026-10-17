@@ -45,6 +45,7 @@ func symbolFixture(t *testing.T) *tools {
 		{Chunk: parser.Chunk{FilePath: "internal/index/index.go", Type: "function", Content: "func Open() {}", Metadata: meta("Open", "", "3")}, Vector: v},
 		{Chunk: parser.Chunk{FilePath: "cmd/stats.go", Type: "function", Content: "func printTelemetry() { telemetry.Open(); var s telemetry.Summary; s.Saved() }", Metadata: meta("printTelemetry", "", "5"), Outbound: []string{"Open", "Saved"}}, Vector: v},
 		{Chunk: parser.Chunk{FilePath: "cmd/index.go", Type: "function", Content: "func runIndex() { index.Open() }", Metadata: meta("runIndex", "", "5"), Outbound: []string{"Open"}}, Vector: v},
+		{Chunk: parser.Chunk{FilePath: "CHANGELOG.md", Type: "section", Content: "## v1 mentions Open", Metadata: meta("v1", "", "1"), Outbound: []string{"Open"}}, Vector: v},
 	}
 	store := openTestStore(t)
 	if err := saveHashed(store, root, chunks); err != nil {
@@ -88,6 +89,9 @@ func TestXrayAmbiguousNameShowsEveryDefinitionWithItsCallers(t *testing.T) {
 	}
 	if strings.Contains(out, "<skeleton>") {
 		t.Fatalf("an ambiguous name is not expanded into one file:\n%s", out)
+	}
+	if strings.Contains(out, "CHANGELOG.md") {
+		t.Fatalf("a documentation page is not a caller:\n%s", out)
 	}
 	// Each definition lists only its own caller.
 	// Definitions are ordered by path: index.go, then telemetry.go.

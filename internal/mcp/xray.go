@@ -13,6 +13,7 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/skeleton"
+	"github.com/axitdev/onfly/internal/vectorstore"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -157,7 +158,7 @@ func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chu
 	n := 0
 	for _, r := range refs {
 		key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
-		if r.FilePath == rel || seen[key] || n >= maxXrayEdges {
+		if r.FilePath == rel || seen[key] || n >= maxXrayEdges || vectorstore.IsProse(r.FilePath) {
 			continue
 		}
 		seen[key] = true
@@ -177,7 +178,7 @@ func (h *tools) writeCalls(ctx context.Context, w *strings.Builder, rel string, 
 			continue
 		}
 		d := nearestDefinition(cands, src.by[ref][0])
-		if d.FilePath == rel {
+		if d.FilePath == rel || vectorstore.IsProse(d.FilePath) {
 			continue
 		}
 		fmt.Fprintf(w, "- %s [%s]\n", signature(d), location(d))

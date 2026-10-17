@@ -51,18 +51,58 @@ type TermStats interface {
 	DocFreq(ctx context.Context, term, workspace string) (df, n int, err error)
 }
 
+// DocFreq counts the chunks containing term, and all chunks. The count stops at
+// 5% of the chunks: a word that common is weighed the same whatever its exact
+// count, and counting a very common word through the full-text index is the
+// slowest thing a query does. The total is kept until the index changes.
 func (s *SQLite) DocFreq(ctx context.Context, term, workspace string) (int, int, error) {
-	var n, df int
-	noProse := sqliteNoProse(ctx, "file_path")
-	if err := s.conn().QueryRowContext(ctx, `SELECT COUNT(*) FROM chunk_meta
-		WHERE (? = '' OR ? = '*' OR workspace = ?)`+noProse, workspace, workspace, workspace).Scan(&n); err != nil {
+	n, err := s.chunkTotal(ctx, workspace)
+	if err != nil {
 		return 0, 0, err
 	}
-	err := s.conn().QueryRowContext(ctx, `SELECT COUNT(*) FROM chunk_fts
-		JOIN chunk_meta m ON m.rowid = chunk_fts.rowid
-		WHERE chunk_fts MATCH ? AND (? = '' OR ? = '*' OR m.workspace = ?)`+sqliteNoProse(ctx, "m.file_path"),
-		"content : "+ftsPhrase(term), workspace, workspace, workspace).Scan(&df)
+	limit := max(200, n/20)
+	var df int
+	err = s.conn().QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+		SELECT 1 FROM chunk_fts JOIN chunk_meta m ON m.rowid = chunk_fts.rowid
+		WHERE chunk_fts MATCH ? AND (? = '' OR ? = '*' OR m.workspace = ?)`+sqliteNoProse(ctx, "m.file_path")+`
+		LIMIT ?)`, "content : "+ftsPhrase(term), workspace, workspace, workspace, limit).Scan(&df)
 	return df, n, err
+}
+
+type totalKey struct {
+	workspace string
+	noProse   bool
+}
+
+type totalVal struct {
+	generation int64
+	n          int
+}
+
+func (s *SQLite) chunkTotal(ctx context.Context, workspace string) (int, error) {
+	gen, err := s.Generation(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := totalKey{workspace, excludesProse(ctx)}
+	s.totalMu.Lock()
+	v, ok := s.totals[key]
+	s.totalMu.Unlock()
+	if ok && v.generation == gen {
+		return v.n, nil
+	}
+	var n int
+	if err := s.conn().QueryRowContext(ctx, `SELECT COUNT(*) FROM chunk_meta
+		WHERE (? = '' OR ? = '*' OR workspace = ?)`+sqliteNoProse(ctx, "file_path"), workspace, workspace, workspace).Scan(&n); err != nil {
+		return 0, err
+	}
+	s.totalMu.Lock()
+	if s.totals == nil {
+		s.totals = map[totalKey]totalVal{}
+	}
+	s.totals[key] = totalVal{gen, n}
+	s.totalMu.Unlock()
+	return n, nil
 }
 
 func pgNoProse(ctx context.Context) string {

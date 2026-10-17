@@ -178,13 +178,7 @@ func applyOverlap(parts []string, limit, overlap int, count func(string) int) []
 	out := []string{parts[0]}
 	for i := 1; i < len(parts); i++ {
 		suffix := tail(out[len(out)-1], overlap, count)
-		for suffix != "" && count(suffix+parts[i]) > limit {
-			_, size := utf8.DecodeRuneInString(suffix)
-			if size < 1 {
-				size = 1
-			}
-			suffix = suffix[size:]
-		}
+		suffix = fitSuffix(suffix, parts[i], limit, count)
 		merged := suffix + parts[i]
 		if count(merged) > limit {
 			merged = parts[i]
@@ -194,8 +188,48 @@ func applyOverlap(parts []string, limit, overlap int, count func(string) int) []
 	return out
 }
 
+// fitSuffix drops the front of suffix until suffix+part fits the limit. It
+// bisects the cut instead of dropping one rune and counting again, which
+// tokenized the whole chunk once per rune.
+func fitSuffix(suffix, part string, limit int, count func(string) int) string {
+	if suffix == "" || count(suffix+part) <= limit {
+		return suffix
+	}
+	lo, hi := 1, len(suffix) // the smallest cut in [lo, hi] that fits; len(suffix) drops it all
+	for lo < hi {
+		mid := (lo + hi) / 2
+		for mid < hi && !isBoundary(suffix, mid) {
+			mid++
+		}
+		if count(suffix[mid:]+part) <= limit {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	for lo < len(suffix) && !isBoundary(suffix, lo) {
+		lo++
+	}
+	return suffix[lo:]
+}
+
+// maxTailBytesPerToken bounds how far back tail looks for `overlap` tokens.
+const maxTailBytesPerToken = 16
+
 func tail(s string, overlap int, count func(string) int) string {
-	if s == "" || count(s) <= overlap {
+	if s == "" {
+		return s
+	}
+	// Counting the whole previous part just to learn it is longer than the
+	// overlap tokenizes a full chunk; only its end can matter.
+	if limit := overlap * maxTailBytesPerToken; limit > 0 && len(s) > limit {
+		start := len(s) - limit
+		for start < len(s) && !isBoundary(s, start) {
+			start++
+		}
+		s = s[start:]
+	}
+	if count(s) <= overlap {
 		return s
 	}
 	best := s

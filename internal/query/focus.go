@@ -77,6 +77,8 @@ func isTestPath(p string) bool {
 var boilerplateTypes = map[string]bool{
 	"struct": true, "type": true, "interface": true, "constant": true,
 	"property": true, "enum_case": true, "trait_use": true, "class": true,
+	// One-line declarations of what a file imports or which namespace it is in.
+	"use": true, "namespace": true, "statement": true,
 }
 
 func demoteBoilerplate(ranked []parser.Chunk, terms []string) []parser.Chunk {

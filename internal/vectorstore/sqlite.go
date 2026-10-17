@@ -32,6 +32,8 @@ type SQLite struct {
 	file       os.FileInfo // identity of the file db was opened on
 	dimensions int
 	extra      map[string]int
+	totalMu    sync.Mutex
+	totals     map[totalKey]totalVal
 }
 
 func OpenSQLite(dsn string) (*SQLite, error) {
@@ -72,6 +74,11 @@ func openSQLiteDB(dsn string, memory bool) (*sql.DB, error) {
 			_ = db.Close()
 			return nil, err
 		}
+		// The default 2 MB page cache re-reads the full-text index from disk on
+		// every query once the index is a few hundred MB. These only raise limits:
+		// memory is used as the file is touched. A failure leaves the defaults.
+		_, _ = db.Exec(`PRAGMA cache_size=-131072`)
+		_, _ = db.Exec(`PRAGMA mmap_size=536870912`)
 	}
 	return db, nil
 }
@@ -222,6 +229,10 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 			return err
 		}
 	}
+	hadRefs, err := sqliteTable(ctx, s.conn(), "chunk_refs")
+	if err != nil {
+		return err
+	}
 	hadFTS, err := sqliteTable(ctx, s.conn(), "chunk_fts")
 	if err != nil {
 		return err
@@ -255,6 +266,21 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 			content_hash TEXT NOT NULL
 		)`,
 		`CREATE VIRTUAL TABLE IF NOT EXISTS summary_fts USING fts5(summary, tokenize='trigram')`,
+		// chunk_refs answers "who mentions this name" from an index; scanning
+		// every chunk's outbound list takes about 0.3s at 50,000 chunks.
+		`CREATE TABLE IF NOT EXISTS chunk_refs (name TEXT NOT NULL, chunk_id INTEGER NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunk_refs_name ON chunk_refs(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_chunk_refs_chunk ON chunk_refs(chunk_id)`,
+		`CREATE TRIGGER IF NOT EXISTS chunk_refs_ai AFTER INSERT ON chunk_meta BEGIN
+			INSERT INTO chunk_refs(name, chunk_id) SELECT value, new.rowid FROM json_each(new.outbound);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS chunk_refs_ad AFTER DELETE ON chunk_meta BEGIN
+			DELETE FROM chunk_refs WHERE chunk_id = old.rowid;
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS chunk_refs_au AFTER UPDATE OF outbound ON chunk_meta BEGIN
+			DELETE FROM chunk_refs WHERE chunk_id = old.rowid;
+			INSERT INTO chunk_refs(name, chunk_id) SELECT value, new.rowid FROM json_each(new.outbound);
+		END`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.conn().ExecContext(ctx, stmt); err != nil {
@@ -263,6 +289,13 @@ func (s *SQLite) ensureTables(ctx context.Context, version string) error {
 	}
 	if !hadFTS {
 		if _, err := s.conn().ExecContext(ctx, `INSERT INTO chunk_fts(chunk_fts) VALUES('rebuild')`); err != nil {
+			return err
+		}
+	}
+	if !hadRefs {
+		// An index built before chunk_refs existed: fill it from what is stored.
+		if _, err := s.conn().ExecContext(ctx, `INSERT INTO chunk_refs(name, chunk_id)
+			SELECT json_each.value, m.rowid FROM chunk_meta AS m, json_each(m.outbound)`); err != nil {
 			return err
 		}
 	}
@@ -807,9 +840,9 @@ func (s *SQLite) ReferencesByNames(ctx context.Context, names []string) (map[str
 			args[i] = n
 		}
 		rows, err := s.conn().QueryContext(ctx, `
-			SELECT json_each.value, m.file_path, m.type, m.content, m.metadata, m.outbound
-			FROM chunk_meta AS m, json_each(m.outbound)
-			WHERE json_each.value IN (`+placeholders(len(batch))+`)
+			SELECT r.name, m.file_path, m.type, m.content, m.metadata, m.outbound
+			FROM chunk_refs AS r JOIN chunk_meta AS m ON m.rowid = r.chunk_id
+			WHERE r.name IN (`+placeholders(len(batch))+`)
 			ORDER BY m.file_path, m.rowid`, args...)
 		if err != nil {
 			return nil, err
@@ -943,8 +976,8 @@ func (s *SQLite) UpdateOutbound(ctx context.Context, outbound map[int64][]string
 func (s *SQLite) GetReferences(ctx context.Context, name string) ([]parser.Chunk, error) {
 	rows, err := s.conn().QueryContext(ctx, `
 		SELECT m.file_path, m.type, m.content, m.metadata, m.outbound
-		FROM chunk_meta AS m, json_each(m.outbound)
-		WHERE json_each.value = ?
+		FROM chunk_refs AS r JOIN chunk_meta AS m ON m.rowid = r.chunk_id
+		WHERE r.name = ?
 		ORDER BY m.file_path, m.rowid
 		LIMIT 100`, name)
 	if err != nil {
