@@ -38,7 +38,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config.yaml")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "log debug detail (to stderr, or to server.log_file for serve; never to stdout)")
 	rootCmd.PersistentFlags().BoolVar(&jsonLogs, "json-logs", false, "write log records as one JSON object per line")
-	rootCmd.AddCommand(initCmd, indexCmd, serveCmd, watchCmd, doctorCmd, optimizeCmd, extCmd, searchCmd, statsCmd, mcpConfigCmd, evalCmd, envCmd, lintCmd)
+	rootCmd.AddCommand(initCmd, indexCmd, serveCmd, watchCmd, doctorCmd, optimizeCmd, extCmd, searchCmd, statsCmd, mcpConfigCmd, evalCmd, envCmd, lintCmd, auditCmd)
 }
 
 func loadConfig() (config.Config, error) {

@@ -95,3 +95,56 @@ func (s Summary) Ratio() float64 {
 	}
 	return float64(s.RawBytes-s.CompressedBytes) / float64(s.RawBytes)
 }
+
+// ToolStat is what one tool, or one target of a tool, accounts for.
+type ToolStat struct {
+	Tool            string
+	Target          string
+	Requests        int
+	RawBytes        int
+	CompressedBytes int
+}
+
+// Saved is the tokens kept out of the context at four bytes each, never negative.
+func (t ToolStat) Saved() int {
+	if t.RawBytes <= t.CompressedBytes {
+		return 0
+	}
+	return (t.RawBytes - t.CompressedBytes) / 4
+}
+
+// ByTool totals the events since a time (the zero time for all of them) per tool.
+func (l *Log) ByTool(ctx context.Context, since time.Time) ([]ToolStat, error) {
+	return l.stats(ctx, since, `SELECT tool_name, '', COUNT(*), COALESCE(SUM(raw_bytes),0), COALESCE(SUM(compressed_bytes),0)
+		FROM telemetry_events WHERE timestamp >= ? GROUP BY tool_name ORDER BY SUM(raw_bytes) DESC`)
+}
+
+// ByTarget totals the events since a time per tool and target.
+func (l *Log) ByTarget(ctx context.Context, since time.Time) ([]ToolStat, error) {
+	return l.stats(ctx, since, `SELECT tool_name, target, COUNT(*), COALESCE(SUM(raw_bytes),0), COALESCE(SUM(compressed_bytes),0)
+		FROM telemetry_events WHERE timestamp >= ? GROUP BY tool_name, target ORDER BY SUM(raw_bytes) DESC`)
+}
+
+func (l *Log) stats(ctx context.Context, since time.Time, query string) ([]ToolStat, error) {
+	if l == nil {
+		return nil, nil
+	}
+	from := ""
+	if !since.IsZero() {
+		from = since.UTC().Format(time.RFC3339)
+	}
+	rows, err := l.db.QueryContext(ctx, query, from)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ToolStat
+	for rows.Next() {
+		var s ToolStat
+		if err := rows.Scan(&s.Tool, &s.Target, &s.Requests, &s.RawBytes, &s.CompressedBytes); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
