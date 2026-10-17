@@ -190,6 +190,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		h.tel = tel
 		closer = func() { stopBg(); tel.Close() }
 	}
+	h.embedLeftovers()
 	if cfg.Server.TraceFile != "" {
 		f, err := os.OpenFile(cfg.Server.TraceFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {

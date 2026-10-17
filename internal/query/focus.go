@@ -34,11 +34,39 @@ func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, err
 	if err != nil {
 		return nil, err
 	}
-	fused := s.rerank(ctx, r.Query, boostPathTokens(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), s.pathCandidates(ctx, g.Terms), g.Terms))
+	fused := s.rerank(ctx, r.Query, boostPathTokens(demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms), s.pathCandidates(ctx, g.Terms), g.Terms))
 	if n := ClampLimit(r.Limit); len(fused) > n {
 		fused = fused[:n]
 	}
 	return fused, nil
+}
+
+// demoteTests moves chunks of test files behind the rest, unless the query
+// asks about tests: a test repeats the words of the code it checks and would
+// otherwise take the places of the implementation.
+func demoteTests(ranked []parser.Chunk, terms []string) []parser.Chunk {
+	for _, t := range terms {
+		if strings.Contains(strings.ToLower(t), "test") || strings.EqualFold(t, "spec") {
+			return ranked
+		}
+	}
+	out := make([]parser.Chunk, 0, len(ranked))
+	var tests []parser.Chunk
+	for _, c := range ranked {
+		if isTestPath(c.FilePath) {
+			tests = append(tests, c)
+		} else {
+			out = append(out, c)
+		}
+	}
+	return append(out, tests...)
+}
+
+func isTestPath(p string) bool {
+	p = strings.ToLower(p)
+	base := filepath.Base(p)
+	return strings.HasSuffix(base, "_test.go") || strings.Contains(base, ".test.") || strings.Contains(base, ".spec.") ||
+		strings.HasPrefix(base, "test_") || strings.Contains(p, "/tests/") || strings.Contains(p, "/__tests__/") || strings.HasPrefix(p, "tests/")
 }
 
 var boilerplateTypes = map[string]bool{

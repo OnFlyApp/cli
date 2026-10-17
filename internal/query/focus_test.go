@@ -94,3 +94,16 @@ func TestBoostPathTokensSlotsInSymbolsNoListReturned(t *testing.T) {
 		}
 	}
 }
+
+func TestDemoteTestsKeepsImplementationFirstUnlessAskedAboutTests(t *testing.T) {
+	ranked := []parser.Chunk{
+		{FilePath: "internal/index/index_test.go", Metadata: map[string]string{"name": "TestIndex"}},
+		{FilePath: "internal/index/index.go", Metadata: map[string]string{"name": "indexFile"}},
+	}
+	if got := demoteTests(ranked, []string{"embedder", "unreachable"}); got[0].FilePath != "internal/index/index.go" || got[1].FilePath != "internal/index/index_test.go" {
+		t.Fatalf("%v", got)
+	}
+	if got := demoteTests(ranked, []string{"tests", "index"}); got[0].FilePath != "internal/index/index_test.go" {
+		t.Fatalf("a query about tests keeps their order: %v", got)
+	}
+}

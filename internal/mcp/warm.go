@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/axitdev/onfly/internal/index"
 )
@@ -77,6 +78,21 @@ func (h *tools) syncFile(ctx context.Context, rel string, files []string) error 
 		h.embedInBackground()
 	}
 	return err
+}
+
+// embedLeftovers starts the background embedding when an earlier session or
+// an index run left files without vectors.
+func (h *tools) embedLeftovers() {
+	hashes, err := h.store.FileHashes(h.bg)
+	if err != nil {
+		return
+	}
+	for _, stored := range hashes {
+		if strings.HasSuffix(stored, index.LexicalSuffix) {
+			h.embedInBackground()
+			return
+		}
+	}
 }
 
 // embedInBackground adds the vectors that warm left out. Files are re-embedded
