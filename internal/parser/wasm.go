@@ -36,6 +36,19 @@ func timeoutOr(d time.Duration) time.Duration {
 	return parseTimeout
 }
 
+// perKiB is what a parse may take per KiB of source on top of the base timeout
+// when none is configured: a 17 MB PHP parser needs a few seconds for a 70 KB
+// file, more when every core is busy.
+const perKiB = 150 * time.Millisecond
+
+// timeoutFor is the configured timeout, or the default grown with the file.
+func (p *WasmParser) timeoutFor(size int) time.Duration {
+	if p.Timeout > 0 {
+		return p.Timeout
+	}
+	return parseTimeout + time.Duration(size>>10)*perKiB
+}
+
 func newWasmParser(ctx context.Context, path string) (*WasmParser, error) {
 	wasm, err := os.ReadFile(path)
 	if err != nil {
@@ -82,7 +95,7 @@ func (p *WasmParser) Parse(ctx context.Context, filePath string, content []byte)
 		WithStdin(bytes.NewReader(content)).
 		WithStdout(stdout).
 		WithStderr(stderr)
-	ctx, cancel := context.WithTimeout(ctx, timeoutOr(p.Timeout))
+	ctx, cancel := context.WithTimeout(ctx, p.timeoutFor(len(content)))
 	defer cancel()
 	mod, err := p.rt.InstantiateModule(ctx, p.compiled, cfg)
 	if mod != nil {

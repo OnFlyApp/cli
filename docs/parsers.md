@@ -61,7 +61,7 @@ If another parser already owns one of the new extensions, a terminal asks `Repla
 
 `onfly ext update` upgrades registry plugins. `onfly ext remove go` deletes that wasm file and its config entry. A lock file name that contains a slash or `..` is refused, and no file is deleted. `onfly ext list` prints `active`, `outdated`, or `corrupted`. The registry fetch stops after three seconds. If it fails, the table still prints and a `registry:` line follows it. A hash mismatch is `corrupted`.
 
-Official parsers: `go`, `php`, `typescript` (`.ts`, `.tsx`, `.mts`, `.cts`), `javascript` (`.js`, `.jsx`, `.mjs`, `.cjs`) and `python` (`.py`, `.pyi`). Each lives in its own `ext-parser-<name>` repository.
+Official parsers: `go`, `php`, `typescript` (`.ts`, `.tsx`, `.mts`, `.cts`), `javascript` (`.js`, `.jsx`, `.mjs`, `.cjs`), `python` (`.py`, `.pyi`) and `rust` (`.rs`). Each lives in its own `ext-parser-<name>` repository.
 
 To build the Go parser from source:
 

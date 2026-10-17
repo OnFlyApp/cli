@@ -89,3 +89,14 @@ func TestWasmTimeoutThenRecover(t *testing.T) {
 		t.Fatalf("%+v", chunks)
 	}
 }
+
+func TestWasmTimeoutGrowsWithTheFileUnlessConfigured(t *testing.T) {
+	p := &WasmParser{}
+	if p.timeoutFor(0) != parseTimeout || p.timeoutFor(80<<10) <= p.timeoutFor(10<<10) {
+		t.Fatalf("%v %v", p.timeoutFor(0), p.timeoutFor(80<<10))
+	}
+	p.Timeout = 2 * time.Second
+	if p.timeoutFor(80<<10) != 2*time.Second {
+		t.Fatal("a configured timeout is used as given")
+	}
+}
