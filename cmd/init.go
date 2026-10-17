@@ -190,10 +190,13 @@ func printInitReport(w io.Writer, created []string, ci bool) {
 Next steps:
   1. Start your embedder: ollama pull qwen3-embedding:0.6b
      (or edit "embedder:" in .onfly/config.yaml)
-  2. Optional, for code: onfly ext install go
-  3. Build the index:    onfly index
-  4. Try it:             onfly search "your question"
-  5. Connect your IDE:   onfly mcp-config claude-code > .mcp.json
+  2. Build the index:    onfly index
+  3. Connect Claude Code: onfly setup claude
+     (Cursor or VS Code: onfly mcp-config cursor, onfly mcp-config vscode)
+  4. Try a search:       onfly search "your question"
+
+A language parser is installed for each manifest found (go.mod, composer.json, ...).
+If that failed, run: onfly ext install <language>
 
 Check the setup any time with: onfly doctor
 `)

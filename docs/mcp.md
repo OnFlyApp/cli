@@ -49,11 +49,11 @@ When `server.trace_file` is set, each tool call appends one JSON object to it (o
 
 When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `graph`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned (these are the atomic tools, so nothing is recorded with the default surface), up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
 
-The server instructions carry a short routing guide (`onfly_xray` before reading a large file, `onfly_focus` for a flow, `get_tests` before a change, `get_history` for risk). `onfly setup claude` registers the server in `.mcp.json` and writes that guide into `CLAUDE.md` in one step. `onfly mcp-config claude-code --allow` prints the `.claude/settings.json` rule (`mcp__onfly`) that lets the read-only tools run without a prompt. `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
+The server instructions carry a short routing guide (`onfly_xray` before reading a large file, `onfly_focus` for a flow, and its `called_by` before a change). `onfly setup claude` registers the server in `.mcp.json` and writes that guide into `CLAUDE.md` in one step. `onfly mcp-config claude-code --allow` prints the `.claude/settings.json` rule (`mcp__onfly`) that lets the read-only tools run without a prompt. `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
 
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
-Every result is one compact JSON text block: no output schema and no `structuredContent`, so the four default tools cost about 550 tokens per session, and all eleven (`server.atomic_tools` and `server.file_tools` on) about 1,500 (2,475 before the schemas were dropped and the tools merged). When rules apply, their text comes first and the JSON follows on the last line. Every tool is annotated read-only.
+Every result is one compact JSON text block: no output schema and no `structuredContent`, so the two default tools cost about 300 tokens per session, and all twelve (`server.atomic_tools` and `server.file_tools` on) about 1,500 (2,475 before the schemas were dropped and the tools merged). When rules apply, their text comes first and the JSON follows on the last line. Every tool is annotated read-only.
 
 A hit has `stale: true` when its file changed on disk after it was indexed (the content hash differs, or the file is gone); its line numbers may be wrong, so read the file before relying on them. Up to 20 files per result are checked.
 
@@ -61,7 +61,7 @@ Tool failures are tool results with `isError` set. They are not protocol errors.
 
 ## Tools
 
-By default the server registers `onfly_xray`, `onfly_focus`, `get_tests` and `get_history`. The earlier single-purpose tools (`search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules`) are **legacy**: they are registered only when `server.atomic_tools: true`, because they overlap with an assistant's own `Read` and `Grep` and cost context on every session. `read_file_raw` and `list_directory` need `server.file_tools: true`. Sections marked *atomic* below describe those opt-in tools.
+By default the server registers exactly two tools, `onfly_xray` and `onfly_focus`. The earlier tools (`search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules`, `get_tests`, `get_history`) are **legacy**: they are registered only when `server.atomic_tools: true`, because they overlap with an assistant's own `Read` and `Grep` and cost context on every session. `read_file_raw` and `list_directory` need `server.file_tools: true`. Sections marked *atomic* below describe those opt-in tools.
 
 ### `onfly_xray`
 
@@ -122,7 +122,7 @@ Returns the chunk whose `metadata.name` equals `name`, as a JSON object with an 
 | `name` | yes |
 | `receiver` | no |
 
-### `get_tests`
+### `get_tests` (atomic)
 
 Finds the tests that mention a symbol. Tests are usually not indexed, so this scans the project's test files directly: a file counts as a test file by name (`*_test.go`, `test_*.py`, `*_test.py`, `*.test.*` and `*.spec.*` for JS and TS, `*Test.php`, `*Test.java`, `*Test.kt`, `*Tests.cs`, `*Tests.swift`, `*_spec.rb`, `*_test.rb`, `*_test.rs`) or by living under a `tests`, `test`, `__tests__` or `spec` directory. Files ignored by `.gitignore` or `indexer.exclude` are skipped. Rust unit tests inside `src/` files are not found.
 
@@ -133,7 +133,7 @@ Returns `{ "tests", "truncated" }`. Each test is `{file_path, line, enclosing, s
 | `name` | yes | |
 | `path` | no | Only scan test files matching this glob. |
 
-### `get_history`
+### `get_history` (atomic)
 
 Returns the commits that touched a symbol's lines, newest first: `{ "file_path", "start_line", "end_line", "scope", "commits" }`, with `hash`, `author`, `date` and `subject` per commit. Uses `git log -L`, so it follows the lines, not the file. A definition without a line range falls back to the file's log and `scope` is `file`. Outside a git repository, or for a file that is not committed, it is a tool error.
 

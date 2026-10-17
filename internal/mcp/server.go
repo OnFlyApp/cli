@@ -202,9 +202,9 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	})
 	addTool(srv, &sdkmcp.Tool{Name: "onfly_xray", Description: "Inspect a file, directory or symbol cheaply: skeleton with long bodies collapsed, what it calls and what calls it, and the project rules for that path. Prefer it to Read for unfamiliar files or files over 100 lines."}, h.xray)
 	addTool(srv, &sdkmcp.Tool{Name: "onfly_focus", Description: "Search by meaning and name. Returns a ready bundle: full code of the best matches, signatures of what they use, and the project rules. Use it for flows and business logic instead of several Grep calls."}, h.focus)
-	addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
-	addTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
 	if cfg.Server.AtomicTools {
+		addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)
+		addTool(srv, &sdkmcp.Tool{Name: "get_history", Description: "Recent commits that touched a symbol's lines: who changed it, when and why. Use to judge how stable or risky a function is."}, h.getHistory)
 		addTool(srv, &sdkmcp.Tool{Name: "search", Description: "Find code by what it does when you do not know the identifier. Returns symbols, summaries and code; hits past the third are signatures."}, h.search)
 		addTool(srv, &sdkmcp.Tool{Name: "find", Description: "Exact lookup. kind text: chunks containing a string or identifier, like Grep over the index. kind symbol: definitions by name; * and ? are wildcards."}, h.find)
 		addTool(srv, &sdkmcp.Tool{Name: "graph", Description: "Follow calls from a symbol: callers (what breaks if it changes), callees (what it uses) or references (where its name appears)."}, h.graph)

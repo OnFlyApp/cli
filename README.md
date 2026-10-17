@@ -96,11 +96,10 @@ A summary is made once per changed chunk and cached; a server that is down only 
 | --- | --- | --- |
 | `onfly_xray` | always | Inspect a file, folder or symbol. |
 | `onfly_focus` | always | Find code by meaning and name. |
-| `get_tests`, `get_history` | always | Tests that mention a symbol; commits that touched it. |
-| `search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules` | `server.atomic_tools: true` (legacy) | The single-purpose tools from earlier versions. |
+| `get_tests`, `get_history`, `search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules` | `server.atomic_tools: true` (legacy) | Tests that mention a symbol, recent commits, and the single-purpose tools from earlier versions. |
 | `read_file_raw`, `list_directory` | `server.file_tools: true` | Read a file or browse a folder. |
 
-The four default tools cost about 550 tokens of tool definitions per session.
+The two default tools cost about 300 tokens of tool definitions per session.
 
 ## Everyday commands
 

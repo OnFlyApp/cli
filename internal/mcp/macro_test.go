@@ -134,12 +134,15 @@ func TestDefaultSurfaceIsTheMacroTools(t *testing.T) {
 	for _, tool := range res.Tools {
 		got[tool.Name] = true
 	}
-	for _, want := range []string{"onfly_xray", "onfly_focus", "get_tests", "get_history"} {
+	for _, want := range []string{"onfly_xray", "onfly_focus"} {
 		if !got[want] {
 			t.Errorf("%s missing: %v", want, got)
 		}
 	}
-	for _, gone := range []string{"search", "find", "graph", "get_component_ast", "get_file_outline", "get_project_rules"} {
+	if len(got) != 2 {
+		t.Errorf("the default surface is exactly two tools: %v", got)
+	}
+	for _, gone := range []string{"get_tests", "get_history", "search", "find", "graph", "get_component_ast", "get_file_outline", "get_project_rules"} {
 		if got[gone] {
 			t.Errorf("%s must be opt-in", gone)
 		}
