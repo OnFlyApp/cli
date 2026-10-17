@@ -106,7 +106,7 @@ const (
 	lowConfidenceCoverage = 0.5
 	// expandedWeight favours the list made from the model's identifiers: it is
 	// only built when the first list looked weak.
-	expandedWeight = 0.6
+	expandedWeight = 1
 )
 
 func countHitsOne(word string, have []string) bool {

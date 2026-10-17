@@ -295,9 +295,9 @@ search:
     timeout_ms: 8000
 ```
 
-`onfly_focus` asks the model for the identifiers a question probably means, but only when none of its top three results is named for the question (under half the question's weight is covered by a result's name and path). The identifiers are matched by name, text and path, not embedded, and their list is merged into the first one at weight 0.6. An answer that is not a JSON array of identifiers is dropped, a failure or a timeout leaves the first answer alone, and answers are cached per question.
+`onfly_focus` asks the model for the identifiers a question probably means, but only when none of its top three results is named for the question (under half the question's weight is covered by a result's name and path). The identifiers are matched by name, text and path, not embedded, and their list is merged into the first one with equal weight. An answer that is not a JSON array of identifiers is dropped, a failure or a timeout leaves the first answer alone, and answers are cached per question.
 
-It is off by default and not recommended yet. On Laravel with `gemma4:e2b`, 15 questions that repeat none of the code's words went from 6 found in the top five to 5 (4 at weight 1.5), the median call from 0.3 s to 7 s, and the small model mostly returned generic words (`log`, `data`, `rules`). A larger model may do better; measure with `onfly eval` before turning it on.
+It is off by default and not recommended yet. On Laravel with `gemma4:e2b`, 15 questions that repeat none of the code's words went from 6 found in the top five to 5 with the expansion list at weight 0.6 and to 4 at 1.5, the median call from 0.3 s to 7 s, and the small model mostly returned generic words (`log`, `data`, `rules`). A larger model may do better; measure with `onfly eval` before turning it on.
 
 ### Summary concurrency
 
