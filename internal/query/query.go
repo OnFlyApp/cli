@@ -69,7 +69,10 @@ type Searcher struct {
 }
 
 type Request struct {
-	Query        string
+	Query string
+	// CodeOnly leaves documentation files out of the search unless the query asks
+	// for documentation.
+	CodeOnly     bool
 	Limit        int
 	Workspace    string
 	ChangedSince string
@@ -125,12 +128,12 @@ const (
 	defaultWordWeight = 0.25
 )
 
-func (s *Searcher) wordMatches(ctx context.Context, words []string, pool int, workspace string) []parser.Chunk {
-	return s.wordMatchesWith(ctx, words, pool, workspace, s.Store.SearchKeyword)
+func (s *Searcher) wordMatches(ctx context.Context, words []string, pool int, workspace string, weights map[string]float64) []parser.Chunk {
+	return s.wordMatchesWith(ctx, words, pool, workspace, s.Store.SearchKeyword, weights)
 }
 
 func (s *Searcher) wordMatchesWith(ctx context.Context, words []string, pool int, workspace string,
-	lookup func(context.Context, string, int, string) ([]parser.Chunk, error)) []parser.Chunk {
+	lookup func(context.Context, string, int, string) ([]parser.Chunk, error), weights map[string]float64) []parser.Chunk {
 	type acc struct {
 		chunk parser.Chunk
 		score float64
@@ -150,7 +153,7 @@ func (s *Searcher) wordMatchesWith(ctx context.Context, words []string, pool int
 				by[key] = a
 				order = append(order, key)
 			}
-			a.score += 1 / float64(rrfK+rank+1)
+			a.score += weightOf(weights, w) / float64(rrfK+rank+1)
 		}
 	}
 	out := make([]parser.Chunk, 0, len(order))

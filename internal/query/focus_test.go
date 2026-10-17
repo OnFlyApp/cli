@@ -53,7 +53,7 @@ func TestBoostPathTokensLiftsTheNamedModule(t *testing.T) {
 		at("internal/embedder/embedder.go", "postOnce"),
 		at("internal/index/walk.go", "walk"),
 	}
-	got := boostPathTokens(ranked, nil, []string{"skeleton", "body", "collapse"})
+	got := boostPathTokens(ranked, nil, []string{"skeleton", "body", "collapse"}, nil)
 	var names []string
 	for _, c := range got[:4] {
 		names = append(names, c.Metadata["name"])
@@ -64,7 +64,7 @@ func TestBoostPathTokensLiftsTheNamedModule(t *testing.T) {
 			t.Fatalf("%v, want %v", names, want)
 		}
 	}
-	if same := boostPathTokens(ranked[2:5], nil, []string{"skeleton"}); same[0].Metadata["name"] != "readFileBody" {
+	if same := boostPathTokens(ranked[2:5], nil, []string{"skeleton"}, nil); same[0].Metadata["name"] != "readFileBody" {
 		t.Fatalf("no path match must keep the order: %v", same)
 	}
 }
@@ -82,7 +82,7 @@ func TestBoostPathTokensSlotsInSymbolsNoListReturned(t *testing.T) {
 		ranked = append(ranked, at(file, n))
 	}
 	extras := []parser.Chunk{at("internal/skeleton/skeleton.go", "Collapse"), at("internal/skeleton/skeleton.go", "Signature"), at("internal/skeleton/skeleton.go", "Span")}
-	got := boostPathTokens(ranked, extras, []string{"skeleton", "body", "collapse"})
+	got := boostPathTokens(ranked, extras, []string{"skeleton", "body", "collapse"}, nil)
 	var names []string
 	for _, c := range got[:5] {
 		names = append(names, c.Metadata["name"])

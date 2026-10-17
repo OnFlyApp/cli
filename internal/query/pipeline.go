@@ -7,6 +7,7 @@ import (
 
 	"github.com/axitdev/onfly/internal/gitx"
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/vectorstore"
 	"github.com/bmatcuk/doublestar/v4"
 )
 
@@ -73,7 +74,11 @@ type Gathered struct {
 	Words             []parser.Chunk
 	Recent            []parser.Chunk
 	Alt, SummaryWords []parser.Chunk
-	req               Request
+	// Weights is how rare each query word is in the index, from 0 to 1.
+	Weights map[string]float64
+	// CodeOnly says documentation files were left out of every list.
+	CodeOnly bool
+	req      Request
 }
 
 func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
@@ -132,12 +137,26 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 		pool = max(pool, min(pool*typeWeightPoolFactor, typeWeightPoolMax))
 	}
 	g := &Gathered{Query: r.Query, Terms: queryWords(r.Query), req: r}
+	if r.CodeOnly && !asksForDocs(g.Terms) {
+		ctx, g.CodeOnly = vectorstore.WithoutProse(ctx), true
+	}
+	g.Weights = s.termWeights(ctx, g.Terms, r.Workspace)
 
 	vec, embedErr := s.Emb.Embed(ctx, r.Query)
 	if embedErr == nil {
 		var err error
-		if g.Semantic, err = s.Store.SearchSemantic(ctx, vec, pool, r.Workspace); err != nil {
+		semPool := pool
+		if g.CodeOnly {
+			semPool = pool * 3 // some of the nearest are prose and go
+		}
+		if g.Semantic, err = s.Store.SearchSemantic(ctx, vec, semPool, r.Workspace); err != nil {
 			return nil, err
+		}
+		if g.CodeOnly {
+			g.Semantic = filterChunks(g.Semantic, func(c parser.Chunk) bool { return !vectorstore.IsProse(c.FilePath) })
+			if len(g.Semantic) > pool {
+				g.Semantic = g.Semantic[:pool]
+			}
 		}
 	} else if ctx.Err() != nil {
 		return nil, embedErr
@@ -155,7 +174,7 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 		s.logger().Warn("embedder unavailable, using keyword results only", "err", embedErr)
 	}
 	if len(g.Terms) >= 2 {
-		g.Words = s.wordMatches(ctx, g.Terms, pool, r.Workspace)
+		g.Words = s.wordMatches(ctx, g.Terms, pool, r.Workspace, g.Weights)
 	}
 	if s.AltEmb != nil {
 		if av, err := s.AltEmb.Embed(ctx, r.Query); err != nil {
@@ -167,7 +186,7 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 		}
 	}
 	if s.SummaryKeyword && len(g.Terms) > 0 {
-		g.SummaryWords = s.wordMatchesWith(ctx, g.Terms, pool, r.Workspace, s.Store.SearchSummary)
+		g.SummaryWords = s.wordMatchesWith(ctx, g.Terms, pool, r.Workspace, s.Store.SearchSummary, g.Weights)
 	}
 	if filtered {
 		g.Semantic, g.Keyword, g.Words = filterChunks(g.Semantic, keep), filterChunks(g.Keyword, keep), filterChunks(g.Words, keep)
@@ -187,7 +206,7 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 	}
 	if p.Field > 0 {
 		cands := union(g.Semantic, g.Keyword, g.Words, g.Alt, g.SummaryWords)
-		if f := fieldMatches(g.Terms, cands); len(f) > 0 {
+		if f := fieldMatches(g.Terms, cands, g.Weights); len(f) > 0 {
 			lists, weights = append(lists, f), append(weights, p.Field*p.Keyword)
 		}
 	}

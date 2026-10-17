@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
 // Lexical lists (keyword, per-word, symbol and path) get 0.65 of the weight and
@@ -30,11 +31,15 @@ func FocusParams(p Params) Params {
 // RunFocus is Run with FocusParams, and with tiny declarations that the query
 // does not name moved behind everything else.
 func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, error) {
+	r.CodeOnly = true
 	g, err := s.Gather(ctx, r)
 	if err != nil {
 		return nil, err
 	}
-	fused := s.rerank(ctx, r.Query, boostPathTokens(demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms), s.pathCandidates(ctx, g.Terms), g.Terms))
+	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
+	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights)
+	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.CodeOnly)
+	fused := s.rerank(ctx, r.Query, boostPathTokens(ranked, extras, g.Terms, g.Weights))
 	if n := ClampLimit(r.Limit); len(fused) > n {
 		fused = fused[:n]
 	}
@@ -112,7 +117,7 @@ const (
 // named symbols of such a file that no list returned are slotted in right after the
 // strongest matches, so cohesive symbols outrank a single-word match in
 // an unrelated package.
-func boostPathTokens(ranked, extras []parser.Chunk, terms []string) []parser.Chunk {
+func boostPathTokens(ranked, extras []parser.Chunk, terms []string, weights map[string]float64) []parser.Chunk {
 	type keyed struct {
 		c   parser.Chunk
 		key float64
@@ -123,8 +128,8 @@ func boostPathTokens(ranked, extras []parser.Chunk, terms []string) []parser.Chu
 	for i, c := range ranked {
 		it := keyed{c, float64(i)}
 		have[ChunkKey(c)] = true
-		if pathNamed(c.FilePath, terms) {
-			it.key *= pathBoost
+		if w := pathWeight(c.FilePath, terms, weights); w > 0 {
+			it.key *= 1 - (1-pathBoost)*w // a rarer word moves the chunk further
 			moved = true
 		}
 		items = append(items, it)
@@ -152,14 +157,14 @@ func boostPathTokens(ranked, extras []parser.Chunk, terms []string) []parser.Chu
 // pathCandidates returns named symbols of the few files whose name a query term
 // equals, in file order. The keyword lists only read chunk text, so a file that
 // the query names but whose code never says the word is otherwise invisible.
-func (s *Searcher) pathCandidates(ctx context.Context, terms []string) []parser.Chunk {
+func (s *Searcher) pathCandidates(ctx context.Context, terms []string, codeOnly bool) []parser.Chunk {
 	files, err := s.Store.ListFiles(ctx)
 	if err != nil {
 		return nil
 	}
 	var picked []string
 	for _, f := range files {
-		if pathNamed(f, terms) {
+		if pathNamed(f, terms) && !(codeOnly && vectorstore.IsProse(f)) {
 			picked = append(picked, f)
 		}
 	}
@@ -201,6 +206,22 @@ func baseNamed(file string, terms []string) bool {
 	return false
 }
 
+// pathWeight is the highest weight among the terms that name a directory or
+// file of the path, and 0 when none does or the only ones are too common.
+func pathWeight(file string, terms []string, weights map[string]float64) float64 {
+	best := 0.0
+	for _, t := range terms {
+		w := weightOf(weights, t)
+		if w < minTermWeight || w <= best {
+			continue
+		}
+		if pathNamed(file, []string{t}) {
+			best = w
+		}
+	}
+	return best
+}
+
 func pathNamed(file string, terms []string) bool {
 	for _, seg := range strings.Split(strings.ToLower(file), "/") {
 		seg = strings.TrimSuffix(seg, filepath.Ext(seg))
@@ -211,4 +232,90 @@ func pathNamed(file string, terms []string) bool {
 		}
 	}
 	return false
+}
+
+// docWords in a query say it is about documentation, so prose is searched too.
+var docWords = map[string]bool{
+	"doc": true, "docs": true, "documentation": true, "documented": true, "readme": true,
+	"guide": true, "tutorial": true, "changelog": true, "markdown": true,
+}
+
+func asksForDocs(terms []string) bool {
+	for _, t := range terms {
+		if docWords[strings.ToLower(t)] {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	cohesionPool   = 40 // ranked chunks whose files are checked
+	cohesionFiles  = 20 // distinct files read for that
+	cohesionWeight = 1.5
+)
+
+// boostCohesion favours the files that, taken whole, mention the most of the
+// query's rare words. A question such as "table of contents headings" is
+// answered by a file whose one function matches "table" and another "headings";
+// chunk by chunk each scores a third, together they cover the question. Each
+// chunk's score is 1/rank plus cohesionWeight times the share of the query's
+// weight that its whole file covers.
+func (s *Searcher) boostCohesion(ctx context.Context, ranked []parser.Chunk, terms []string, weights map[string]float64) []parser.Chunk {
+	var total float64
+	for _, t := range terms {
+		total += weightOf(weights, t)
+	}
+	if total <= 0 || len(ranked) < 2 {
+		return ranked
+	}
+	head := ranked
+	if len(head) > cohesionPool {
+		head = ranked[:cohesionPool]
+	}
+	var files []string
+	seen := map[string]bool{}
+	for _, c := range head {
+		if !seen[c.FilePath] && len(files) < cohesionFiles {
+			seen[c.FilePath] = true
+			files = append(files, c.FilePath)
+		}
+	}
+	rows, err := s.Store.ChunksByFiles(ctx, files)
+	if err != nil {
+		return ranked
+	}
+	text := map[string]string{}
+	for _, f := range files {
+		text[f] = strings.ToLower(f)
+	}
+	for _, r := range rows {
+		text[r.Chunk.FilePath] += "\n" + strings.ToLower(r.Chunk.Content)
+	}
+	coverage := map[string]float64{}
+	for f, body := range text {
+		for _, t := range terms {
+			if st := stem(strings.ToLower(t)); len(st) >= 3 && strings.Contains(body, st) {
+				coverage[f] += weightOf(weights, t)
+			}
+		}
+		coverage[f] /= total
+	}
+	type scored struct {
+		c     parser.Chunk
+		score float64
+	}
+	items := make([]scored, len(ranked))
+	for i, c := range ranked {
+		items[i] = scored{c, 1 / float64(i+1)}
+		if i < cohesionPool {
+			items[i].score += cohesionWeight * coverage[c.FilePath]
+		}
+	}
+	sort.SliceStable(items, func(a, b int) bool { return items[a].score > items[b].score })
+	out := make([]parser.Chunk, len(items))
+	for i, it := range items {
+		out[i] = it.c
+	}
+	return out
 }

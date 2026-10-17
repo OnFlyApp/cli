@@ -606,14 +606,14 @@ func (s *SQLite) SearchKeyword(ctx context.Context, keyword string, limit int, w
 			FROM chunk_fts
 			JOIN chunk_meta m ON m.rowid = chunk_fts.rowid
 			WHERE chunk_fts MATCH ?
-			  AND (? = '' OR ? = '*' OR m.workspace = ?)
+			  AND (? = '' OR ? = '*' OR m.workspace = ?)`+sqliteNoProse(ctx, "m.file_path")+`
 			ORDER BY chunk_fts.rank
 			LIMIT ?`, "content : "+ftsPhrase(keyword), workspace, workspace, workspace, limit)
 	} else {
 		rows, err = s.conn().QueryContext(ctx, `
 			SELECT file_path, type, content, metadata, outbound FROM chunk_meta
 			WHERE instr(lower(content), lower(?)) > 0
-			  AND (? = '' OR ? = '*' OR workspace = ?)
+			  AND (? = '' OR ? = '*' OR workspace = ?)`+sqliteNoProse(ctx, "file_path")+`
 			LIMIT ?`, keyword, workspace, workspace, workspace, limit)
 	}
 	if err != nil {

@@ -19,13 +19,18 @@ const (
 	minStemLen = 4
 )
 
-func fieldMatches(terms []string, cands []parser.Chunk) []parser.Chunk {
+// fieldMatches ranks candidates by how well their name, file name, directory and
+// leading comment match the query words. weights, if given, scale each word by
+// its rarity.
+func fieldMatches(terms []string, cands []parser.Chunk, weights map[string]float64) []parser.Chunk {
 	if len(terms) == 0 || len(cands) == 0 {
 		return nil
 	}
-	want := make([]string, 0, len(terms))
+	var want []weighted
 	for _, t := range terms {
-		want = append(want, splitWords(t)...)
+		for _, w := range splitWords(t) {
+			want = append(want, weighted{w, weightOf(weights, t)})
+		}
 	}
 	type item struct {
 		chunk parser.Chunk
@@ -52,34 +57,55 @@ func fieldMatches(terms []string, cands []parser.Chunk) []parser.Chunk {
 	return out
 }
 
-func fieldScore(want []string, c parser.Chunk) float64 {
+type weighted struct {
+	word   string
+	weight float64
+}
+
+func fieldScore(want []weighted, c parser.Chunk) float64 {
 	var score float64
 	if name := splitWords(c.Metadata["name"]); len(name) > 0 {
-		hits := countHits(want, name)
-		score += nameHit * float64(hits)
-		if hits == len(name) {
+		hits, covered := countHits(want, name)
+		score += nameHit * hits
+		if covered == len(name) {
 			score += nameCover
 		}
 	}
 	dir, file := path.Split(c.FilePath)
 	base := strings.TrimSuffix(file, path.Ext(file))
-	score += baseHit * float64(countHits(want, splitWords(base)))
-	score += dirHit * float64(countHits(want, splitWords(dir)))
-	score += docHit * float64(countHits(want, splitWords(c.Metadata["summary"]+" "+leadingComment(c.Content))))
+	score += baseHit * hitsIn(want, splitWords(base))
+	score += dirHit * hitsIn(want, splitWords(dir))
+	score += docHit * hitsIn(want, splitWords(c.Metadata["summary"]+" "+leadingComment(c.Content)))
 	return score
 }
 
-func countHits(want, have []string) int {
-	n := 0
+// countHits sums the weights of the query words that appear in have, and
+// counts how many words of have some query word matches.
+func countHits(want []weighted, have []string) (float64, int) {
+	var sum float64
 	for _, w := range want {
 		for _, h := range have {
-			if sameWord(w, h) {
-				n++
+			if sameWord(w.word, h) {
+				sum += w.weight
 				break
 			}
 		}
 	}
-	return n
+	covered := 0
+	for _, h := range have {
+		for _, w := range want {
+			if sameWord(w.word, h) {
+				covered++
+				break
+			}
+		}
+	}
+	return sum, covered
+}
+
+func hitsIn(want []weighted, have []string) float64 {
+	sum, _ := countHits(want, have)
+	return sum
 }
 
 func sameWord(a, b string) bool {

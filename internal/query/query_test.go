@@ -219,7 +219,7 @@ func TestQueryWordsDropsStopWordsAndShortWords(t *testing.T) {
 
 func TestWordMatchesRanksByHowManyWordsMatch(t *testing.T) {
 	s := newSearcher(t)
-	got := s.wordMatches(context.Background(), queryWords("getUserId func"), 10, "")
+	got := s.wordMatches(context.Background(), queryWords("getUserId func"), 10, "", nil)
 	if len(got) != 2 || got[0].FilePath != "a.go" || got[1].FilePath != "b.go" {
 		t.Fatalf("the chunk with both words must come first, the one with only %q after it: %+v", "func", got)
 	}

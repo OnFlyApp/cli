@@ -389,7 +389,7 @@ func (p *Postgres) SearchKeyword(ctx context.Context, keyword string, limit int,
 		FROM chunks
 		WHERE (content ILIKE $1 ESCAPE '\'
 		   OR tsv @@ plainto_tsquery('simple', $2))
-		  AND ($4 = '' OR $4 = '*' OR workspace = $4)
+		  AND ($4 = '' OR $4 = '*' OR workspace = $4)`+pgNoProse(ctx)+`
 		ORDER BY (content ILIKE $1 ESCAPE '\') DESC,
 		         ts_rank(tsv, plainto_tsquery('simple', $2)) DESC
 		LIMIT $3`, likePattern(keyword), keyword, limit, workspace)

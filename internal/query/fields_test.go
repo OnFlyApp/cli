@@ -51,7 +51,7 @@ func TestFieldMatchesRanksNamedChunkFirst(t *testing.T) {
 	mentions := parser.Chunk{FilePath: "docs/a.md", Type: "section", Content: "we call prune whenever files vanish", Metadata: map[string]string{"name": "Intro"}}
 	named := parser.Chunk{FilePath: "internal/index/index.go", Type: "method", Content: "func (s *Session) prune() {}", Metadata: map[string]string{"name": "prune"}}
 	other := parser.Chunk{FilePath: "x.go", Type: "function", Content: "func other() {}", Metadata: map[string]string{"name": "other"}}
-	got := fieldMatches([]string{"prune", "files"}, []parser.Chunk{mentions, other, named})
+	got := fieldMatches([]string{"prune", "files"}, []parser.Chunk{mentions, other, named}, nil)
 	if len(got) != 2 || got[0].Metadata["name"] != "prune" {
 		t.Fatalf("the chunk named for the query must lead; chunks with no field hit are dropped: %+v", got)
 	}
@@ -62,12 +62,12 @@ func TestFieldMatchesUsesPathCommentAndSummary(t *testing.T) {
 	byDoc := parser.Chunk{FilePath: "z.go", Type: "function", Content: "// Debounce coalesces events.\nfunc z() {}", Metadata: map[string]string{"name": "z"}}
 	bySummary := parser.Chunk{FilePath: "y.go", Type: "function", Content: "func y() {}", Metadata: map[string]string{"name": "y", "summary": "Retries failed requests with backoff."}}
 	for q, want := range map[string]string{"watcher": "run", "debounce": "z", "backoff": "y"} {
-		got := fieldMatches([]string{q}, []parser.Chunk{byPath, byDoc, bySummary})
+		got := fieldMatches([]string{q}, []parser.Chunk{byPath, byDoc, bySummary}, nil)
 		if len(got) == 0 || got[0].Metadata["name"] != want {
 			t.Errorf("%s: %+v, want %s first", q, got, want)
 		}
 	}
-	if fieldMatches(nil, []parser.Chunk{byPath}) != nil {
+	if fieldMatches(nil, []parser.Chunk{byPath}, nil) != nil {
 		t.Error("no terms, no list")
 	}
 }
