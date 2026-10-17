@@ -66,6 +66,7 @@ type Searcher struct {
 	SectionWeight                 *float64
 	TypeWeights                   map[string]float64
 	Root                          string
+	Expander                      *Expander
 }
 
 type Request struct {
@@ -78,6 +79,8 @@ type Request struct {
 	ChangedSince string
 	Type         string
 	Path         string
+	// LexicalOnly skips the embedder: the words are matched by name, text and path.
+	LexicalOnly bool
 }
 
 func (s *Searcher) logger() *slog.Logger {
@@ -225,6 +228,13 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 		for t, w := range cfg.Search.TypeWeights {
 			s.TypeWeights[strings.ToLower(strings.TrimSpace(t))] = w
 		}
+	}
+	if cfg.Search.Expansion.Provider != "" {
+		chat, err := embedder.NewChat(cfg.Search.Expansion)
+		if err != nil {
+			return nil, fmt.Errorf("search.expansion: %w", err)
+		}
+		s.Expander = &Expander{Chat: chat, Timeout: cfg.Search.Expansion.Timeout()}
 	}
 	if cfg.Embedder.Alt != nil {
 		alt, err := embedder.New(*cfg.Embedder.Alt)

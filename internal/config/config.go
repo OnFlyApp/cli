@@ -63,6 +63,9 @@ type Search struct {
 	TypeWeights       map[string]float64 `yaml:"type_weights"`
 	AltWeight         *float64           `yaml:"alt_weight"`
 	SummaryWordWeight *float64           `yaml:"summary_word_weight"`
+	// Expansion names a small local chat model that onfly_focus asks for the
+	// identifiers a question probably means, when its first answer looks weak.
+	Expansion LLM `yaml:"expansion"`
 }
 
 func (c Config) ExtraSlots() map[string]int {
@@ -418,6 +421,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if len(child.Search.TypeWeights) > 0 {
 		out.Search.TypeWeights = child.Search.TypeWeights
+	}
+	if child.Search.Expansion.Provider != "" {
+		out.Search.Expansion = child.Search.Expansion
 	}
 	if child.Search.SectionWeight != nil {
 		out.Search.SectionWeight = child.Search.SectionWeight

@@ -2,6 +2,8 @@ package query
 
 import (
 	"context"
+	"math"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,18 +34,88 @@ func FocusParams(p Params) Params {
 // does not name moved behind everything else.
 func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, error) {
 	r.CodeOnly = true
-	g, err := s.Gather(ctx, r)
+	ranked, g, err := s.focusRank(ctx, r)
 	if err != nil {
 		return nil, err
 	}
-	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
-	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights, g.Absent)
-	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.CodeOnly)
-	fused := s.rerank(ctx, r.Query, boostPathTokens(ranked, extras, g.Terms, g.Weights))
+	if s.Expander != nil && s.lowConfidence(ranked, g) {
+		if kws, err := s.Expander.Expand(ctx, r.Query); err != nil {
+			s.logger().Warn("query expansion", "err", err)
+		} else if len(kws) > 0 {
+			r2 := r
+			r2.Query = strings.Join(kws, " ")
+			r2.LexicalOnly = true // identifiers are matched, not embedded
+			if more, _, err := s.focusRank(ctx, r2); err == nil {
+				s.logger().Debug("query expanded", "query", r.Query, "keywords", kws)
+				ranked = FuseWeighted([]float64{1, expandedWeight}, ranked, more)
+			}
+		}
+	}
+	fused := s.rerank(ctx, r.Query, ranked)
 	if n := ClampLimit(r.Limit); len(fused) > n {
 		fused = fused[:n]
 	}
 	return fused, nil
+}
+
+// focusRank is the ranking of onfly_focus before the reranker.
+func (s *Searcher) focusRank(ctx context.Context, r Request) ([]parser.Chunk, *Gathered, error) {
+	g, err := s.Gather(ctx, r)
+	if err != nil {
+		return nil, nil, err
+	}
+	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
+	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights, g.Absent)
+	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.CodeOnly)
+	return boostPathTokens(ranked, extras, g.Terms, g.Weights), g, nil
+}
+
+// lowConfidence says that none of the top three results is named for the
+// question: the share of the question's weight that a result's name or path
+// covers is under a half. A question that repeats the code's own words is not
+// expanded, so the model is asked only where search is likely to miss.
+func (s *Searcher) lowConfidence(ranked []parser.Chunk, g *Gathered) bool {
+	var total float64
+	for _, t := range g.Terms {
+		total += weightOf(g.Weights, t)
+	}
+	if total <= 0 {
+		return false
+	}
+	best := 0.0
+	for i, c := range ranked {
+		if i == 3 {
+			break
+		}
+		have := splitWords(c.Metadata["name"] + " " + strings.TrimSuffix(c.FilePath, path.Ext(c.FilePath)))
+		var got float64
+		for _, t := range g.Terms {
+			for _, w := range splitWords(t) {
+				if countHitsOne(w, have) {
+					got += weightOf(g.Weights, t)
+					break
+				}
+			}
+		}
+		best = math.Max(best, got/total)
+	}
+	return best < lowConfidenceCoverage
+}
+
+const (
+	lowConfidenceCoverage = 0.5
+	// expandedWeight favours the list made from the model's identifiers: it is
+	// only built when the first list looked weak.
+	expandedWeight = 0.6
+)
+
+func countHitsOne(word string, have []string) bool {
+	for _, h := range have {
+		if sameWord(word, h) {
+			return true
+		}
+	}
+	return false
 }
 
 // demoteTests moves chunks of test files behind the rest, unless the query

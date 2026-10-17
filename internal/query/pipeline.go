@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -95,6 +96,8 @@ func (s *Searcher) Run(ctx context.Context, r Request) ([]parser.Chunk, error) {
 	return fused, nil
 }
 
+var errLexicalOnly = errors.New("query: lexical only")
+
 func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	var only map[string]bool
 	pool := CandidatePool(r.Limit)
@@ -144,7 +147,13 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	}
 	g.Weights, g.Absent = s.termWeights(ctx, g.Terms, r.Workspace)
 
-	vec, embedErr := s.Emb.Embed(ctx, r.Query)
+	var vec []float32
+	var embedErr error
+	if r.LexicalOnly {
+		embedErr = errLexicalOnly
+	} else {
+		vec, embedErr = s.Emb.Embed(ctx, r.Query)
+	}
 	if embedErr == nil {
 		var err error
 		semPool := pool
@@ -172,7 +181,7 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 		keyword = nil
 	}
 	g.Keyword = keyword
-	if embedErr != nil {
+	if embedErr != nil && embedErr != errLexicalOnly {
 		s.logger().Warn("embedder unavailable, using keyword results only", "err", embedErr)
 	}
 	if len(g.Terms) >= 2 {

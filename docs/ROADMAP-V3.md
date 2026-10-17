@@ -10,7 +10,7 @@ Every item below ships behind a measurement. The retrieval benchmarks in [Evalua
 
 A local small language model (`internal/slm`) rewrites a conceptual question into the keywords and synonyms the code uses. It addresses the weakest case today: questions that do not repeat the names in the code.
 
-An earlier build had query expansion and removed it (+0.016 MRR for about 3 s per new query). It returns only as opt-in, once per query, and only when the top results are low-confidence, and it stays only if it lifts the paraphrased-question sets by a clear margin.
+An earlier build had query expansion and removed it (+0.016 MRR for about 3 s per new query). It is back as opt-in (`search.expansion`), once per query, and only when the top results are low-confidence. Status: implemented, off by default. With a small local model it did not lift the paraphrased-question set (Laravel 6/15 to 5/15), so it does not meet its own gate; see [Configuration](configuration.md#query-expansion-experimental).
 
 ### 2. Polymorphic interface implementations (`internal/index`, `internal/mcp`)
 

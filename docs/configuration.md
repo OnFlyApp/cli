@@ -285,6 +285,20 @@ indexer:
 
 With no `indexer.summaries` in the config, `ONFLY_SLM_URL` and `ONFLY_SLM_MODEL` turn summaries on against a local server, for example `ONFLY_SLM_PROVIDER=openai ONFLY_SLM_URL=http://localhost:8080 ONFLY_SLM_MODEL=mlx-community/Qwen2.5-Coder-7B-Instruct-4bit onfly index`. `ONFLY_SLM_PROVIDER` is `ollama` or `openai` (the default, except that a URL with port 11434 means Ollama). The config file wins when it sets `indexer.summaries`. If the server is down the summaries for that file are skipped and indexing continues.
 
+### Query expansion (experimental)
+
+```yaml
+search:
+  expansion:
+    provider: ollama          # or openai
+    model: qwen2.5-coder:7b   # a small chat model
+    timeout_ms: 8000
+```
+
+`onfly_focus` asks the model for the identifiers a question probably means, but only when none of its top three results is named for the question (under half the question's weight is covered by a result's name and path). The identifiers are matched by name, text and path, not embedded, and their list is merged into the first one at weight 0.6. An answer that is not a JSON array of identifiers is dropped, a failure or a timeout leaves the first answer alone, and answers are cached per question.
+
+It is off by default and not recommended yet. On Laravel with `gemma4:e2b`, 15 questions that repeat none of the code's words went from 6 found in the top five to 5 (4 at weight 1.5), the median call from 0.3 s to 7 s, and the small model mostly returned generic words (`log`, `data`, `rules`). A larger model may do better; measure with `onfly eval` before turning it on.
+
 ### Summary concurrency
 
 Without `indexer.summaries.concurrency` Onfly sends one chunk at a time per file, which suits Ollama's default. A server that batches requests answers many at once in nearly the time of one, so raising it shortens the first index in proportion, up to the server's limits. It multiplies with `indexer.concurrency` (files in parallel); keep the product within what the server accepts. The answers are applied in order and cached, so a failure or an interrupted run loses nothing already written.
