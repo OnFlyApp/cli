@@ -29,9 +29,12 @@ func idfWeight(df, n int) float64 {
 
 // termWeights weighs each query word by how rare it is in the index, so that
 // "content" in a site generator counts for little and "toc" for a lot. The key
-// is the lower-cased word. A store that cannot count gives every word 1.
-func (s *Searcher) termWeights(ctx context.Context, terms []string, workspace string) map[string]float64 {
+// is the lower-cased word. A store that cannot count gives every word 1. The
+// second result holds the words that appear in no chunk at all: they weigh 1 in
+// field matching (a stem may still match a name) but nothing can cover them.
+func (s *Searcher) termWeights(ctx context.Context, terms []string, workspace string) (map[string]float64, map[string]bool) {
 	out := make(map[string]float64, len(terms))
+	absent := map[string]bool{}
 	stats, ok := s.Store.(vectorstore.TermStats)
 	for _, t := range terms {
 		lt := strings.ToLower(t)
@@ -41,9 +44,10 @@ func (s *Searcher) termWeights(ctx context.Context, terms []string, workspace st
 		}
 		if df, n, err := stats.DocFreq(ctx, lt, workspace); err == nil {
 			out[lt] = idfWeight(df, n)
+			absent[lt] = df == 0 && n > 0
 		}
 	}
-	return out
+	return out, absent
 }
 
 func weightOf(weights map[string]float64, term string) float64 {

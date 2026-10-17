@@ -71,7 +71,7 @@ func siteCorpus(t *testing.T) *Searcher {
 
 func TestTermWeightsMakeCommonWordsLight(t *testing.T) {
 	s := siteCorpus(t)
-	w := s.termWeights(vectorstore.WithoutProse(context.Background()), []string{"content", "headings"}, "")
+	w, _ := s.termWeights(vectorstore.WithoutProse(context.Background()), []string{"content", "headings"}, "")
 	if w["content"] >= minTermWeight || w["headings"] <= 0.6 || w["headings"] <= w["content"] {
 		t.Fatalf("%v", w)
 	}
@@ -111,14 +111,14 @@ func TestCohesionLiftsTheFileThatCoversTheQuestion(t *testing.T) {
 	s := siteCorpus(t)
 	ctx := context.Background()
 	terms := queryWords("table of contents headings")
-	weights := s.termWeights(vectorstore.WithoutProse(ctx), terms, "")
+	weights, absent := s.termWeights(vectorstore.WithoutProse(ctx), terms, "")
 	decoy := parser.Chunk{FilePath: "create/content.go", Type: "function", Content: "func NewContent()", Metadata: map[string]string{"name": "NewContent"}}
 	hit := parser.Chunk{FilePath: "markup/goldmark/toc.go", Type: "function", Content: "func extractHeadings()", Metadata: map[string]string{"name": "extractHeadings"}}
-	got := s.boostCohesion(ctx, []parser.Chunk{decoy, hit}, terms, weights)
+	got := s.boostCohesion(ctx, []parser.Chunk{decoy, hit}, terms, weights, absent)
 	if got[0].FilePath != "markup/goldmark/toc.go" {
 		t.Fatalf("%v", got)
 	}
-	same := s.boostCohesion(ctx, []parser.Chunk{decoy}, terms, weights)
+	same := s.boostCohesion(ctx, []parser.Chunk{decoy}, terms, weights, absent)
 	if len(same) != 1 {
 		t.Fatalf("%v", same)
 	}
@@ -146,5 +146,21 @@ func TestPathBoostIgnoresCommonWords(t *testing.T) {
 	rare := boostPathTokens(ranked(), nil, []string{"page"}, map[string]float64{"page": 1})
 	if order(rare) != "a.go b.go hugolib/page.go c.go " {
 		t.Fatalf("a rare word moves the file it names: %s", order(rare))
+	}
+}
+
+func TestCohesionIgnoresWordsFoundNowhere(t *testing.T) {
+	s := siteCorpus(t)
+	ctx := vectorstore.WithoutProse(context.Background())
+	terms := queryWords("table of contents headings zxqvword")
+	weights, absent := s.termWeights(ctx, terms, "")
+	if !absent["zxqvword"] || absent["headings"] {
+		t.Fatalf("%v", absent)
+	}
+	decoy := parser.Chunk{FilePath: "create/content.go", Type: "function", Content: "func NewContent()", Metadata: map[string]string{"name": "NewContent"}}
+	hit := parser.Chunk{FilePath: "markup/goldmark/toc.go", Type: "function", Content: "func extractHeadings()", Metadata: map[string]string{"name": "extractHeadings"}}
+	// The unmatched word must not dilute the share, so toc.go still leads.
+	if got := s.boostCohesion(ctx, []parser.Chunk{decoy, hit}, terms, weights, absent); got[0].FilePath != "markup/goldmark/toc.go" {
+		t.Fatalf("%v", got)
 	}
 }

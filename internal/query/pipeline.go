@@ -76,6 +76,8 @@ type Gathered struct {
 	Alt, SummaryWords []parser.Chunk
 	// Weights is how rare each query word is in the index, from 0 to 1.
 	Weights map[string]float64
+	// Absent holds the query words found in no chunk.
+	Absent map[string]bool
 	// CodeOnly says documentation files were left out of every list.
 	CodeOnly bool
 	req      Request
@@ -140,7 +142,7 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	if r.CodeOnly && !asksForDocs(g.Terms) {
 		ctx, g.CodeOnly = vectorstore.WithoutProse(ctx), true
 	}
-	g.Weights = s.termWeights(ctx, g.Terms, r.Workspace)
+	g.Weights, g.Absent = s.termWeights(ctx, g.Terms, r.Workspace)
 
 	vec, embedErr := s.Emb.Embed(ctx, r.Query)
 	if embedErr == nil {

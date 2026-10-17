@@ -37,7 +37,7 @@ func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, err
 		return nil, err
 	}
 	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
-	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights)
+	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights, g.Absent)
 	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.CodeOnly)
 	fused := s.rerank(ctx, r.Query, boostPathTokens(ranked, extras, g.Terms, g.Weights))
 	if n := ClampLimit(r.Limit); len(fused) > n {
@@ -261,11 +261,18 @@ const (
 // chunk by chunk each scores a third, together they cover the question. Each
 // chunk's score is 1/rank plus cohesionWeight times the share of the query's
 // weight that its whole file covers.
-func (s *Searcher) boostCohesion(ctx context.Context, ranked []parser.Chunk, terms []string, weights map[string]float64) []parser.Chunk {
+func (s *Searcher) boostCohesion(ctx context.Context, ranked []parser.Chunk, terms []string, weights map[string]float64, absent map[string]bool) []parser.Chunk {
+	// A word found nowhere in the index cannot be covered by any file, so it
+	// stays out of the share a file is judged by.
+	var present []string
 	var total float64
 	for _, t := range terms {
-		total += weightOf(weights, t)
+		if !absent[strings.ToLower(t)] {
+			present = append(present, t)
+			total += weightOf(weights, t)
+		}
 	}
+	terms = present
 	if total <= 0 || len(ranked) < 2 {
 		return ranked
 	}
