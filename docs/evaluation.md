@@ -82,8 +82,6 @@ Retrieval only, without an agent: for each question, `onfly_focus` with `limit: 
 
 `onfly_xray` used 40 to 60% of the tokens of reading the files it covers (cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies, such as an interface, costs about the same as the file. On the five largest Laravel files it answers in 100 to 220 ms, on Kubernetes' `validation.go` (373 chunks) in 0.4 s.
 
-The questions, the pinned commits and the script are in [`scripts/bench`](../scripts/bench/README.md), so a change can be scored the same way.
-
 Two agents got the same questions, one with `Grep` and `Read` and one with the Onfly tools.
 
 - This repository, 10 questions, and Laravel, 8 questions (routing middleware, container resolution, `Model::save`, callers of one method, Blade, queue, filesystem, validation): every answer was correct in both arms, at about 50k tokens each and 33 to 48 seconds. On Laravel two of Onfly's answers were less complete, and its PHP line numbers were off by the length of the docblock before the declaration-line fix.

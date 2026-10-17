@@ -6,7 +6,7 @@ Every item below ships behind a measurement. The retrieval benchmarks in [Evalua
 
 ## Status
 
-All six are implemented. `onfly lint`, `onfly audit`, `onfly env` and the implementation lists in `onfly_xray` need no setting. `onfly_env` and `onfly_run` are opt-in tools (`server.tools`). The query expander is off by default because it did not pass its gate. The benchmark scripts of step 0 are in `scripts/bench`.
+All six are implemented. `onfly lint`, `onfly audit`, `onfly env` and the implementation lists in `onfly_xray` need no setting. `onfly_env` and `onfly_run` are opt-in tools (`server.tools`). The query expander is off by default because it did not pass its gate.
 
 ## The six pillars
 
@@ -42,7 +42,7 @@ Read `.env`, `.env.example` and `.env.schema`, find the references in code (`os.
 
 ## Order
 
-0. Put the benchmark scripts and pinned repositories in the repository so each pillar has a pass or fail gate (done: `scripts/bench`).
+0. Score each pillar against the retrieval benchmarks in [Evaluation](evaluation.md#large-repositories-and-other-languages) before keeping it.
 1. `onfly_env` and `onfly lint`: small, deterministic, no new dependency.
 2. Interface implementations.
 3. The query expander and the auditor.

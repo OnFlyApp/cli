@@ -1,5 +1,0 @@
-# name  url  commit  [sparse paths...]
-cobra       https://github.com/spf13/cobra                 v1.10.2
-hugo        https://github.com/gohugoio/hugo               85fb23f1c23a0acc9c9094dc033c19ec2c0d2a2b
-laravel     https://github.com/laravel/framework           e51b5fe16d6f0e547137087e52c6106118c319f1
-kubernetes  https://github.com/kubernetes/kubernetes       949f064e6d9e32f0a597795c265fcd50c6aad66e  pkg cmd staging/src/k8s.io/apiserver

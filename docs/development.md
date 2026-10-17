@@ -50,7 +50,6 @@ internal/runner/        allowlisted command runner and test-output parsers behin
 internal/resolve/       which definition a name in a chunk refers to (Go imports, PHP use and namespaces)
 internal/skeleton/      numbered skeletons: long bodies collapsed, original line numbers kept
 internal/telemetry/     tokens saved per call, per tool and per target
-scripts/bench/          pinned repositories, question sets and bench.py for the retrieval benchmark
 ```
 
 ## Store interface
