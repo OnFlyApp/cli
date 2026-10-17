@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -491,5 +492,53 @@ func TestExtOf(t *testing.T) {
 		if got := extOf(in); got != want {
 			t.Errorf("extOf(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestSQLiteReopensAReplacedDatabaseFile(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v.db")
+	put := func(st *SQLite, file string) {
+		t.Helper()
+		c := EmbeddedChunk{Chunk: parser.Chunk{FilePath: file, Type: "function", Content: "x", Metadata: map[string]string{"name": file}}, Vector: []float32{1, 0, 0, 0}}
+		if err := saveChunks(ctx, st, []EmbeddedChunk{c}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { old.Close() })
+	if err := old.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	put(old, "old.go")
+
+	// Another process wipes the index and builds a new one at the same path.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		os.Remove(path + suffix)
+	}
+	fresh, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	put(fresh, "new.go")
+	fresh.Close()
+
+	got, err := old.ListFiles(ctx)
+	if err != nil || len(got) != 1 || got[0] != "new.go" {
+		t.Fatalf("the open handle should follow the replaced file: %v %v", got, err)
+	}
+
+	// Deleted and not yet rebuilt: keep serving rather than fail.
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		os.Remove(path + suffix)
+	}
+	if _, err := old.ListFiles(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

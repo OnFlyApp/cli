@@ -61,18 +61,22 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 	var res *sdkmcp.CallToolResult
 	switch {
 	case contains(files, rel):
-		res, err = h.xrayFile(ctx, rel, focus, in.Depth)
+		res, err = h.xrayFile(ctx, rel, focus, in.Depth, "")
 	case hasPrefix(files, rel+"/"):
 		res, err = h.xrayDir(ctx, rel, files)
 	default:
-		var defs []parser.Chunk
-		if defs, err = h.store.GetComponents(ctx, target); err != nil || len(defs) == 0 {
+		defs, note, rerr := h.resolveSymbol(ctx, target)
+		if rerr != nil || len(defs) == 0 {
 			return nil, struct{}{}, fmt.Errorf("%q is not a file, directory or symbol in this project", target)
+		}
+		if len(defs) > 1 {
+			return h.xraySymbols(ctx, target, note, defs, in.Depth), struct{}{}, nil
 		}
 		if focus == "" {
 			focus = defs[0].Metadata["name"]
 		}
-		res, err = h.xrayFile(ctx, defs[0].FilePath, focus, in.Depth)
+		block, _ := h.definitionBlock(ctx, defs[0], in.Depth, h.newSources())
+		res, err = h.xrayFile(ctx, defs[0].FilePath, focus, in.Depth, block)
 	}
 	return res, struct{}{}, err
 }
@@ -87,7 +91,7 @@ func hasPrefix(files []string, prefix string) bool {
 	return i < len(files) && strings.HasPrefix(files[i], prefix)
 }
 
-func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int) (*sdkmcp.CallToolResult, error) {
+func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symbols string) (*sdkmcp.CallToolResult, error) {
 	rows, err := h.store.ChunksByFiles(ctx, []string{rel})
 	if err != nil {
 		return nil, err
@@ -115,6 +119,9 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int) (*sd
 	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)
 	var b strings.Builder
 	b.WriteString("<skeleton>\n" + sk + "\n</skeleton>\n<blast_radius>\n<calls>\n" + calls + "</calls>\n<called_by>\n" + calledBy + "</called_by>\n</blast_radius>\n")
+	if symbols != "" {
+		b.WriteString("<definitions>\n" + symbols + "</definitions>\n")
+	}
 	text, n := h.rulesOnce(chunkQuery(chunks))
 	// Without onfly the assistant reads the file and spends about 150 tokens of
 	// grep and read context on each file it depends on or that depends on it.
