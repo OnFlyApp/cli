@@ -9,6 +9,7 @@ import (
 
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/rules"
+	"github.com/axitdev/onfly/internal/skeleton"
 	"github.com/axitdev/onfly/internal/telemetry"
 	"github.com/axitdev/onfly/internal/tokens"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -54,8 +55,7 @@ func (h *tools) finishMacro(ctx context.Context, tool, target string, raw int, h
 }
 
 func signature(c parser.Chunk) string {
-	first, _, _ := strings.Cut(strings.TrimSpace(c.Content), "\n")
-	return clip(strings.TrimSpace(first), 200)
+	return clip(skeleton.Signature(c.Content), 200)
 }
 
 func location(c parser.Chunk) string {

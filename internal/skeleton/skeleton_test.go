@@ -199,3 +199,114 @@ func TestCollapseDoesNotMutateSpans(t *testing.T) {
 		t.Fatalf("caller's slice was reordered: %+v", spans)
 	}
 }
+
+const goTypeLiteralSrc = `package p
+
+// Process has type literals all over its signature.
+func Process(
+	ctx context.Context,
+	meta map[string]interface{},
+	opt struct {
+		Retries int
+	},
+	fn func() struct{},
+) (out map[string]interface{}, err error) {
+	a := 1
+	b := 2
+	c := 3
+	return nil, nil
+}
+`
+
+const phpStringSrc = `<?php
+
+class ItemController
+{
+    /**
+     * @return array{id: int}
+     */
+    #[Route('/api/v1/items/{id}', methods: ['GET'])]
+    public function show(
+        int $id,
+        string $tpl = '{default}',
+        string $other = "{also}",
+    ): array {
+        $a = 1;
+        $b = 2;
+        $c = 3;
+        return ['id' => $id];
+    }
+}
+`
+
+func TestCollapseSignaturesWithBracesInsideThem(t *testing.T) {
+	tests := []struct {
+		name  string
+		src   string
+		span  Span
+		keep  []string
+		drop  []string
+		lines string
+	}{
+		{
+			name: "go: interface{} and struct literals in parameters and results",
+			src:  goTypeLiteralSrc,
+			span: Span{4, 16, "Process"},
+			keep: []string{
+				"	meta map[string]interface{},",
+				"	opt struct {",
+				"		Retries int",
+				"	fn func() struct{},",
+				") (out map[string]interface{}, err error) {",
+			},
+			drop:  []string{"a := 1", "return nil, nil"},
+			lines: "lines 12-15",
+		},
+		{
+			name: "php: braces in an attribute path and in default string values",
+			src:  phpStringSrc,
+			span: Span{5, 18, "show"},
+			keep: []string{
+				"     * @return array{id: int}",
+				"    #[Route('/api/v1/items/{id}', methods: ['GET'])]",
+				"        string $tpl = '{default}',",
+				`        string $other = "{also}",`,
+				"    ): array {",
+			},
+			drop:  []string{"$a = 1", "return ['id' => $id];"},
+			lines: "lines 14-17",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Collapse(tc.src, []Span{tc.span}, "", 4)
+			for _, k := range tc.keep {
+				if !strings.Contains(got, k) {
+					t.Errorf("lost %q in\n%s", k, got)
+				}
+			}
+			for _, d := range tc.drop {
+				if strings.Contains(got, d) {
+					t.Errorf("kept %q in\n%s", d, got)
+				}
+			}
+			if !strings.Contains(got, "body omitted: "+tc.lines) {
+				t.Errorf("want marker %q in\n%s", tc.lines, got)
+			}
+		})
+	}
+}
+
+func TestSignatureSkipsDocsAndAttributes(t *testing.T) {
+	tests := map[string]string{
+		"// Doc line.\n// More.\nfunc Run(a int) error {\n\treturn nil\n}":      "func Run(a int) error {",
+		"/**\n * Doc.\n */\n#[Route('/x')]\npublic function show(): void\n{\n}": "public function show(): void",
+		"type Span struct {\n\tStart int\n}":                                    "type Span struct {",
+		"// only a comment":                                                     "// only a comment",
+	}
+	for in, want := range tests {
+		if got := Signature(in); got != want {
+			t.Errorf("Signature(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

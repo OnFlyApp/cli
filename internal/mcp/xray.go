@@ -176,7 +176,7 @@ func (h *tools) referencedDefinitions(ctx context.Context, chunks []parser.Chunk
 	src := refSources{by: map[string]parser.Chunk{}}
 	for _, c := range chunks {
 		for _, ref := range c.Outbound {
-			if _, ok := src.by[ref]; ok || len(src.order) >= limit {
+			if _, ok := src.by[ref]; ok || len(src.order) >= limit || builtins[ref] {
 				continue
 			}
 			src.by[ref] = c
@@ -231,4 +231,12 @@ func (h *tools) xrayDir(ctx context.Context, rel string, files []string) (*sdkmc
 	b.WriteString("</skeleton>\n")
 	text, n := h.rulesOnce(rules.Query{Targets: chunkQuery(all).Targets})
 	return h.finishMacro(ctx, "onfly_xray", rel, raw, fmt.Sprintf("target=%q", rel+"/"), b.String(), text, n), nil
+}
+
+// builtins are Go's predeclared functions; a method that shares one of these
+// names (func (l *Log) append) is not what the call refers to.
+var builtins = map[string]bool{
+	"append": true, "cap": true, "clear": true, "close": true, "complex": true, "copy": true,
+	"delete": true, "imag": true, "len": true, "make": true, "max": true, "min": true,
+	"new": true, "panic": true, "print": true, "println": true, "real": true, "recover": true,
 }
