@@ -95,6 +95,8 @@ A summary is made once per changed chunk and cached; a server that is down only 
 | `onfly_focus` | always | Find code by meaning and name. |
 | `get_tests`, `get_history`, `search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules` | `server.atomic_tools: true` (legacy) | Tests that mention a symbol, recent commits, and the single-purpose tools from earlier versions. |
 | `read_file_raw`, `list_directory` | `server.file_tools: true` | Read a file or browse a folder. |
+| `onfly_env` | `server.tools: [onfly_env]` | The environment variables a project defines (names only) and where the code reads them. |
+| `onfly_run` | `server.tools: [onfly_run]` and `run.commands` | Run an allowed test or build command and get back only the failures, with the code they point at. Starts processes, so not read-only. |
 
 The two default tools cost about 300 tokens of tool definitions per session.
 
@@ -106,6 +108,9 @@ onfly serve --watch          # serve your IDE and keep the index fresh
 onfly search "question"      # try a search from the terminal
 onfly doctor                 # something wrong? start here
 onfly stats                  # index breakdown and token savings
+onfly lint                   # check a change against forbidden_calls / forbidden_imports in the rules
+onfly audit                  # where an assistant's tokens go, from telemetry and its session logs
+onfly env                    # environment variables defined and read
 onfly eval tune              # find ranking weights that fit your code
 ```
 

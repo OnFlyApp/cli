@@ -4,6 +4,10 @@ Version 3 grows Onfly from a context compressor into a platform for AI agents an
 
 Every item below ships behind a measurement. The retrieval benchmarks in [Evaluation](evaluation.md#large-repositories-and-other-languages) are the gate: a change that does not move a number, or that costs another one, is not kept. New MCP tools are opt-in, because each default tool costs context in every session.
 
+## Status
+
+All six pillars are implemented. Three are on by default or by a command (`onfly lint`, `onfly audit`, `onfly env` and the implementation lists in `onfly_xray`); `onfly_env` and `onfly_run` are opt-in tools (`server.tools`); the query expander is off by default because it did not pass its gate. The benchmark scripts of step 0 are in `scripts/bench`.
+
 ## The six pillars
 
 ### 1. Semantic query expander (`internal/query/expand.go`)
@@ -12,11 +16,11 @@ A local small language model (`internal/slm`) rewrites a conceptual question int
 
 An earlier build had query expansion and removed it (+0.016 MRR for about 3 s per new query). It is back as opt-in (`search.expansion`), once per query, and only when the top results are low-confidence. Status: implemented, off by default. With a small local model it did not lift the paraphrased-question set (Laravel 6/15 to 5/15), so it does not meet its own gate; see [Configuration](configuration.md#query-expansion-experimental).
 
-### 2. Polymorphic interface implementations (`internal/index`, `internal/mcp`)
+### 2. Polymorphic interface implementations (`internal/mcp`)
 
 Index explicit `implements` and `extends` (PHP already emits them; TypeScript and Rust need it) and Go's implicit interface satisfaction by matching struct method sets against interface method sets. `onfly_xray` on an interface then lists its implementations, with their callers.
 
-Without type information the Go match is by method names, so it is reported as "likely" and requires every method of the interface. Explicit languages first, Go second.
+Without type information the Go match is by method names, so it is reported as "likely" and requires every method of the interface. It is computed when `onfly_xray` is asked, from the chunk metadata and the method index, so it needs no new index and no reindex.
 
 ### 3. Architecture rules linter (`onfly lint`)
 
@@ -38,7 +42,7 @@ Read `.env`, `.env.example` and `.env.schema`, find the references in code (`os.
 
 ## Order
 
-0. Put the benchmark scripts and pinned repositories in the repository so each pillar has a pass or fail gate.
+0. Put the benchmark scripts and pinned repositories in the repository so each pillar has a pass or fail gate (done: `scripts/bench`).
 1. `onfly_env` and `onfly lint`: small, deterministic, no new dependency.
 2. Interface implementations.
 3. The query expander and the auditor.
