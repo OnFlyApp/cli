@@ -1,12 +1,8 @@
 # Onfly — Context Compressor & Architectural Interceptor for AI Coding Agents
 
-> **Experimental, test repository.** Measured with Claude Code on five repositories (three runs per task; details in [docs/evaluation.md](docs/evaluation.md)):
->
-> - Best case, on two medium repositories with questions about behavior: about 10% fewer turns and less time, 12 to 16% fewer output tokens, 6% less context sent to the model.
-> - On the other three there was no gain: the assistant rarely called Onfly and found answers with Grep or Read.
-> - Cost savings were not measured reliably (prompt caching dominates) and are unproven.
+> **Experimental, test repository.** Retrieval scores on Go and PHP repositories of 40 to 5,000 files are in [Evaluation](docs/evaluation.md#large-repositories-and-other-languages). Savings in agent runs are modest and depend on how often the assistant calls Onfly instead of `Grep` and `Read`; cost savings are not measured.
 
-Stop burning thousands of tokens on whole-file `Read`s and noisy `Grep`s. Onfly is a CGO-free Go CLI and MCP server that parses your code into language-aware chunks with WebAssembly parsers, then gives Claude Code, Cursor or any MCP client two tools: **`onfly_xray`** (a file's skeleton, who calls it, what it calls, your project rules) and **`onfly_focus`** (the best-matching code plus what it uses), each in one round-trip. In our self-test each call came back about half the size (an estimate) of reading the files it replaces; the measured end-to-end effect on agent runs is smaller, see the note above.
+Stop burning thousands of tokens on whole-file `Read`s and noisy `Grep`s. Onfly is a CGO-free Go CLI and MCP server that parses your code into language-aware chunks with WebAssembly parsers, then gives Claude Code, Cursor or any MCP client two tools: **`onfly_xray`** (a file's skeleton, who calls it, what it calls, your project rules) and **`onfly_focus`** (the best-matching code plus what it uses), each in one round-trip. Each call comes back smaller than reading the files it replaces; the estimate is in `onfly stats`.
 
 ## Why not just `Read` and `Grep`?
 
@@ -20,7 +16,7 @@ Stop burning thousands of tokens on whole-file `Read`s and noisy `Grep`s. Onfly 
 
 ## 30-second quickstart
 
-You need Go 1.27+ to build Onfly and an embedder; the easiest is [Ollama](https://ollama.com) (free, local).
+You need Go 1.27+ to build Onfly. An embedder is optional: without one, names, text and paths are searched and everything else works; [Ollama](https://ollama.com) (free, local) adds search by meaning.
 
 ```sh
 git clone https://github.com/OnFlyApp/cli onfly && cd onfly && make build   # bin/onfly; put it on your PATH
@@ -31,11 +27,11 @@ onfly init            # .onfly/config.yaml, .onfly/ in .gitignore, parsers for t
 onfly setup claude    # register the MCP server in .mcp.json and write the guide into CLAUDE.md
 ```
 
-Restart Claude Code and ask about your code. The MCP tools build or refresh the index on first use if it is missing or stale, in about a second and without the embedder: names, text and paths are searchable at once, and the vectors for semantic search are added in the background when the embedder is up (`onfly index` runs it by hand; `onfly index --lexical` skips the embedder). Later, `onfly stats` prints the index breakdown and, once the tools have run, requests served, estimated tokens and dollars saved, and rules injected (`onfly stats --format json` prints just those totals for CI). Cursor and VS Code: `onfly mcp-config cursor` or `onfly mcp-config vscode`. If `init` could not install a parser (no network), it prints the `onfly ext install <language>` line to run. Details: [Getting started](docs/getting-started.md).
+Restart Claude Code and ask about your code. `init` indexes without the embedder, so it finishes in seconds (2,000 Go files in 13 s). The MCP tools also build or refresh the index on first use if it is missing or a file changed on disk, and add the vectors for semantic search in the background when the embedder is up. `onfly index` embeds by hand; `onfly index --lexical` skips the embedder on purpose. Later, `onfly stats` prints the index breakdown and, once the tools have run, requests served, estimated tokens and dollars saved, and rules injected (`onfly stats --format json` prints just those totals for CI). Cursor and VS Code: `onfly mcp-config cursor` or `onfly mcp-config vscode`. If `init` could not install a parser (no network), it prints the `onfly ext install <language>` line to run. Details: [Getting started](docs/getting-started.md).
 
 ## What the tools return
 
-`onfly_xray(target, focus_symbol?, depth?)` where `target` is a file, a directory or a symbol name. A trimmed real answer for `internal/mcp/xray.go` in this repository:
+`onfly_xray(target, focus_symbol?, depth?)` where `target` is a file, a directory or a symbol. A symbol can be qualified (`telemetry.Open`, `Summary.Saved`, `Container::make`, `internal/telemetry/telemetry.go:Open`); a bare name that several files define (`Open`) returns every definition with its own callers, so no second call is needed. A trimmed real answer for `internal/mcp/xray.go` in this repository:
 
 ```xml
 <onfly_context target="internal/mcp/xray.go" tokens_saved="1865">
@@ -67,19 +63,21 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 </onfly_context>
 ```
 
-`onfly_focus(query, limit?)` returns `<symbols>` (full code of the top matches), `<related>` (one-line signatures of what they use) and the rules. Ranking weights the name, path and word lists 0.65 and the embedder 0.35, and lifts the symbols of a file or directory your query names. Parameters and edge cases: [MCP server](docs/mcp.md).
+`onfly_focus(query, limit?)` returns `<symbols>` (full code of the top matches), `<related>` (one-line signatures of what they use) and the rules. Ranking weights the name, path and word lists 0.65 and the embedder 0.35. Query words count by rarity (a word in 5% of the chunks adds little), documentation files stay out of the candidates unless the query asks for docs, test files and one-line imports rank last, and files that cover more of the question as a whole rank higher. Parameters and edge cases: [MCP server](docs/mcp.md).
 
 Under the hood:
 
 - **Parsers are WebAssembly plugins** ([wazero](https://wazero.io), no CGO, no host access). The official Go parser uses `go/parser`; the PHP, TypeScript, JavaScript, Python and Rust parsers use a pure-Go Tree-sitter port. They install with `onfly ext install go|php|typescript|javascript|python|rust`. Any program that prints chunks can be a parser.
 - **The skeletonizer copies lines, it never re-renders code.** Docblocks, PHP 8 `#[...]` attributes, Go struct tags and multi-line signatures survive byte for byte; only the middle of long bodies is replaced, and the scanner ignores braces inside parameters, strings and `interface{}`.
-- **Calls are resolved from the caller's imports and namespaces** (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository. Blast-radius queries are batched, a fixed number per call.
+- **Calls are resolved from the caller's imports and namespaces** (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository, and a PHP `$this->name()` resolves only to the caller's own class, a class it imports, or its namespace. Blast-radius queries are batched, a fixed number per call.
+- **Generated code is left out.** Files that say "Code generated ... DO NOT EDIT", `zz_generated*` and `*.pb.go` are not indexed (17% of the chunks in Kubernetes); `indexer.index_generated: true` keeps them.
+- **Locations point at the declaration**, not at the docblock above it.
 - **Rules are delivered, not requested.** Matching rules from `.onfly/rules/` (or `CLAUDE.md` and friends) are appended to the tool result once per MCP session, held in memory.
 - **Telemetry is conservative.** The baseline for `onfly_xray` is the file plus 150 tokens for each file it calls or is called from; for `onfly_focus`, the whole files of the three best matches. Tokens are bytes divided by four.
 
 ## Optional: summaries from a local model
 
-Chunk summaries make search by meaning better (MRR 0.663 to 0.751 on this repository, see [Evaluation](docs/evaluation.md)) and cost index time. Point Onfly at any local server with three variables, no config needed:
+Chunk summaries make search by meaning better and cost index time. Point Onfly at any local server with three variables, no config needed:
 
 ```sh
 export ONFLY_SLM_PROVIDER=ollama          # or openai, for mlx_lm.server, llama-server, LM Studio, vLLM

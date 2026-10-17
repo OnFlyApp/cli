@@ -24,7 +24,7 @@ In order of effort: (1) keep the defaults, which weigh the semantic list above t
 
 ### Should I add a reranker on top of summaries?
 
-Measure it. With a local chat model (`reranker.provider: ollama`) it raised recall@5 but lowered rank 1 and added seconds per search in the earlier measurement. A hosted cross-encoder (Voyage, Cohere, Jina) is the better candidate and is already supported; it was not measured here because it needs an API key. Run `onfly eval` with and without it on your own cases.
+Measure it. With a local chat model (`reranker.provider: ollama`) it can raise recall@5 but lower rank 1, and it adds seconds per search. A hosted cross-encoder (Voyage, Cohere, Jina) is the better candidate and is already supported. Run `onfly eval` with and without it on your own cases.
 
 ### Can I use vLLM, mlx_lm.server or LM Studio instead of Ollama?
 
@@ -40,7 +40,7 @@ No. Answers are cached in `.onfly/summaries.jsonl` by chunk text and model, so d
 
 ### Which summary model should I use?
 
-`qwen2.5-coder:7b` gave the best scores; `qwen2.5-coder:3b` was within 0.004 MRR and indexed about a third faster. Both are local through Ollama. See [Chunk summaries](configuration.md#chunk-summaries).
+`qwen2.5-coder:7b` and `qwen2.5-coder:3b` both work and are local through Ollama; the smaller one indexes faster. See [Chunk summaries](configuration.md#chunk-summaries).
 
 ### What does it cost?
 

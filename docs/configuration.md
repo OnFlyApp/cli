@@ -70,7 +70,8 @@ indexer:
   include: ["**/*"]
   exclude: [vendor, node_modules, dist, build, target, .venv]
   debounce_ms: 2000              # onfly watch; default 2000
-  parse_timeout_ms: 5000         # per parser call; default 5000
+  parse_timeout_ms: 5000         # per parser call; default 5 s plus 150 ms per KiB of source for WASM parsers
+  index_generated: false         # true keeps generated files (Code generated ... DO NOT EDIT, zz_generated*, *.pb.go)
   skip_types: [use]              # drop chunks of these types after parsing (see "onfly stats" for the types); reindex to apply
   embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
   # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
@@ -166,7 +167,7 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 3. **Fuse.** Every list scores `weight / (rrf_k + rank)` and the scores add up. Defaults: `semantic_weight` 2, `keyword_weight` 0.5, `word_weight` 0.25 and `field_weight` 0.5 (both relative to `keyword_weight`), `rrf_k` 20. A zero value takes the default, except `word_weight` and `field_weight`, where 0 turns the list off.
 `search.type_weights` multiplies a chunk's fused score by its type (`onfly stats` lists the types). Use it where small declarations such as PHP `trait_use`, `property` or `enum_case` chunks match a question's words and outrank the class that holds them: a weight of 0.3 sends them below the definition without deleting them, unlike `indexer.skip_types`. A chunk with weight `w` contributes `w` of its reciprocal rank and takes only `w` of a position in each list, so the chunks behind it rank almost as if it were absent; a weight near 0 approaches deleting the type from search while keeping it findable. With any type weight set, each list also reads three times as many candidates (up to 150), because demoted chunks would otherwise fill the slots that real definitions need. It needs no reindex. Measure with `onfly eval` before keeping a value.
 
-The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half of 573 cases and checked on the other half, where MRR rose from 0.605 to 0.678. Your code may prefer other numbers: run `onfly eval tune` on your own cases before changing them.
+The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half of the cases and checked on the other half. Your code may prefer other numbers: run `onfly eval tune` on your own cases before changing them.
 
 If the embedder is unreachable, `search` logs a warning and answers from keyword results alone instead of failing. A cancelled request still fails. Query vectors are cached in memory (256 entries), so a repeated query does not call the embedder again.
 
@@ -182,11 +183,11 @@ embedder:
   document_prefix: "title: none | text: "
 ```
 
-`query_prefix` goes in front of every search query (and expansion text), `document_prefix` in front of every chunk at index time, so changing the document prefix needs a fresh index (the summary cache keeps that cheap). On this repository the code-retrieval prompts raised MRR from 0.797 to 0.810, and the hand-written cases from 0.705 to 0.774. `task: search result | query: ` gave 0.806. Models without task prompts (Qwen3-Embedding takes an `Instruct: ... Query: ` prefix on the query side only) should be measured before setting any.
+`query_prefix` goes in front of every search query (and expansion text), `document_prefix` in front of every chunk at index time, so changing the document prefix needs a fresh index (the summary cache keeps that cheap). Models without task prompts (Qwen3-Embedding takes an `Instruct: ... Query: ` prefix on the query side only) should be measured before setting any.
 
 ### Second embedder
 
-`embedder.alt` adds a second embedding model. Each chunk is embedded by both, stored in a second vector slot, and search fuses the two vector lists (`search.alt_weight`, default 1). Models fail on different questions, so the union ranks better than either: embeddinggemma-2 with qwen3-embedding:0.6b as `alt` reached MRR 0.809 against 0.797 alone, and 0.816 together with the prompts above.
+`embedder.alt` adds a second embedding model. Each chunk is embedded by both, stored in a second vector slot, and search fuses the two vector lists (`search.alt_weight`, default 1). Models fail on different questions, so the union can rank better than either; check it with `onfly eval` on your own cases.
 
 ```yaml
 embedder:
@@ -219,7 +220,7 @@ indexer:
 
 **Cache.** Every answer is also appended to `.onfly/summaries.jsonl`, keyed by the model, the prompt version, the chunk's type and name and its exact text. Deleting the database, changing the embedder or a prefix, or rebuilding on another machine that has the file therefore does not call the model again: a full reindex of this repository dropped from 17 minutes to about a minute and a half. A different summary model has different keys and asks again. Keep the file out of git like `vector.db`.
 
-Summaries are written during indexing, one model call per new or changed chunk. A chunk whose text did not change keeps its stored summary, so a reindex calls the model only for what changed. The first index of a project is slower: on this repository (about 730 chunks) it took 16 minutes with a 7B model on a laptop instead of under a minute; it raised MRR from 0.663 to 0.751 in the [measurement](evaluation.md#measured-effect). If the model is unreachable, indexing logs a warning, skips the rest of that file's summaries and still completes. Turning summaries on does not touch chunks that are already indexed until their file changes; delete the database and reindex to apply them everywhere.
+Summaries are written during indexing, one model call per new or changed chunk. A chunk whose text did not change keeps its stored summary, so a reindex calls the model only for what changed. The first index of a project is much slower, since every chunk costs a model call. If the model is unreachable, indexing logs a warning, skips the rest of that file's summaries and still completes. Turning summaries on does not touch chunks that are already indexed until their file changes; delete the database and reindex to apply them everywhere.
 
 ### Usage log
 
@@ -227,7 +228,7 @@ With `server.usage_file` set, the MCP server appends one JSON line (`ts`, `query
 
 ### Removed options
 
-Earlier builds had the `ollama`, `ollama-score` and `openai-score` rerankers, `search.recency_weight`, `search.usage_weight`, `indexer.summaries.files`, `indexer.summaries.context`, `search.expand`, `search.group_by`, `search.dedupe`, `search.graph_weight`, `indexer.summaries.batch`, `indexer.summaries.questions`, `indexer.summary_vector` and `indexer.embed_neighbours`. Each was measured and none beat the defaults on the final configuration (see [evaluation](evaluation.md#removed-options)), so they were deleted. A config file that still names them loads; the keys are ignored.
+Earlier builds had the `ollama`, `ollama-score` and `openai-score` rerankers, `search.recency_weight`, `search.usage_weight`, `indexer.summaries.files`, `indexer.summaries.context`, `search.expand`, `search.group_by`, `search.dedupe`, `search.graph_weight`, `indexer.summaries.batch`, `indexer.summaries.questions`, `indexer.summary_vector` and `indexer.embed_neighbours`. None beat the defaults, so they were deleted. A config file that still names them loads; the keys are ignored.
 
 ## Other inference engines
 
@@ -310,7 +311,7 @@ Voyage: `POST {endpoint}/v1/embeddings`. The default endpoint is `https://api.vo
 
 The HTTP timeout is 60 seconds. Batches are 32 texts, or 128 with `onfly index --ci`. HTTP 429, 502, 503 and 504, and network errors, are retried up to five times. `Retry-After` of 1–30 seconds replaces the backoff. Other status codes, including a plain 500, fail immediately.
 
-`embeddinggemma-2` (`ollama pull embeddinggemma-2`, 768 dimensions) was the best of six models tried here; see [Evaluation](evaluation.md#embedding-models).
+`embeddinggemma-2` (`ollama pull embeddinggemma-2`, 768 dimensions) is a good small model to try; compare models on your own cases with `onfly eval`.
 
 **Context window.** Ollama loads an embedding model with a 4096-token window and cuts longer input without any error. `max_input_tokens` defaults to 6000, so Onfly sends `num_ctx: max_input_tokens + 512` with every Ollama embed request whenever that is above 4096, and `embedder.alt` inherits the value. Models that read fewer tokens than that (`nomic-embed-text` 2048, `embeddinggemma` v1 2048, `mxbai-embed-large` 512) cut the excess regardless; `onfly stats` and `onfly doctor` print a `hint:` when the configured model is one of them, and when the index holds chunks longer than about 2000 tokens. Set `max_input_tokens` to the model's context minus a margin and reindex so those chunks are split instead of cut. This repository has no chunk above 1900 tokens (median 98, 99th percentile 838), so it is unaffected.
 

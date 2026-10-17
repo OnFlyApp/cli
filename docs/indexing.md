@@ -13,7 +13,21 @@ Directory symlinks are not followed. A file symlink is read only when its target
 
 Each selected file is hashed with xxHash64. A stored hash that matches is skipped: the parser and the embedder are not called. Otherwise the file is parsed, split when a chunk is over `embedder.max_input_tokens` (the same number sizes the context window requested from Ollama), embedded, and stored in one transaction. The split overlap is 12% of that limit. The stored `file_path` uses forward slashes and is relative to the project root.
 
-The default embed batch is 32. `onfly index --ci` uses 128. A WASM or stdio parse that runs longer than `indexer.parse_timeout_ms` (default 5 seconds) is cancelled. With `indexer.concurrency` above 1, that many files are parsed, embedded and committed in parallel; each file is still committed in its own transaction. Each WASM runtime is limited to 256 MiB.
+## Without the embedder
+
+Parsing and storing a file need no network. `onfly index --lexical`, `onfly init`, and the MCP tools on a missing or edited file store the chunks without vectors: name, text, path and reference search work at once, and `onfly_xray` is complete. Such a file carries the suffix `+lex` on its stored hash, so the next `onfly index` that can embed does not take it for unchanged, keeps the vectors of chunks whose text is the same, and embeds the rest. A plain `onfly index` does the same when the embedder fails: a refused connection is not retried, the embedder is not asked again for a minute, and each remaining file is stored without vectors. The summary says how many (`N files are stored without vectors`). `onfly serve` starts that embedding in the background at startup when it finds such files, and after it builds an empty index or syncs an edited one.
+
+A lexical run parses with one worker per core (at most 8) unless `indexer.concurrency` is set.
+
+## Generated files
+
+A file is left out, and removed from an existing index, when its name starts with `zz_generated` or ends with `.pb.go` or `.pb.gw.go`, or when its first kilobyte says `Code generated` and `DO NOT EDIT`, or `@generated`. In Kubernetes (`pkg`, `cmd`, `apiserver`) that was 9,500 of 54,000 chunks. `indexer.index_generated: true` indexes them.
+
+## Speed
+
+On a laptop, lexical: Go 2,000 files and 12,000 chunks in 13 s; Go 4,700 files and 44,000 chunks in 44 s; PHP 3,200 files and 56,000 chunks in 5 minutes (the PHP parser is the cost, about 0.6 s of CPU per file). The index of the PHP project is 112 MB, of the Go one 208 MB. Embedding is far slower: 12,000 chunks took 20 minutes with `qwen3-embedding:0.6b`. The compiled form of a WASM parser is cached in the user cache directory (`onfly/wasm`), which saves about a second per process.
+
+The default embed batch is 32. `onfly index --ci` uses 128. A WASM or stdio parse that runs longer than `indexer.parse_timeout_ms` is cancelled. With no value set, a WASM parse may take 5 seconds plus 150 ms per KiB of source, so a 75 KB PHP file gets 16 seconds; a set value is used as given. With `indexer.concurrency` above 1, that many files are parsed, embedded and committed in parallel; each file is still committed in its own transaction. Each WASM runtime is limited to 256 MiB.
 
 ## Reindex
 

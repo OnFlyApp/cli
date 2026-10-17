@@ -33,6 +33,11 @@ Stdout is a JSON array. An empty file is `[]`. `null` is treated as an empty arr
 
 The Go parser ([OnFlyApp/ext-parser-go](https://github.com/OnFlyApp/ext-parser-go)) emits `function`, `method`, `struct`, `interface`, and `type`. Methods set `metadata.receiver`. `onfly ext install go` installs a published release.
 
+## Known limits of the published parsers
+
+- **PHP** ([OnFlyApp/ext-parser-php](https://github.com/OnFlyApp/ext-parser-php)): a file over 80 KB (`maxParseSize`) is not parsed into symbols; it comes back as plain `file` chunks with `reason: too_large`, so `onfly_xray` has no outline or blast radius for it. In Laravel that is about twenty files, among them `Eloquent/Model.php` and `Query/Builder.php`. Parsing costs about 0.6 s of CPU per file, against about 10 ms for the Go parser, so a 3,000-file project takes minutes. A chunk's `start_line` is the line of its docblock; `onfly_xray` and `onfly_focus` show the declaration line.
+- **Go**: a chunk includes the doc comment above a declaration, for the same reason.
+
 ## WASM
 
 Build a `wasip1` command, not a reactor with custom `alloc` and `parse` exports:

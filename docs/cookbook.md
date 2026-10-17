@@ -69,7 +69,7 @@ search:
   type_weights: {trait_use: 0.05, property: 0.1, enum_case: 0.1}   # keep them findable, rank them low (no reindex)
 ```
 
-On a PHP project this took MRR from 0.838 to 0.868 while keeping enum and property lookups; dropping the types outright reached 0.885 but made those lookups impossible. See [measured results](evaluation.md#a-php-project). Change one type at a time and run `onfly eval` after each.
+Dropping the types outright removes those lookups, which this keeps. Change one type at a time and run `onfly eval` after each.
 
 ## Use a different parser for part of the project
 
