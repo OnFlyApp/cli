@@ -1,4 +1,4 @@
-package cmd
+package logger
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+// plainHandler writes "warning: message key=value" lines, for a person reading a
+// terminal.
 type plainHandler struct {
 	w         io.Writer
 	mu        *sync.Mutex
@@ -16,7 +18,9 @@ type plainHandler struct {
 	clearLine bool
 }
 
-func newPlainHandler(w io.Writer, min slog.Level, clearLine bool) *plainHandler {
+// NewPlainHandler returns that handler. clearLine erases the terminal line first,
+// so a log line does not land in the middle of a progress bar.
+func NewPlainHandler(w io.Writer, min slog.Level, clearLine bool) slog.Handler {
 	return &plainHandler{w: w, mu: &sync.Mutex{}, min: min, clearLine: clearLine}
 }
 

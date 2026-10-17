@@ -4,11 +4,22 @@ import (
 	"os"
 
 	"github.com/axitdev/onfly/internal/config"
+	"github.com/axitdev/onfly/internal/logger"
 	"github.com/axitdev/onfly/internal/mcp"
 	"github.com/spf13/cobra"
 )
 
-var configPath string
+var (
+	configPath string
+	verbose    bool
+	jsonLogs   bool
+)
+
+// logOptions are the log flags every command shares. plain asks for the
+// human-readable form when --json-logs is not set.
+func logOptions(plain bool) logger.Options {
+	return logger.Options{Verbose: verbose, JSON: jsonLogs, Plain: plain}
+}
 
 var rootCmd = &cobra.Command{
 	Use:           "onfly",
@@ -25,6 +36,8 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "path to config.yaml")
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "log debug detail (to stderr, or to server.log_file for serve; never to stdout)")
+	rootCmd.PersistentFlags().BoolVar(&jsonLogs, "json-logs", false, "write log records as one JSON object per line")
 	rootCmd.AddCommand(initCmd, indexCmd, serveCmd, watchCmd, doctorCmd, optimizeCmd, extCmd, searchCmd, statsCmd, mcpConfigCmd, evalCmd)
 }
 

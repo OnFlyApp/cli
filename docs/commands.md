@@ -35,6 +35,8 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | `onfly ext update` | Upgrade installed registry parsers. |
 | `onfly ext remove go` | Remove the wasm file and its config entry. |
 | `onfly ext list` | Show name, version, and `active`, `outdated`, or `corrupted`. |
+| `--verbose`, `-v` | Log debug detail. Applies to every command. `onfly serve` writes it to `server.log_file`; the others to standard error. |
+| `--json-logs` | Write log records as one JSON object per line instead of text. `onfly index` then reports its steps as records rather than a progress bar. |
 | `--config path` | Use this config file instead of walking parent directories. |
 | `--version` | Print the build version. |
 

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"github.com/axitdev/onfly/internal/logger"
 	"log/slog"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 func TestPlainHandlerHasNoTimestampAndKeepsAttrs(t *testing.T) {
 	var b bytes.Buffer
-	l := slog.New(newPlainHandler(&b, slog.LevelInfo, false))
+	l := slog.New(logger.NewPlainHandler(&b, slog.LevelInfo, false))
 	l.Warn("parse", "path", "a.go", "err", "boom")
 	l.Info("indexed a.go", "chunks", 3)
 	l.Debug("hidden")

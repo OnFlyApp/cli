@@ -4,6 +4,8 @@
 
 The process loads the config, opens the database, and checks `embedder.dimensions` against the stored size. A mismatch stops the server before it accepts a session.
 
+Logging never touches stdout, which carries only JSON-RPC: records go to `server.log_file`, at `server.log_level` (`debug`, `info`, `warn`, `error`), or at debug with `--verbose`, and as JSON with `--json-logs`. Even a logger pointed at stdout is redirected to stderr.
+
 Start it from the project root so config discovery works:
 
 ```sh

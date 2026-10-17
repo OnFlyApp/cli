@@ -34,6 +34,10 @@ var indexCmd = &cobra.Command{
 		if err != nil && stats == (index.Stats{}) {
 			return err
 		}
+		if jsonLogs {
+			progress.logger().Info("indexed", "files", stats.Files, "chunks", stats.Chunks, "reused", stats.Reused, "skipped", stats.Skipped, "pruned", stats.Pruned, "failed", stats.Failed, "lexical", stats.Lexical)
+			return err
+		}
 		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, reused %d, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Reused, stats.Skipped, stats.Pruned, stats.Failed)
 		if stats.Lexical > 0 {
 			fmt.Fprintf(os.Stderr, "%d files are stored without vectors (--lexical, or the embedder was unreachable): name, text and path search work; run onfly index once the embedder is up\n", stats.Lexical)

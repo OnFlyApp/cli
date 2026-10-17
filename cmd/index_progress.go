@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axitdev/onfly/internal/index"
+	"github.com/axitdev/onfly/internal/logger"
 )
 
 const progressWidth = 20
@@ -16,6 +18,7 @@ type indexProgress struct {
 	out     io.Writer
 	tty     bool
 	perFile bool
+	log     *slog.Logger
 }
 
 func newIndexProgress(out *os.File, perFile bool) *indexProgress {
@@ -23,6 +26,15 @@ func newIndexProgress(out *os.File, perFile bool) *indexProgress {
 }
 
 func (p *indexProgress) Event(ev index.Event) {
+	if jsonLogs {
+		// A progress bar or a plain line would break a stream of JSON records.
+		level := slog.LevelInfo
+		if (ev.Action == "parsing" || ev.Action == "summarising" || ev.Action == "unchanged") && ev.Total > 0 && !p.perFile {
+			level = slog.LevelDebug
+		}
+		p.logger().Log(context.Background(), level, ev.Action, "n", ev.N, "total", ev.Total, "path", ev.Path)
+		return
+	}
 	if !p.tty && !p.perFile && (ev.Action == "parsing" || ev.Action == "summarising") && ev.Total > 0 {
 		return
 	}
@@ -41,7 +53,10 @@ func (p *indexProgress) Finish() {
 }
 
 func (p *indexProgress) logger() *slog.Logger {
-	return slog.New(newPlainHandler(p.out, slog.LevelInfo, p.tty))
+	if p.log == nil {
+		p.log = logger.New(p.out, logger.Options{Verbose: verbose, JSON: jsonLogs, Plain: true, Clear: p.tty && !jsonLogs})
+	}
+	return p.log
 }
 
 func formatIndexProgress(ev index.Event, tty bool) string {

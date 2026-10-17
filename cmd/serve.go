@@ -31,7 +31,8 @@ var serveCmd = &cobra.Command{
 			fmt.Fprintln(os.Stderr, "onfly serve speaks MCP on stdin/stdout and is meant to be started by an IDE.")
 			fmt.Fprintln(os.Stderr, "Run `onfly mcp-config claude-code` (or cursor, vscode) to get the entry to add. Waiting for a client; Ctrl-C to stop.")
 		}
-		return mcp.Serve(cmd.Context(), cfg, os.Stdin, os.Stdout)
+		// Logs go to server.log_file; stdout carries only JSON-RPC.
+		return mcp.ServeWith(cmd.Context(), cfg, os.Stdin, os.Stdout, logOptions(false))
 	},
 }
 

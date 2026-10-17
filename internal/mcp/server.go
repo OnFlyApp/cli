@@ -11,7 +11,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +18,7 @@ import (
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
 	"github.com/axitdev/onfly/internal/ignore"
+	"github.com/axitdev/onfly/internal/logger"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/query"
 	"github.com/axitdev/onfly/internal/rules"
@@ -240,6 +240,12 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 }
 
 func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) error {
+	return ServeWith(ctx, cfg, in, out, logger.Options{})
+}
+
+// ServeWith is Serve with the log format chosen by the caller. The log goes to
+// server.log_file; out carries only JSON-RPC and is never written to by the logger.
+func ServeWith(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer, logOpts logger.Options) error {
 	lf, err := os.OpenFile(cfg.Server.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
@@ -248,7 +254,9 @@ func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) 
 	prev := log.Writer()
 	log.SetOutput(lf)
 	defer log.SetOutput(prev)
-	logger := slog.New(slog.NewTextHandler(lf, &slog.HandlerOptions{Level: logLevel(cfg.Server.LogLevel)}))
+	logOpts.Level = logger.ParseLevel(cfg.Server.LogLevel)
+	lg := logger.New(lf, logOpts)
+	slog.SetDefault(lg) // a dependency that uses the default slog logger lands in the file too
 	log.Printf("onfly serve")
 
 	store, err := vectorstore.New(ctx, cfg.Database)
@@ -263,13 +271,13 @@ func Serve(ctx context.Context, cfg config.Config, in io.Reader, out io.Writer) 
 	if err != nil {
 		return err
 	}
-	srv, closer, err := NewServer(cfg, store, emb, logger)
+	srv, closer, err := NewServer(cfg, store, emb, lg)
 	if err != nil {
 		return err
 	}
 	defer closer()
 	if cfg.Server.Watch {
-		stopWatch := startWatch(ctx, cfg, logger, watch.Run)
+		stopWatch := startWatch(ctx, cfg, lg, watch.Run)
 		defer stopWatch()
 	}
 	pollCtx, pollCancel := context.WithCancel(ctx)
@@ -453,19 +461,6 @@ func toDTO(chunks []parser.Chunk) []chunkDTO {
 		})
 	}
 	return out
-}
-
-func logLevel(name string) slog.Level {
-	switch strings.ToLower(name) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn", "warning":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }
 
 type nopWriteCloser struct{ io.Writer }
