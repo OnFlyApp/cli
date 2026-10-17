@@ -33,6 +33,24 @@ func Accepts(src string, caller, def parser.Chunk) bool {
 	return true
 }
 
+// Methods that many unrelated types implement because a standard interface or
+// the language asks for them. A call to one on an untyped value is only
+// attributed to a definition in the caller's own file.
+var (
+	goUbiquitous = names("String", "Error", "Read", "Write", "Close", "Len", "Less", "Swap",
+		"MarshalJSON", "UnmarshalJSON", "MarshalText", "UnmarshalText", "Scan", "Value")
+	phpUbiquitous = names("__construct", "__destruct", "__toString", "__invoke", "__get", "__set",
+		"toArray", "jsonSerialize", "handle")
+)
+
+func names(list ...string) map[string]bool {
+	m := make(map[string]bool, len(list))
+	for _, n := range list {
+		m[n] = true
+	}
+	return m
+}
+
 var (
 	goImportLine = regexp.MustCompile(`^\s*(?:import\s+)?([A-Za-z_][\w]*|\.)?\s*"([^"]+)"\s*$`)
 	goVersion    = regexp.MustCompile(`^v\d+$`)
@@ -104,7 +122,7 @@ func goAccepts(src string, caller, def parser.Chunk, name string) bool {
 			}
 		default:
 			rest := strings.TrimLeft(caller.Content[m[1]:], " \t")
-			if isMethod && strings.HasPrefix(rest, "(") {
+			if isMethod && strings.HasPrefix(rest, "(") && (!goUbiquitous[name] || def.FilePath == caller.FilePath) {
 				return true
 			}
 		}
@@ -174,7 +192,7 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 				return true
 			}
 		case strings.HasPrefix(qual, "$") || qual == "self" || qual == "static" || qual == "parent":
-			if isMethod {
+			if isMethod && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
 				return true
 			}
 		default:

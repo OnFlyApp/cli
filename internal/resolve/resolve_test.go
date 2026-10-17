@@ -41,6 +41,9 @@ func TestGoResolution(t *testing.T) {
 		{"method call on a value", "h.store.GetComponents(ctx, n)", method("internal/vectorstore/postgres.go", "GetComponents", "Postgres"), true},
 		{"predeclared append is not a method", "out = append(out, x)", method("internal/usage/usage.go", "append", "Log"), false},
 		{"a field read is not a method call", "srcs.text[rel] = src", method("internal/rules/rules.go", "text", "Rule"), false},
+		{"String on a value does not cross files", "b.String()", method("internal/rules/rules.go", "String", "parserNames"), false},
+		{"String on a value in the same file", "b.String()", method("internal/skeleton/skeleton.go", "String", "scanner"), true},
+		{"a domain method on a value still resolves", "h.record(x)", method("internal/mcp/server.go", "record", "tools"), true},
 		{"a function is not called through a value", "x.Count()", fn("internal/tokens/tokens.go", "Count"), false},
 		{"name not in the text", "return 1", fn("internal/skeleton/skeleton.go", "Collapse"), false},
 	}
@@ -101,6 +104,7 @@ func TestPHPResolution(t *testing.T) {
 		{"aliased import", "Cash::format(1)", method("format", `App\Support\Money`), true},
 		{"method on a variable", "$this->save()", method("save", `App\Models\Story`), true},
 		{"a method is not called bare", "save()", method("save", `App\Models\Story`), false},
+		{"handle() on a variable does not cross files", "$job->handle()", method("handle", `App\Jobs\Send`), false},
 		{"count() is not a user method", "count($a)", method("count", `App\Models\Story`), false},
 	}
 	for _, tc := range tests {
