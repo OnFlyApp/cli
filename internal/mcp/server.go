@@ -210,7 +210,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		SubscribeHandler:   func(context.Context, *sdkmcp.SubscribeRequest) error { return nil },
 		UnsubscribeHandler: func(context.Context, *sdkmcp.UnsubscribeRequest) error { return nil },
 	})
-	addTool(srv, &sdkmcp.Tool{Name: "onfly_xray", Description: "Inspect a file, directory or symbol cheaply: skeleton with long bodies collapsed, what it calls and what calls it, and the project rules for that path. Prefer it to Read for unfamiliar files or files over 100 lines."}, h.xray)
+	addTool(srv, &sdkmcp.Tool{Name: "onfly_xray", Description: "Inspect a file, directory or symbol cheaply: numbered skeleton with long bodies collapsed, its callers and callees, rules. Prefer it to Read for large files. A \"body omitted\" line is a collapsed function: pass focus_symbol=<name> to expand it."}, h.xray)
 	addTool(srv, &sdkmcp.Tool{Name: "onfly_focus", Description: "Search by meaning and name. Returns a ready bundle: full code of the best matches, signatures of what they use, and the project rules. Use it for flows and business logic instead of several Grep calls."}, h.focus)
 	if cfg.Server.AtomicTools {
 		addTool(srv, &sdkmcp.Tool{Name: "get_tests", Description: "Find test files that mention a symbol, with the enclosing test and line. Use before changing a function to see what exercises it."}, h.getTests)

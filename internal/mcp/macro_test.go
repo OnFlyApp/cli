@@ -100,7 +100,7 @@ func TestXrayFileSkeletonBlastRadiusAndRulesOnce(t *testing.T) {
 	cfg.Server.LogFile = filepath.Join(t.TempDir(), "server.log")
 	session := openServer(t, cfg, store, fakeEmbedder{})
 	first := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go"})
-	for _, want := range []string{`<onfly_context target="src/pay.go"`, "body omitted: lines 4-13", "func Handle() { Charge() } [src/web.go:1]", "Use the repository layer."} {
+	for _, want := range []string{`<onfly_context target="src/pay.go"`, "body omitted: original lines 4-13", "func Handle() { Charge() } [src/web.go:1]", "Use the repository layer."} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("missing %q in\n%s", want, first)
 		}

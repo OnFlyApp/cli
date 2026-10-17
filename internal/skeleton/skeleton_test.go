@@ -1,6 +1,7 @@
 package skeleton
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -290,7 +291,7 @@ func TestCollapseSignaturesWithBracesInsideThem(t *testing.T) {
 					t.Errorf("kept %q in\n%s", d, got)
 				}
 			}
-			if !strings.Contains(got, "body omitted: "+tc.lines) {
+			if !strings.Contains(got, "body omitted: original "+tc.lines) {
 				t.Errorf("want marker %q in\n%s", tc.lines, got)
 			}
 		})
@@ -308,5 +309,53 @@ func TestSignatureSkipsDocsAndAttributes(t *testing.T) {
 		if got := Signature(in); got != want {
 			t.Errorf("Signature(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCollapseNumberedKeepsTheNumbersOfTheOriginalFile(t *testing.T) {
+	var src strings.Builder
+	src.WriteString("package p\n\n// Big does a lot.\nfunc Big() int {\n")
+	for i := 0; i < 12; i++ {
+		src.WriteString("\tx := 1\n")
+	}
+	src.WriteString("\treturn x\n}\n\nfunc Small() {}\n")
+	text := src.String()
+	original := strings.Split(text, "\n")
+	// Big is lines 4-18: signature on 4, body 5-17, closing brace on 18.
+	spans := []Span{{Start: 4, End: 18, Name: "Big"}, {Start: 20, End: 20, Name: "Small"}}
+	got := CollapseNumbered(text, spans, "", 10)
+	lines := strings.Split(got, "\n")
+	if lines[0] != ExpandTip {
+		t.Fatalf("a collapsed body comes with the tip first: %q", lines[0])
+	}
+	marker := ""
+	for _, l := range lines[1:] {
+		num, rest, ok := strings.Cut(l, "| ")
+		if !ok {
+			t.Fatalf("every line has a number: %q", l)
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(num))
+		if err != nil {
+			t.Fatalf("%q", l)
+		}
+		if strings.Contains(rest, "body omitted") {
+			marker = l
+			continue
+		}
+		if rest != original[n-1] {
+			t.Fatalf("line %d of the skeleton is %q, line %d of the file is %q", n, rest, n, original[n-1])
+		}
+	}
+	for _, want := range []string{" 5| ", "original lines 5-17", "~13 lines", `focus_symbol="Big" expands it`} {
+		if !strings.Contains(marker, want) {
+			t.Fatalf("marker %q lacks %q", marker, want)
+		}
+	}
+	if !strings.Contains(got, "18| }") || !strings.Contains(got, "20| func Small() {}") {
+		t.Fatalf("lines after a collapsed body keep their own numbers:\n%s", got)
+	}
+	// Nothing collapsed, no tip.
+	if plain := CollapseNumbered("a\nb\n", nil, "", 10); strings.Contains(plain, "Tip") || !strings.HasPrefix(plain, "1| a\n2| b") {
+		t.Fatalf("%q", plain)
 	}
 }

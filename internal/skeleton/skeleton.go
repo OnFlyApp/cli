@@ -3,6 +3,7 @@ package skeleton
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/axitdev/onfly/internal/tokens"
@@ -22,10 +23,59 @@ type Span struct {
 // brace cannot be found are left whole. Line numbers refer to src, so no
 // replacement shifts another.
 func Collapse(src string, spans []Span, focus string, minLines int) string {
+	var out []string
+	for _, l := range collapse(src, spans, focus, minLines) {
+		out = append(out, l.text)
+	}
+	return strings.Join(out, "\n")
+}
+
+// A line of the result: n is its 1-based number in src, or the first line it
+// stands for when it is a marker.
+type line struct {
+	n      int
+	text   string
+	marker bool
+}
+
+// ExpandTip tells a reader what a collapsed body is and how to get it.
+const ExpandTip = `// [Tip: a "body omitted" line is a collapsed function; the numbers on the left are line numbers of the original file. To read one body call onfly_xray with focus_symbol="<name>" (or read those lines).]`
+
+// CollapseNumbered is Collapse with the number of each line in src in front of
+// it, so a position read from the skeleton is a position in the file. A marker
+// carries the number of the first line it hides and says which lines those are
+// and, when the span has a name, which focus_symbol expands it. If anything was
+// collapsed, one tip line says how to read a body.
+func CollapseNumbered(src string, spans []Span, focus string, minLines int) string {
+	ls := collapse(src, spans, focus, minLines)
+	width := len(strconv.Itoa(strings.Count(src, "\n") + 1))
+	var b strings.Builder
+	any := false
+	for _, l := range ls {
+		any = any || l.marker
+	}
+	if any {
+		b.WriteString(ExpandTip + "\n")
+	}
+	for i, l := range ls {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		fmt.Fprintf(&b, "%*d| %s", width, l.n, l.text)
+	}
+	return b.String()
+}
+
+func collapse(src string, spans []Span, focus string, minLines int) []line {
 	lines := strings.Split(src, "\n")
 	sorted := append([]Span(nil), spans...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Start < sorted[j].Start })
-	var out []string
+	var out []line
+	keep := func(from, to int) { // 1-based, inclusive
+		for n := from; n <= to; n++ {
+			out = append(out, line{n: n, text: lines[n-1]})
+		}
+	}
 	next, covered := 1, 0
 	for _, sp := range sorted {
 		if sp.Start < 1 || sp.Start <= covered || sp.Start < next || sp.End > len(lines) || sp.End-sp.Start+1 <= minLines || (focus != "" && sp.Name == focus) {
@@ -35,16 +85,21 @@ func Collapse(src string, spans []Span, focus string, minLines int) string {
 		if !ok || open >= sp.End-1 {
 			continue
 		}
-		out = append(out, lines[next-1:open]...)
+		keep(next, open)
 		omitted := strings.Join(lines[open:sp.End-1], "\n")
 		n, _ := tokens.Count(omitted)
-		out = append(out, fmt.Sprintf("%s// ... [body omitted: lines %d-%d, ~%d tokens] ...", indentOf(lines[open-1])+"\t", open+1, sp.End-1, n), lines[sp.End-1])
+		hint := ""
+		if sp.Name != "" {
+			hint = fmt.Sprintf("; focus_symbol=%q expands it", sp.Name)
+		}
+		out = append(out, line{n: open + 1, marker: true, text: fmt.Sprintf("%s// ... [body omitted: original lines %d-%d, ~%d lines, ~%d tokens%s] ...", indentOf(lines[open-1])+"\t", open+1, sp.End-1, sp.End-1-open, n, hint)})
+		keep(sp.End, sp.End)
 		next, covered = sp.End+1, sp.End
 	}
 	if next <= len(lines) {
-		out = append(out, lines[next-1:]...)
+		keep(next, len(lines))
 	}
-	return strings.Join(out, "\n")
+	return out
 }
 
 // bodyOpen returns the 1-based line holding the "{" that opens the body. It

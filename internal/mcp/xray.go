@@ -114,7 +114,7 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 			spans = append(spans, skeleton.Span{Start: s, End: e, Name: c.Metadata["name"]})
 		}
 	}
-	sk := cutToBudget(skeleton.Collapse(string(src), spans, focus, collapseOver), h.maxTokens)
+	sk := cutToBudget(skeleton.CollapseNumbered(string(src), spans, focus, collapseOver), h.maxTokens)
 	srcs := h.newSources()
 	srcs.text[rel] = string(src)
 	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)

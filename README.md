@@ -8,7 +8,7 @@ Stop burning thousands of tokens on whole-file `Read`s and noisy `Grep`s. Onfly 
 
 | | Native agent flow | With Onfly |
 | --- | --- | --- |
-| Understand a file | `Read` the whole file, every method body | `onfly_xray`: signatures, attributes and docblocks kept, long bodies collapsed to `// ... [body omitted: lines 12-58, ~410 tokens] ...` |
+| Understand a file | `Read` the whole file, every method body | `onfly_xray`: signatures, attributes and docblocks kept, long bodies collapsed to `// ... [body omitted: original lines 12-58, ~47 lines, ~410 tokens; focus_symbol="Name" expands it] ...`, every line numbered as in the file |
 | Who calls this? | Several `Grep`s, then `Read` each hit | `called_by` and `calls` in the same answer, resolved through imports so `strings.Split` is not your `Split` |
 | Find a flow | `Grep` for guessed words, read the false hits | `onfly_focus`: ranked by name and meaning, full code of the best few plus signatures of what they use |
 | Project conventions | Whatever the model remembered from `CLAUDE.md` | The rules that match the returned paths ride along in `<architectural_rules>`, once per session |
@@ -36,16 +36,17 @@ Restart Claude Code and ask about your code. `init` indexes without the embedder
 ```xml
 <onfly_context target="internal/mcp/xray.go" tokens_saved="1865">
 <skeleton>
-func (h *tools) xray(ctx context.Context, req *sdkmcp.CallToolRequest, in xrayIn) (*sdkmcp.CallToolResult, struct{}, error) {
-	start := time.Now()
-	res, out, err := h.runXray(ctx, req, in)
-	h.record("onfly_xray", in, start, resultText(res), 0)
-	return res, out, err
-}
-
-func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayIn) (*sdkmcp.CallToolResult, struct{}, error) {
-	// ... [body omitted: lines 44-74, ~299 tokens] ...
-}
+// [Tip: a "body omitted" line is a collapsed function; the numbers on the left are line numbers of the original file. To read one body call onfly_xray with focus_symbol="<name>" (or read those lines).]
+36| func (h *tools) xray(ctx context.Context, req *sdkmcp.CallToolRequest, in xrayIn) (*sdkmcp.CallToolResult, struct{}, error) {
+37| 	start := time.Now()
+38| 	res, out, err := h.runXray(ctx, req, in)
+39| 	h.record("onfly_xray", in, start, resultText(res), 0)
+40| 	return res, out, err
+41| }
+42|
+43| func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayIn) (*sdkmcp.CallToolResult, struct{}, error) {
+44| 	// ... [body omitted: original lines 44-74, ~31 lines, ~299 tokens; focus_symbol="runXray" expands it] ...
+75| }
 </skeleton>
 <blast_radius>
 <calls>

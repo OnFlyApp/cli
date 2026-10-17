@@ -71,12 +71,14 @@ Inspects a file, a directory or a symbol with far fewer tokens than reading it. 
 
 `onfly_xray` does not rebuild code. The skeletonizer copies lines of the file on disk and replaces only the middle of long bodies, using the line ranges stored with each function and method chunk. Everything up to the line that opens the body is kept as written: the docblock, PHP 8 `#[...]` attributes, Go doc comments, a signature spread over several lines, a brace on its own line. The scanner reads the signature as code, so a `{` inside `(...)`, `[...]`, a string, a comment, `interface{}` or `struct{...}` does not end it. A body of 10 lines or fewer, the `focus_symbol`, and a span whose body brace cannot be found are left whole. The closing line is kept. Struct tags and type definitions are never touched.
 
+Each line of the skeleton starts with its line number in the file, so a position read from the skeleton is a position in the file; a marker carries the number of the first line it hides, says which lines those are, and names the `focus_symbol` that expands the function. When anything is collapsed, the first line of the skeleton is a tip saying so. The numbers add a few tokens per line; they are what stops an assistant from counting lines in the collapsed text.
+
 For a file the result is one text block:
 
 ```xml
 <onfly_context target="app/Services/PaymentService.php" tokens_saved="3420">
-<skeleton>the file with every function or method body longer than 10 lines replaced by
-// ... [body omitted: lines 12-58, ~410 tokens] ...</skeleton>
+<skeleton>the file, every line numbered as in the file, with every function or method body longer than 10 lines replaced by
+12| // ... [body omitted: original lines 12-58, ~47 lines, ~410 tokens; focus_symbol="Name" expands it] ...</skeleton>
 <blast_radius>
 <calls>- signature [file:line]  (what the file uses, defined in other files)</calls>
 <called_by>- signature [file:line]  (who calls the file's symbols, up to depth)</called_by>
