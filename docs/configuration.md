@@ -285,6 +285,19 @@ indexer:
 
 With no `indexer.summaries` in the config, `ONFLY_SLM_URL` and `ONFLY_SLM_MODEL` turn summaries on against a local server, for example `ONFLY_SLM_PROVIDER=openai ONFLY_SLM_URL=http://localhost:8080 ONFLY_SLM_MODEL=mlx-community/Qwen2.5-Coder-7B-Instruct-4bit onfly index`. `ONFLY_SLM_PROVIDER` is `ollama` or `openai` (the default, except that a URL with port 11434 means Ollama). The config file wins when it sets `indexer.summaries`. If the server is down the summaries for that file are skipped and indexing continues.
 
+### Optional tools and `run`
+
+```yaml
+server:
+  tools: [onfly_env, onfly_run]   # optional macro-tools; none by default
+
+run:
+  commands: ["go test", "vendor/bin/phpunit", "pytest"]   # onfly_run starts nothing else
+  timeout_seconds: 120
+```
+
+`server.tools` registers the tools that are not part of the default two (`onfly_xray`, `onfly_focus`): `onfly_env` and `onfly_run`, described in [MCP server](mcp.md#onfly_env-optional). `run.commands` is an allowlist of command prefixes, compared word for word, with no shell; with an empty list `onfly_run` refuses every command.
+
 ### Query expansion (experimental)
 
 ```yaml

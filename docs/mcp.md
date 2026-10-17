@@ -106,6 +106,30 @@ Searches by meaning and by name and returns a bundle. Ranking weights the lexica
 
 Both tools append one row per call to `telemetry.db` beside `server.log_file`: tool, target, the size of the files the answer replaced, the size of the answer, and the number of rules sent. `tokens_saved` in the result is the difference at four bytes per token, against a deliberately modest baseline: for `onfly_xray` the target file plus 150 tokens for each file it calls or is called from; for `onfly_focus` the whole files of the best three matches. `onfly stats` totals them: requests, tokens saved and the share they represent, dollars at $3 per million input tokens, and rules enforced. The file holds sizes and paths only.
 
+### `onfly_env` (optional)
+
+`server.tools: [onfly_env]`. Inventory of environment variables: the keys the `.env`, `.env.example`, `.env.schema` and similar files in the project root define (names only; a value is never read into the answer), where the code reads each one (`os.Getenv`, `env()`, `process.env`, `os.environ`, `env::var`, `ENV[...]`), the variables read but defined in no env file, and the ones defined but never read. A read with a default (`env('X', 'v')`, `os.getenv('X', 'v')`) is optional and is not reported as missing. Test files are not counted. `filter` keeps the names that contain a text. The same report is `onfly env`. Names built at run time (`os.Getenv(prefix + "X")`, or a constant) are not seen.
+
+### `onfly_run` (optional)
+
+`server.tools: [onfly_run]`. Runs a test or build command and returns only the failures. It starts a process, so it is not read-only: it is announced as such, and **nothing runs unless the command is listed in `run.commands`** in the config (word for word: `go test` allows `go test ./...` but not `go build`). There is no shell, so `;`, `|`, `&&`, redirections and `$(...)` are refused. Output is capped at 8 MiB and the run at `run.timeout_seconds` (default 120, at most 600).
+
+`go test` is run with `-json`, so a failure is the failed test's own output with the file and line it names; a compile error is the build's output. Other runners (PHPUnit, pytest, Jest, Cargo) are read as text: control codes, progress dots and vendor and `node_modules` frames are dropped, the first failure block and the summary line are kept. For each failure the answer carries the code of the project function that contains the first lines it points at (at most two, 60 lines each): the test, and the code under test. A passing run is its summary line.
+
+```xml
+<onfly_run command="go test ./..." exit="1" duration="1.4s" tokens_saved="2290">
+<summary>1 failed, 2 passed in 2 packages</summary>
+<failures>
+<failure name="TestAdd" package="calc">
+<message>
+calc_test.go:7: Add(2, 3) = -1, want 5
+</message>
+<code at="calc/calc_test.go:5">func TestAdd(t *testing.T) { ... }</code>
+</failure>
+</failures>
+</onfly_run>
+```
+
 ### `search` (atomic)
 
 Finds code by what it does. Embeds `query` once and fuses semantic, keyword, per-word keyword and symbol-name lists, plus the lists of any second embedder, summary vector or summary keyword index that the project enables. Each side reads a candidate pool of `limit` raised to at least 20 and capped at 50. Rank in a list starts at 1. A repeated chunk keeps its first rank. The score is the sum of `weight / (rrf_k + rank)` over the lists; weights and `rrf_k` are in [configuration.md](configuration.md#search-fusion). Hits are sorted by score, then path, then text. A hit carries `summary` when the chunk has a generated one. The structured result is `{ "rules", "hits", "callers", "tests" }`. `hits` has `limit` entries. When the first hit is a named code chunk shown with its code, `callers` lists up to 5 chunks that reference it (one level, signatures only) and `tests` up to 5 test-file lines that mention its name, so a question about what uses or covers it needs no second call; both are omitted when empty. `rules` is omitted when nothing matches. An empty or whitespace `query` is a tool error and does not embed. A keyword error leaves the semantic hits in place.

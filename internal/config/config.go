@@ -23,7 +23,18 @@ type Config struct {
 	RulesEngine RulesEngine `yaml:"rules_engine"`
 	Indexer     Indexer     `yaml:"indexer"`
 	Server      Server      `yaml:"server"`
+	Run         Run         `yaml:"run"`
 	ProjectRoot string      `yaml:"-"`
+}
+
+// Run configures the onfly_run tool, which starts commands: nothing runs unless
+// it is listed here.
+type Run struct {
+	// Commands are the command prefixes the tool may start, word for word
+	// ("go test" allows "go test ./..."). There is no shell.
+	Commands []string `yaml:"commands"`
+	// TimeoutSeconds bounds one run; default 120, at most 600.
+	TimeoutSeconds int `yaml:"timeout_seconds"`
 }
 
 type Database struct {
@@ -394,6 +405,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Embedder.MaxInputTokens != 0 {
 		out.Embedder.MaxInputTokens = child.Embedder.MaxInputTokens
+	}
+	if len(child.Run.Commands) > 0 {
+		out.Run = child.Run
 	}
 	if child.Server.Transport != "" {
 		out.Server.Transport = child.Server.Transport

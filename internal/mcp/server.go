@@ -225,6 +225,9 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	if cfg.Server.HasTool("onfly_env") {
 		addTool(srv, &sdkmcp.Tool{Name: "onfly_env", Description: "Inventory of environment variables: the keys the .env files define (names only), where the code reads each one, the ones read but defined nowhere, and the ones defined but never read."}, h.env)
 	}
+	if cfg.Server.HasTool("onfly_run") {
+		addActionTool(srv, &sdkmcp.Tool{Name: "onfly_run", Description: "Run an allowed test or build command (run.commands in the config) and get back only the failures: the message, and the code of the project function each failure points at. A passing run is one line."}, h.run)
+	}
 	h.addPrompts(srv)
 	if cfg.Server.FileTools {
 		addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
