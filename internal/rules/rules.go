@@ -64,6 +64,12 @@ type Rule struct {
 	Body     string
 	Path     string
 	Err      error
+
+	// Constraints enforced by onfly lint on the lines a change adds.
+	ForbiddenCalls   []string
+	ForbiddenImports []string
+	Severity         string // "error" (default) or "warning"
+	Message          string
 }
 
 type templateData struct {
@@ -100,6 +106,11 @@ type frontmatter struct {
 	Scope    []string `yaml:"scope"`
 	Ignore   []string `yaml:"ignore"`
 	Priority int      `yaml:"priority"`
+
+	ForbiddenCalls   []string `yaml:"forbidden_calls"`
+	ForbiddenImports []string `yaml:"forbidden_imports"`
+	Severity         string   `yaml:"severity"`
+	Message          string   `yaml:"message"`
 }
 
 func Load(cfg config.Config) *Engine {
@@ -447,6 +458,10 @@ func parseRule(path, raw string, data templateData) Rule {
 		rule.Scope = fm.Scope
 		rule.Ignore = fm.Ignore
 		rule.Priority = fm.Priority
+		rule.ForbiddenCalls = fm.ForbiddenCalls
+		rule.ForbiddenImports = fm.ForbiddenImports
+		rule.Severity = strings.ToLower(strings.TrimSpace(fm.Severity))
+		rule.Message = strings.TrimSpace(fm.Message)
 	}
 	rendered, err := render(body, data)
 	if err != nil {
@@ -656,4 +671,24 @@ func truncateToTokens(s string, budget int) string {
 		hi = mid - 1
 	}
 	return best
+}
+
+// Constraints returns the rules that carry forbidden_calls or forbidden_imports.
+func (e *Engine) Constraints() []Rule {
+	var out []Rule
+	for _, r := range e.rules {
+		if r.Err == nil && (len(r.ForbiddenCalls) > 0 || len(r.ForbiddenImports) > 0) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// AppliesTo reports whether the rule's scope and ignore list select a file path.
+func (r Rule) AppliesTo(path string) bool {
+	path = filepath.ToSlash(path)
+	if r.ignored(path) {
+		return false
+	}
+	return r.isGlobal() || r.pathScoped(path)
 }

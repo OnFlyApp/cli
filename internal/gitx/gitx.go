@@ -94,3 +94,32 @@ func commits(lines []string) []Commit {
 	}
 	return out
 }
+
+// Diff is `git diff --unified=0` of the working tree against ref (HEAD when
+// empty), or of the index when staged. Untracked files are not part of it.
+func Diff(ctx context.Context, root, ref string, staged bool) (string, error) {
+	args := []string{"diff", "--unified=0", "--no-color", "--no-ext-diff"}
+	if staged {
+		args = append(args, "--cached")
+	}
+	if ref != "" {
+		if strings.HasPrefix(ref, "-") {
+			return "", fmt.Errorf("invalid git ref %q", ref)
+		}
+		args = append(args, ref)
+	} else if !staged {
+		args = append(args, "HEAD")
+	}
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git diff: %w: %s", err, strings.TrimSpace(errb.String()))
+	}
+	return out.String(), nil
+}
+
+// Tracked lists the files git tracks, relative to root.
+func Tracked(ctx context.Context, root string) ([]string, error) {
+	return run(ctx, root, "ls-files")
+}

@@ -20,7 +20,7 @@ Without type information the Go match is by method names, so it is reported as "
 
 ### 3. Architecture rules linter (`onfly lint`)
 
-Evaluate `git diff` against the rules in `.onfly/rules/` and report violations of frontmatter constraints such as `forbidden_calls` and `forbidden_imports`, with file and line, an exit code, and `--format json`. It moves governance from prompt injection to CI and pre-commit hooks. Matches are confirmed by the call resolver so a function that only shares a name is not flagged.
+Evaluate `git diff` against the rules in `.onfly/rules/` and report violations of frontmatter constraints such as `forbidden_calls` and `forbidden_imports`, with file and line, an exit code, and `--format json`. It moves governance from prompt injection to CI and pre-commit hooks. The match is textual on the added lines, with strings and comments left out; a qualified entry such as `fmt.Println` is exact, a bare one does not match methods.
 
 ### 4. Context efficiency auditor (`onfly audit`)
 

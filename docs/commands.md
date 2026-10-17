@@ -18,6 +18,8 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | `onfly serve --watch` | Serve and reindex changed files in the same process. Same as `server.watch: true`. |
 | `onfly serve --max-tokens N` | Cap search results at N tokens. `N` of 0 keeps `server.max_tokens`. |
 | `onfly search "question"` | Search from the terminal. `--limit N`, `--workspace NAME`, `--changed-since REF`, `--type function|method|section|...`, `--path 'internal/**'`, `--json`. |
+| `onfly lint` | Check the lines a change adds against `forbidden_calls` and `forbidden_imports` in the rules (see [Rules](rules.md#constraints-checked-by-onfly-lint)). Default: the working tree against `HEAD`. `--staged` checks the index (pre-commit), `--base REF` another ref, `--all` every tracked file, trailing paths narrow it. `--format json`, `--strict` (warnings fail too). Exit 1 when an error-level rule is broken. |
+| `onfly env` | List the environment variables the `.env*` files define (names only) and where the code reads each one, with those read but defined nowhere and those defined but never read. `--format json`, `--filter TEXT`, `--strict` (exit 1 when one is read but defined nowhere). The same report is the `onfly_env` tool when `server.tools: [onfly_env]`. |
 | `onfly doctor` | Check config, the database, the embedder, parser files, and rule frontmatter. Also prints the `stats` hints. |
 | `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). `--cases A,B` combines files, `--split even|odd`, `--file-level`, `--explain`, `--judge MODEL`. See [Evaluation](evaluation.md). |
 | `onfly eval tune` | Grid-search the fusion weights on half the cases and check them on the other half. |
