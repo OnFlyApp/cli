@@ -137,6 +137,18 @@ type Server struct {
 	// AtomicTools registers the single-purpose tools (search, find, graph, ...)
 	// beside onfly_xray and onfly_focus.
 	AtomicTools bool `yaml:"atomic_tools"`
+	// Tools names the optional macro-tools to register: onfly_env, onfly_run.
+	Tools []string `yaml:"tools"`
+}
+
+// HasTool reports whether an optional tool is switched on.
+func (s Server) HasTool(name string) bool {
+	for _, t := range s.Tools {
+		if t == name {
+			return true
+		}
+	}
+	return false
 }
 
 // TelemetryPath is the file that records the bytes each tool call saved.

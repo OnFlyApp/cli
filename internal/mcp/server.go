@@ -222,6 +222,9 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		addTool(srv, &sdkmcp.Tool{Name: "get_file_outline", Description: "List the symbols of one indexed file with their line ranges, in file order."}, h.fileOutline)
 		addTool(srv, &sdkmcp.Tool{Name: "get_project_rules", Description: "Return the project rules that apply to every request."}, h.projectRules)
 	}
+	if cfg.Server.HasTool("onfly_env") {
+		addTool(srv, &sdkmcp.Tool{Name: "onfly_env", Description: "Inventory of environment variables: the keys the .env files define (names only), where the code reads each one, the ones read but defined nowhere, and the ones defined but never read."}, h.env)
+	}
 	h.addPrompts(srv)
 	if cfg.Server.FileTools {
 		addTool(srv, &sdkmcp.Tool{Name: "read_file_raw", Description: "Read a project file, up to 1MiB."}, h.readFile)
