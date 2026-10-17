@@ -127,3 +127,7 @@ Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or rera
 Start here: [Getting started](docs/getting-started.md), [Cookbook](docs/cookbook.md), [FAQ](docs/faq.md).
 
 Reference: [Configuration](docs/configuration.md), [Commands](docs/commands.md), [Rules](docs/rules.md), [Parsers](docs/parsers.md), [Indexing](docs/indexing.md), [MCP server](docs/mcp.md), [Evaluation](docs/evaluation.md), [Development](docs/development.md).
+
+## License
+
+Onfly is released under the [Functional Source License, Version 1.1, ALv2 Future License](LICENSE) (FSL-1.1-ALv2), the license used across the OnFlyApp organization. You may use, copy, modify and redistribute it for any purpose except a competing commercial use, and each version converts to the Apache License 2.0 two years after it is released. The parsers in [OnFlyApp/ext-parser-*](https://github.com/OnFlyApp) and the [registry](https://github.com/OnFlyApp/registry) carry the same license.
