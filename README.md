@@ -1,8 +1,8 @@
-# Onfly — Context Compressor & Architectural Interceptor for AI Coding Agents
+# Onfly: a context compressor for AI coding agents
 
-> **Experimental, test repository.** Retrieval scores on Go and PHP repositories of 40 to 5,000 files are in [Evaluation](docs/evaluation.md#large-repositories-and-other-languages). Savings in agent runs are modest and depend on how often the assistant calls Onfly instead of `Grep` and `Read`; cost savings are not measured.
+> Experimental, test repository. Retrieval scores on Go and PHP repositories of 40 to 5,000 files are in [Evaluation](docs/evaluation.md#large-repositories-and-other-languages). Savings in agent runs are modest and depend on how often the assistant calls Onfly instead of `Grep` and `Read`; cost savings are not measured.
 
-Stop burning thousands of tokens on whole-file `Read`s and noisy `Grep`s. Onfly is a CGO-free Go CLI and MCP server that parses your code into language-aware chunks with WebAssembly parsers, then gives Claude Code, Cursor or any MCP client two tools: **`onfly_xray`** (a file's skeleton, who calls it, what it calls, your project rules) and **`onfly_focus`** (the best-matching code plus what it uses), each in one round-trip. Each call comes back smaller than reading the files it replaces; the estimate is in `onfly stats`.
+Onfly is a CGO-free Go CLI and MCP server. It parses your code into chunks with WebAssembly parsers and gives Claude Code, Cursor or any MCP client two tools, each answering in one round-trip: `onfly_xray` returns a file's skeleton, who calls it, what it calls and your project rules, and `onfly_focus` returns the best-matching code and what it uses. A call comes back smaller than the files it replaces; `onfly stats` shows the estimate.
 
 ## Why not just `Read` and `Grep`?
 
@@ -14,7 +14,7 @@ Stop burning thousands of tokens on whole-file `Read`s and noisy `Grep`s. Onfly 
 | Project conventions | Whatever the model remembered from `CLAUDE.md` | The rules that match the returned paths ride along in `<architectural_rules>`, once per session |
 | Cost visibility | None | `onfly stats` totals the estimated tokens saved |
 
-## 30-second quickstart
+## Quickstart
 
 You need Go 1.27+ to build Onfly. An embedder is optional: without one, names, text and paths are searched and everything else works; [Ollama](https://ollama.com) (free, local) adds search by meaning.
 
@@ -27,7 +27,11 @@ onfly init            # .onfly/config.yaml, .onfly/ in .gitignore, parsers for t
 onfly setup claude    # register the MCP server in .mcp.json and write the guide into CLAUDE.md
 ```
 
-Restart Claude Code and ask about your code. `init` indexes without the embedder, so it finishes in seconds (2,000 Go files in 13 s). The MCP tools also build or refresh the index on first use if it is missing or a file changed on disk, and add the vectors for semantic search in the background when the embedder is up. `onfly index` embeds by hand; `onfly index --lexical` skips the embedder on purpose. Later, `onfly stats` prints the index breakdown and, once the tools have run, requests served, estimated tokens and dollars saved, and rules injected (`onfly stats --format json` prints just those totals for CI). Cursor and VS Code: `onfly mcp-config cursor` or `onfly mcp-config vscode`. If `init` could not install a parser (no network), it prints the `onfly ext install <language>` line to run. Details: [Getting started](docs/getting-started.md).
+Restart Claude Code and ask about your code.
+
+`init` indexes without the embedder, so it finishes in seconds (2,000 Go files in 13 s). The MCP tools build or refresh the index on first use if it is missing or a file changed on disk, and add the vectors for search by meaning in the background when the embedder is up. `onfly index` embeds by hand; `onfly index --lexical` skips the embedder on purpose.
+
+`onfly stats` prints the index breakdown and, once the tools have run, requests served, estimated tokens and dollars saved, and rules injected. `onfly stats --format json` prints just those totals for CI. For Cursor and VS Code use `onfly mcp-config cursor` or `onfly mcp-config vscode`. If `init` could not install a parser (no network), it prints the `onfly ext install <language>` command to run. More in [Getting started](docs/getting-started.md).
 
 ## What the tools return
 
@@ -68,13 +72,13 @@ Restart Claude Code and ask about your code. `init` indexes without the embedder
 
 Under the hood:
 
-- **Parsers are WebAssembly plugins** ([wazero](https://wazero.io), no CGO, no host access). The official Go parser uses `go/parser`; the PHP, TypeScript, JavaScript, Python and Rust parsers use a pure-Go Tree-sitter port. They install with `onfly ext install go|php|typescript|javascript|python|rust`. Any program that prints chunks can be a parser.
-- **The skeletonizer copies lines, it never re-renders code.** Docblocks, PHP 8 `#[...]` attributes, Go struct tags and multi-line signatures survive byte for byte; only the middle of long bodies is replaced, and the scanner ignores braces inside parameters, strings and `interface{}`.
-- **Calls are resolved from the caller's imports and namespaces** (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository, and a PHP `$this->name()` resolves only to the caller's own class, a class it imports, or its namespace. Blast-radius queries are batched, a fixed number per call.
-- **Generated code is left out.** Files that say "Code generated ... DO NOT EDIT", `zz_generated*` and `*.pb.go` are not indexed (17% of the chunks in Kubernetes); `indexer.index_generated: true` keeps them.
-- **Locations point at the declaration**, not at the docblock above it.
-- **Rules are delivered, not requested.** Matching rules from `.onfly/rules/` (or `CLAUDE.md` and friends) are appended to the tool result once per MCP session, held in memory.
-- **Telemetry is conservative.** The baseline for `onfly_xray` is the file plus 150 tokens for each file it calls or is called from; for `onfly_focus`, the whole files of the three best matches. Tokens are bytes divided by four.
+- Parsers are WebAssembly plugins ([wazero](https://wazero.io), no CGO, no host access). The official Go parser uses `go/parser`; the PHP, TypeScript, JavaScript, Python and Rust parsers use a pure-Go Tree-sitter port. They install with `onfly ext install go|php|typescript|javascript|python|rust`. Any program that prints chunks can be a parser.
+- The skeletonizer copies lines of the file and never re-renders code. Docblocks, PHP 8 `#[...]` attributes, Go struct tags and multi-line signatures survive byte for byte; only the middle of long bodies is replaced, and the scanner ignores braces inside parameters, strings and `interface{}`.
+- Calls are resolved from the caller's imports and namespaces (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository, and a PHP `$this->name()` resolves only to the caller's own class, a class it imports, or its namespace. Blast-radius queries are batched, a fixed number per call.
+- Generated code is left out. Files that say "Code generated ... DO NOT EDIT", `zz_generated*` and `*.pb.go` are not indexed (17% of the chunks in Kubernetes); `indexer.index_generated: true` keeps them.
+- Locations point at the declaration line, below any docblock.
+- Matching rules from `.onfly/rules/` (or `CLAUDE.md` and friends) are appended to the tool result once per MCP session, held in memory, so the assistant does not have to ask for them.
+- Telemetry uses a modest baseline: for `onfly_xray` the file plus 150 tokens for each file it calls or is called from, for `onfly_focus` the whole files of the three best matches. Tokens are bytes divided by four.
 
 ## Optional: summaries from a local model
 
@@ -115,7 +119,7 @@ onfly env                    # environment variables defined and read
 onfly eval tune              # find ranking weights that fit your code
 ```
 
-Every command is in [Commands](docs/commands.md). Results too noisy for your language? See `indexer.skip_types` and `search.type_weights` in the [cookbook](docs/cookbook.md#quiet-small-declarations-properties-enum-cases-imports).
+Every command is in [Commands](docs/commands.md). If small declarations crowd the results in your language, see `indexer.skip_types` and `search.type_weights` in the [cookbook](docs/cookbook.md#quiet-small-declarations-properties-enum-cases-imports).
 
 ## How it works
 

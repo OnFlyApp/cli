@@ -239,7 +239,7 @@ run:
   timeout_seconds: 180
 ```
 
-The assistant gets the failures, with the code of the functions they point at, not a screen of log. See [`onfly_run`](mcp.md#onfly_run-optional).
+The assistant gets the failures and the code of the functions they point at instead of a screen of log. See [`onfly_run`](mcp.md#onfly_run-optional).
 
 ## Find out where tokens go
 

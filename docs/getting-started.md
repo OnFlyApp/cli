@@ -8,9 +8,9 @@ You need three things.
 
 | Piece | What it does | How to get it |
 | --- | --- | --- |
-| **Onfly** | Builds the index and serves it to your IDE. | `make build`, then put `bin/onfly` on your `PATH`. |
-| **An embedder** (optional) | Turns text into numbers so search can match meaning. Without one, names, text and paths are still searched. | [Ollama](https://ollama.com) is free and local. OpenAI and Voyage also work (see the [Cookbook](cookbook.md)). |
-| **A parser** | Splits a language's files into functions and types. | `onfly init` installs one for each language it finds from a manifest (`go.mod`, `composer.json`, `package.json`, ...); otherwise `onfly ext install go`. |
+| Onfly | Builds the index and serves it to your IDE. | `make build`, then put `bin/onfly` on your `PATH`. |
+| An embedder (optional) | Turns text into numbers so search can match meaning. Without one, names, text and paths are still searched. | [Ollama](https://ollama.com) is free and local. OpenAI and Voyage also work (see the [Cookbook](cookbook.md)). |
+| A parser | Splits a language's files into functions and types. | `onfly init` installs one for each language it finds from a manifest (`go.mod`, `composer.json`, `package.json`, ...); otherwise `onfly ext install go`. |
 
 With Ollama:
 
@@ -61,7 +61,7 @@ indexer:
       type: text
 ```
 
-A file is indexed only when **all three** are true: it matches `include`, it is not excluded or git-ignored, and a parser handles its extension. If a file you expect is missing, one of those is the reason.
+A file is indexed only when all three are true: it matches `include`, it is not excluded or git-ignored, and a parser handles its extension. If a file you expect is missing, one of those is the reason.
 
 ## 3. Add a parser for another language
 

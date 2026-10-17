@@ -1,12 +1,12 @@
 # Onfly v3 roadmap
 
-Version 3 grows Onfly from a context compressor into a platform for AI agents and the people who work with them, under the same constraints as before: CGO-free Go, a cold start of about a second, and no mandatory external daemon.
+Version 3 adds six features around the two default tools. The constraints stay the same: CGO-free Go, a cold start of about a second, and no mandatory external daemon.
 
 Every item below ships behind a measurement. The retrieval benchmarks in [Evaluation](evaluation.md#large-repositories-and-other-languages) are the gate: a change that does not move a number, or that costs another one, is not kept. New MCP tools are opt-in, because each default tool costs context in every session.
 
 ## Status
 
-All six pillars are implemented. Three are on by default or by a command (`onfly lint`, `onfly audit`, `onfly env` and the implementation lists in `onfly_xray`); `onfly_env` and `onfly_run` are opt-in tools (`server.tools`); the query expander is off by default because it did not pass its gate. The benchmark scripts of step 0 are in `scripts/bench`.
+All six are implemented. `onfly lint`, `onfly audit`, `onfly env` and the implementation lists in `onfly_xray` need no setting. `onfly_env` and `onfly_run` are opt-in tools (`server.tools`). The query expander is off by default because it did not pass its gate. The benchmark scripts of step 0 are in `scripts/bench`.
 
 ## The six pillars
 
@@ -24,7 +24,7 @@ Without type information the Go match is by method names, so it is reported as "
 
 ### 3. Architecture rules linter (`onfly lint`)
 
-Evaluate `git diff` against the rules in `.onfly/rules/` and report violations of frontmatter constraints such as `forbidden_calls` and `forbidden_imports`, with file and line, an exit code, and `--format json`. It moves governance from prompt injection to CI and pre-commit hooks. The match is textual on the added lines, with strings and comments left out; a qualified entry such as `fmt.Println` is exact, a bare one does not match methods.
+Evaluate `git diff` against the rules in `.onfly/rules/` and report violations of frontmatter constraints such as `forbidden_calls` and `forbidden_imports`, with file and line, an exit code, and `--format json`. It carries the rules from prompt injection into CI and pre-commit hooks. The match is textual on the added lines, with strings and comments left out; a qualified entry such as `fmt.Println` is exact, a bare one does not match methods.
 
 ### 4. Context efficiency auditor (`onfly audit`)
 
@@ -32,7 +32,7 @@ A report on where tokens go: `telemetry_events` for Onfly calls, project file si
 
 ### 5. Runtime and test interceptor (`onfly_run`)
 
-A macro-tool that runs tests or a build (`go test`, `phpunit`, `pytest`), removes progress output and vendor stack traces, parses the failures and returns them with the code of the failing function. It reads structured output (`go test -json`, JUnit) rather than scraping logs.
+A macro-tool that runs tests or a build (`go test`, `phpunit`, `pytest`), removes progress output and vendor stack traces, parses the failures and returns them with the code of the failing function. It reads `go test -json` directly; the other runners are read as text.
 
 It executes commands, so it is the one tool that is not read-only: an allowlist of commands in the config, no shell, a timeout, and a security review before release.
 
@@ -50,4 +50,4 @@ Read `.env`, `.env.example` and `.env.schema`, find the references in code (`os.
 
 ## Logging
 
-All commands log through `log/slog` (`internal/logger`). `--verbose` lowers the level to debug and `--json-logs` writes one JSON record per line. Logs never go to standard output: `onfly serve` uses it for JSON-RPC, so its records go to `server.log_file`, and the other commands write to standard error.
+All commands log through `log/slog` (`internal/logger`). `--verbose` lowers the level to debug and `--json-logs` writes one JSON record per line. Logs never go to standard output, because `onfly serve` uses it for JSON-RPC. Its records go to `server.log_file`, and the other commands write to standard error.

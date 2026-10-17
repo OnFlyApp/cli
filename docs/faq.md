@@ -8,7 +8,7 @@ A local search index for your code that AI assistants can query over MCP, so the
 
 ### Does my code leave my machine?
 
-Only to the embedder you choose. With **Ollama**, nothing leaves. With **OpenAI** or **Voyage**, the text of each chunk is sent to that provider to be embedded. The optional **reranker** (Voyage, Cohere or Jina) also sends the top search results, unless you use Ollama or your own server. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc` and similar) are never indexed or served.
+Only to the embedder you choose. With Ollama, nothing leaves. With OpenAI or Voyage, the text of each chunk is sent to that provider to be embedded. The optional **reranker** (Voyage, Cohere or Jina) also sends the top search results, unless you use Ollama or your own server. Files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc` and similar) are never indexed or served.
 
 ### Can I rerank with Ollama?
 
