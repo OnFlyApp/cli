@@ -50,7 +50,12 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 	if rel == ".." || strings.HasPrefix(rel, "../") || path.IsAbs(rel) {
 		return nil, struct{}{}, fmt.Errorf("target must be inside the project")
 	}
-	if err := h.warm(ctx, rel); err != nil {
+	// "file.go:Symbol" syncs the file part, not the whole string.
+	warmRel := rel
+	if q, _, isPath := splitTarget(target); isPath && q != "" {
+		warmRel = path.Clean(strings.TrimPrefix(requestPath(h.root, q), "./"))
+	}
+	if err := h.warm(ctx, warmRel); err != nil {
 		return nil, struct{}{}, err
 	}
 	files, err := h.store.ListFiles(ctx)
@@ -62,22 +67,37 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 	var res *sdkmcp.CallToolResult
 	switch {
 	case contains(files, rel):
-		res, err = h.xrayFile(ctx, rel, focus, in.Depth, "")
+		res, err = h.xrayFile(ctx, rel, focus, in.Depth, "", "")
 	case hasPrefix(files, rel+"/"):
 		res, err = h.xrayDir(ctx, rel, files)
 	default:
 		defs, note, rerr := h.resolveSymbol(ctx, target)
 		if rerr != nil || len(defs) == 0 {
+			// "file.go:Missing": the file is real, so give it, and say what it has.
+			if file, ok := h.fileOfTarget(target, files); ok {
+				res, err = h.xrayFile(ctx, file, focus, in.Depth, "", h.missingSymbolNote(ctx, file, target))
+				return res, struct{}{}, err
+			}
 			return nil, struct{}{}, fmt.Errorf("%q is not a file, directory or symbol in this project", target)
 		}
-		if len(defs) > 1 {
+		if !sameFile(defs) {
 			return h.xraySymbols(ctx, target, note, defs, in.Depth), struct{}{}, nil
 		}
+		// One file holds every definition of the name: the skeleton of that file
+		// with all of them expanded.
 		if focus == "" {
 			focus = defs[0].Metadata["name"]
 		}
-		block, _ := h.definitionBlock(ctx, defs[0], in.Depth, h.newSources())
-		res, err = h.xrayFile(ctx, defs[0].FilePath, focus, in.Depth, block)
+		srcs := h.newSources()
+		var blocks strings.Builder
+		for i, d := range defs {
+			if i == maxDefinitions {
+				break
+			}
+			block, _ := h.definitionBlock(ctx, d, in.Depth, srcs, false)
+			blocks.WriteString(block)
+		}
+		res, err = h.xrayFile(ctx, defs[0].FilePath, focus, in.Depth, blocks.String(), note)
 	}
 	return res, struct{}{}, err
 }
@@ -92,7 +112,7 @@ func hasPrefix(files []string, prefix string) bool {
 	return i < len(files) && strings.HasPrefix(files[i], prefix)
 }
 
-func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symbols string) (*sdkmcp.CallToolResult, error) {
+func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symbols, note string) (*sdkmcp.CallToolResult, error) {
 	rows, err := h.store.ChunksByFiles(ctx, []string{rel})
 	if err != nil {
 		return nil, err
@@ -119,6 +139,9 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	srcs.text[rel] = string(src)
 	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)
 	var b strings.Builder
+	if note != "" {
+		b.WriteString("<note>" + note + "</note>\n")
+	}
 	b.WriteString("<skeleton>\n" + sk + "\n</skeleton>\n<blast_radius>\n<calls>\n" + calls + "</calls>\n<called_by>\n" + calledBy + "</called_by>\n</blast_radius>\n")
 	if symbols != "" {
 		b.WriteString("<definitions>\n" + symbols + "</definitions>\n")
@@ -281,4 +304,56 @@ var builtins = map[string]bool{
 	"append": true, "cap": true, "clear": true, "close": true, "complex": true, "copy": true,
 	"delete": true, "imag": true, "len": true, "make": true, "max": true, "min": true,
 	"new": true, "panic": true, "print": true, "println": true, "real": true, "recover": true,
+}
+
+func sameFile(defs []parser.Chunk) bool {
+	for _, d := range defs[1:] {
+		if d.FilePath != defs[0].FilePath {
+			return false
+		}
+	}
+	return true
+}
+
+// fileOfTarget reads "path/to/file.go:Name" and finds the one indexed file the
+// path part names, by full path or by its end ("eviction_manager.go").
+func (h *tools) fileOfTarget(target string, files []string) (string, bool) {
+	q, _, isPath := splitTarget(target)
+	if !isPath || q == "" {
+		return "", false
+	}
+	q = path.Clean(strings.TrimPrefix(filepath.ToSlash(q), "./"))
+	var found []string
+	for _, f := range files {
+		if f == q || strings.HasSuffix(f, "/"+q) {
+			found = append(found, f)
+		}
+	}
+	if len(found) != 1 {
+		return "", false
+	}
+	return found[0], true
+}
+
+// missingSymbolNote says that a symbol asked for is not in the file, and lists
+// the ones that are, so the next call can be right.
+func (h *tools) missingSymbolNote(ctx context.Context, file, target string) string {
+	_, name, _ := splitTarget(target)
+	rows, err := h.store.ChunksByFiles(ctx, []string{file})
+	if err != nil {
+		return fmt.Sprintf("no symbol %q in this file", name)
+	}
+	var names []string
+	seen := map[string]bool{}
+	for _, r := range rows {
+		n := r.Chunk.Metadata["name"]
+		if n == "" || seen[n] || (r.Chunk.Type != "function" && r.Chunk.Type != "method") {
+			continue
+		}
+		seen[n] = true
+		if len(names) < 30 {
+			names = append(names, n)
+		}
+	}
+	return fmt.Sprintf("no symbol %q in this file (showing the whole skeleton). Functions and methods here: %s", name, strings.Join(names, ", "))
 }

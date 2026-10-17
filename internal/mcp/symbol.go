@@ -14,7 +14,13 @@ import (
 )
 
 // maxDefinitions bounds how many definitions of one name onfly_xray expands.
-const maxDefinitions = 5
+const (
+	maxDefinitions = 5
+	// With this many definitions or fewer, each comes with its code (clipped), so
+	// asking for an ambiguous name needs no second call.
+	maxDefinitionsWithCode = 3
+	maxDefinitionCode      = 40
+)
 
 // resolveSymbol finds the definitions a non-path target names. The target is a
 // bare name ("Open"), or a name with a qualifier that picks among definitions:
@@ -141,7 +147,7 @@ func rankDefinitions(defs []parser.Chunk) []parser.Chunk {
 }
 
 // definitionBlock is one definition with exactly what it calls and who calls it.
-func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, srcs *sources) (string, int) {
+func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, srcs *sources, withCode bool) (string, int) {
 	var calls, calledBy strings.Builder
 	deps := map[string]bool{d.FilePath: true}
 	h.writeCalls(ctx, &calls, "", []parser.Chunk{d}, srcs, deps)
@@ -160,8 +166,12 @@ func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, 
 		}
 	}
 	impls := h.implementationsBlock(ctx, []parser.Chunk{d})
-	return fmt.Sprintf("<definition at=%q>\n%s\n<calls>\n%s</calls>\n<called_by>\n%s</called_by>\n%s</definition>\n",
-		location(d), signature(d), calls.String(), calledBy.String(), impls), len(deps)
+	code := ""
+	if withCode {
+		code = "<code>\n" + clipLines(d.Content, maxDefinitionCode) + "\n</code>\n"
+	}
+	return fmt.Sprintf("<definition at=%q>\n%s\n%s<calls>\n%s</calls>\n<called_by>\n%s</called_by>\n%s</definition>\n",
+		location(d), signature(d), code, calls.String(), calledBy.String(), impls), len(deps)
 }
 
 // xraySymbols answers a name that has several definitions with a block for
@@ -180,7 +190,7 @@ func (h *tools) xraySymbols(ctx context.Context, target, note string, defs []par
 	files := map[string]bool{}
 	depFiles := 0
 	for _, d := range shown {
-		block, n := h.definitionBlock(ctx, d, depth, srcs)
+		block, n := h.definitionBlock(ctx, d, depth, srcs, len(shown) <= maxDefinitionsWithCode)
 		b.WriteString(block)
 		files[d.FilePath] = true
 		depFiles += n - 1

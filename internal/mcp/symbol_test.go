@@ -116,3 +116,72 @@ func TestXrayUnmatchedQualifierFallsBackToAllDefinitions(t *testing.T) {
 		t.Fatal("an unknown symbol is an error")
 	}
 }
+
+// bigFixture is pkg/big.go with two functions of 16 lines each: First on lines
+// 3-18 and Second on lines 20-35, both long enough to be collapsed.
+func bigFixture(t *testing.T) *tools {
+	t.Helper()
+	root := t.TempDir()
+	body := func(name, v string) string {
+		s := "func " + name + "() int {\n"
+		for i := 0; i < 13; i++ {
+			s += "\t" + v + " := " + v + " + 1\n"
+		}
+		return s + "\treturn " + v + "\n}\n"
+	}
+	src := "package big\n\n" + body("First", "a") + "\n" + body("Second", "b")
+	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pkg", "big.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(src, "\n")
+	chunk := func(name string, start, end int) vectorstore.EmbeddedChunk {
+		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "pkg/big.go", Type: "function", Content: strings.Join(lines[start-1:end], "\n"),
+			Metadata: map[string]string{"name": name, "start_line": itoa(start), "end_line": itoa(end)}}, Vector: []float32{1, 0, 0, 1}}
+	}
+	store := openTestStore(t)
+	if err := saveHashed(store, root, []vectorstore.EmbeddedChunk{chunk("First", 3, 18), chunk("Second", 20, 35)}); err != nil {
+		t.Fatal(err)
+	}
+	return &tools{root: root, store: store, maxTokens: 8192}
+}
+
+func TestXrayExpandsTheNamedSymbolInOneCall(t *testing.T) {
+	h := bigFixture(t)
+	for _, target := range []string{"big.go:Second", "pkg/big.go:Second", "Second"} {
+		out := xrayText(t, h, target)
+		if !strings.Contains(out, `target="pkg/big.go"`) {
+			t.Fatalf("%s should open the file:\n%s", target, out)
+		}
+		if !strings.Contains(out, "20| func Second() int {") || !strings.Contains(out, "21| \tb := b + 1") || !strings.Contains(out, "34| \treturn b") {
+			t.Fatalf("%s: Second must be expanded with its own line numbers:\n%s", target, out)
+		}
+		if strings.Contains(out, "a := a + 1") || !strings.Contains(out, `original lines 4-17`) || !strings.Contains(out, `focus_symbol="First" expands it`) {
+			t.Fatalf("%s: First stays collapsed and says how to expand it:\n%s", target, out)
+		}
+	}
+	// The other way round.
+	out := xrayText(t, h, "big.go:First")
+	if !strings.Contains(out, "4| \ta := a + 1") || strings.Contains(out, "b := b + 1") {
+		t.Fatalf("%s", out)
+	}
+}
+
+func TestXrayWithAnUnknownSymbolInARealFileReturnsTheFileAndWhatItHas(t *testing.T) {
+	out := xrayText(t, bigFixture(t), "big.go:Nope")
+	if !strings.Contains(out, `<note>no symbol "Nope" in this file`) || !strings.Contains(out, "First, Second") || !strings.Contains(out, "<skeleton>") {
+		t.Fatalf("%s", out)
+	}
+	if _, _, err := bigFixture(t).runXray(context.Background(), nil, xrayIn{Target: "nothere.go:Nope"}); err == nil {
+		t.Fatal("a file that does not exist is still an error")
+	}
+}
+
+func TestXrayAmbiguousNameCarriesTheCodeOfEachDefinition(t *testing.T) {
+	out := xrayText(t, symbolFixture(t), "Open")
+	if strings.Count(out, "<code>\nfunc Open() {}\n</code>") != 2 {
+		t.Fatalf("with two definitions each comes with its code:\n%s", out)
+	}
+}
