@@ -63,7 +63,7 @@ func signature(c parser.Chunk) string {
 }
 
 func location(c parser.Chunk) string {
-	if l := lineNum(c.Metadata["start_line"]); l > 0 {
+	if l := declLine(c); l > 0 {
 		return fmt.Sprintf("%s:%d", c.FilePath, l)
 	}
 	return c.FilePath
