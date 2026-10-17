@@ -71,7 +71,7 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 
 Under the hood:
 
-- **Parsers are WebAssembly plugins** ([wazero](https://wazero.io), no CGO, no host access). The official Go parser uses `go/parser` and the PHP parser a pure-Go Tree-sitter port; they install with `onfly ext install`. Any program that prints chunks can be a parser.
+- **Parsers are WebAssembly plugins** ([wazero](https://wazero.io), no CGO, no host access). The official Go parser uses `go/parser`; the PHP, TypeScript, JavaScript and Python parsers use a pure-Go Tree-sitter port. They install with `onfly ext install go|php|typescript|javascript|python`. Any program that prints chunks can be a parser.
 - **The skeletonizer copies lines, it never re-renders code.** Docblocks, PHP 8 `#[...]` attributes, Go struct tags and multi-line signatures survive byte for byte; only the middle of long bodies is replaced, and the scanner ignores braces inside parameters, strings and `interface{}`.
 - **Calls are resolved from the caller's imports and namespaces** (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository. Blast-radius queries are batched, a fixed number per call.
 - **Rules are delivered, not requested.** Matching rules from `.onfly/rules/` (or `CLAUDE.md` and friends) are appended to the tool result once per MCP session, held in memory.

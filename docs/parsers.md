@@ -1,6 +1,6 @@
 # Parsers
 
-A parser turns one source file into a JSON array of chunks. Onfly loads it as WASM (WASI) or as a subprocess. The core has no PHP, JavaScript, or Go grammar of its own.
+A parser turns one source file into a JSON array of chunks. Onfly loads it as WASM (WASI) or as a subprocess. The core has no grammar of its own.
 
 The router picks a parser by file suffix. Matching is case-insensitive. The longest suffix wins, so `.blade.php` is chosen over `.php` when both are configured. The same extension on two parsers is a configuration error, unless every parser that claims it has an `include` scope; see [per-parser scope](configuration.md#per-parser-scope). A file whose suffix has no parser is not opened.
 
@@ -60,6 +60,8 @@ Exit 0 is success. A non-zero exit fails that file. The error includes the last 
 If another parser already owns one of the new extensions, a terminal asks `Replace parser for .php, .inc? [y/N] `. `--yes` overwrites. Enter or `n` returns `ext: install cancelled` and leaves the project unchanged. Without a terminal, the command returns `parser for ".php, .inc" already exists; rerun with --yes` and writes nothing. The same wasm path is updated in place.
 
 `onfly ext update` upgrades registry plugins. `onfly ext remove go` deletes that wasm file and its config entry. A lock file name that contains a slash or `..` is refused, and no file is deleted. `onfly ext list` prints `active`, `outdated`, or `corrupted`. The registry fetch stops after three seconds. If it fails, the table still prints and a `registry:` line follows it. A hash mismatch is `corrupted`.
+
+Official parsers: `go`, `php`, `typescript` (`.ts`, `.tsx`, `.mts`, `.cts`), `javascript` (`.js`, `.jsx`, `.mjs`, `.cjs`) and `python` (`.py`, `.pyi`). Each lives in its own `ext-parser-<name>` repository.
 
 To build the Go parser from source:
 
