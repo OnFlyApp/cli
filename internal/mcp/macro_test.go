@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"github.com/axitdev/onfly/internal/config"
+	"github.com/axitdev/onfly/internal/index"
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/telemetry"
 	"github.com/axitdev/onfly/internal/vectorstore"
-	"github.com/axitdev/onfly/internal/vectorstore/storetest"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -51,7 +51,7 @@ func macroFixture(t *testing.T) (config.Config, vectorstore.Store, string) {
 	meta := func(name string, start, end int) map[string]string {
 		return map[string]string{"name": name, "start_line": itoa(start), "end_line": itoa(end)}
 	}
-	must(storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{
+	must(saveHashed(store, root, []vectorstore.EmbeddedChunk{
 		{Chunk: parser.Chunk{FilePath: "src/pay.go", Type: "function", Content: "func Charge() {\n...", Metadata: meta("Charge", 3, 14), Outbound: []string{"Lock"}}, Vector: vec},
 		{Chunk: parser.Chunk{FilePath: "src/pay.go", Type: "function", Content: "func Lock() {}", Metadata: meta("Lock", 16, 16)}, Vector: vec},
 		{Chunk: parser.Chunk{FilePath: "src/web.go", Type: "function", Content: "func Handle() { Charge() }", Metadata: meta("Handle", 1, 1), Outbound: []string{"Charge"}}, Vector: vec},
@@ -60,13 +60,37 @@ func macroFixture(t *testing.T) (config.Config, vectorstore.Store, string) {
 	return cfg, store, root
 }
 
+// saveHashed stores fixture chunks under the real content hash of the file on
+// disk, so the tools see it as up to date instead of syncing it.
+func saveHashed(store vectorstore.Store, root string, chunks []vectorstore.EmbeddedChunk) error {
+	by := map[string][]vectorstore.EmbeddedChunk{}
+	var order []string
+	for _, c := range chunks {
+		p := c.Chunk.FilePath
+		if _, ok := by[p]; !ok {
+			order = append(order, p)
+		}
+		by[p] = append(by[p], c)
+	}
+	for _, p := range order {
+		hash := "fixture"
+		if raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p))); err == nil {
+			hash = index.ContentHash(raw)
+		}
+		if err := store.CommitFile(context.Background(), p, hash, by[p]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func itoa(n int) string { return strconv.Itoa(n) }
 
 func callText(t *testing.T, s *sdkmcp.ClientSession, name string, args map[string]any) string {
 	t.Helper()
 	res, err := s.CallTool(context.Background(), &sdkmcp.CallToolParams{Name: name, Arguments: args})
 	if err != nil || res.IsError {
-		t.Fatalf("%s: %v %+v", name, err, res)
+		t.Fatalf("%s: %v %+v %v", name, err, res, res.Content[0].(*sdkmcp.TextContent).Text)
 	}
 	return res.Content[0].(*sdkmcp.TextContent).Text
 }
@@ -213,7 +237,7 @@ func TestBlastRadiusUsesBatchedQueries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "big.go"), []byte(src.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := storetest.Save(context.Background(), store, chunks); err != nil {
+	if err := saveHashed(store, root, chunks); err != nil {
 		t.Fatal(err)
 	}
 	counted := &countingStore{Store: store}
@@ -254,7 +278,7 @@ func TestBlastRadiusDoesNotMatchStdlibCallsToProjectNames(t *testing.T) {
 	meta := func(name string) map[string]string {
 		return map[string]string{"name": name, "start_line": "9", "end_line": "13"}
 	}
-	if err := storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{
+	if err := saveHashed(store, root, []vectorstore.EmbeddedChunk{
 		{Chunk: parser.Chunk{FilePath: "internal/pay/pay.go", Type: "function", Content: "func Charge(s string) int {\n\tparts := strings.Split(s, \",\")\n\tn, _ := tokens.Count(s)\n\treturn len(parts) + n\n}", Metadata: meta("Charge"), Outbound: []string{"Split", "Count", "len"}}, Vector: vec},
 		{Chunk: parser.Chunk{FilePath: "internal/eval/eval.go", Type: "function", Content: "func Split(cases []Case) {}", Metadata: map[string]string{"name": "Split"}}, Vector: vec},
 		{Chunk: parser.Chunk{FilePath: "internal/tokens/tokens.go", Type: "function", Content: "func Count(s string) int { return 0 }", Metadata: map[string]string{"name": "Count"}}, Vector: vec},

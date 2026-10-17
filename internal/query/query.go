@@ -208,7 +208,7 @@ func Open(ctx context.Context, cfg config.Config) (*Searcher, func() error, erro
 }
 
 func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, rr embedder.Reranker, logger *slog.Logger) (*Searcher, error) {
-	s := &Searcher{Store: store, Emb: embedder.Cached(emb, EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
+	s := &Searcher{Store: store, Emb: embedder.Cached(embedder.WithBreaker(emb, time.Minute), EmbedCacheSize), Rerank: rr, Candidates: cfg.Reranker.Candidates,
 		RerankTimeout:  cfg.Reranker.Timeout(),
 		SemanticWeight: cfg.Search.SemanticWeight, KeywordWeight: cfg.Search.KeywordWeight,
 		WordWeight: cfg.Search.WordWeight, FieldWeight: cfg.Search.FieldWeight, RRFK: cfg.Search.RRFK,

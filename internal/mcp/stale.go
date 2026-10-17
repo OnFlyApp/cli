@@ -45,7 +45,7 @@ func (h *tools) markStale(ctx context.Context, hits []hitDTO) {
 		if err != nil {
 			continue
 		}
-		if index.ContentHash(raw) != indexed {
+		if !index.Fresh(indexed, raw) {
 			stale[p] = true
 		}
 	}

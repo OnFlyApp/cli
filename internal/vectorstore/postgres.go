@@ -254,7 +254,7 @@ func insertPGChunks(ctx context.Context, tx pgx.Tx, chunks []EmbeddedChunk, extr
 	for _, c := range chunks {
 		cols := `file_path, type, content, metadata, outbound, workspace, embedding`
 		vals := `$1, $2, $3, $4::jsonb, $5::jsonb, $6, $7::vector`
-		args := []any{slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, vecLiteral(c.Vector)}
+		args := []any{slashPath(c.Chunk.FilePath), c.Chunk.Type, c.Chunk.Content, metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace, nullableVec(c.Vector)}
 		slots := make([]string, 0, len(c.Extra))
 		for slot := range c.Extra {
 			slots = append(slots, slot)
@@ -373,7 +373,7 @@ func (p *Postgres) SearchSemantic(ctx context.Context, queryVector []float32, li
 const semanticSQL = `
 		SELECT file_path, type, content, metadata::text, outbound::text
 		FROM chunks
-		WHERE ($2 = '' OR $2 = '*' OR workspace = $2)
+		WHERE embedding IS NOT NULL AND ($2 = '' OR $2 = '*' OR workspace = $2)
 		ORDER BY embedding <=> $1::vector
 		LIMIT $3`
 
@@ -722,7 +722,7 @@ func (p *Postgres) FileHash(ctx context.Context, path string) (string, bool, err
 }
 
 func (p *Postgres) VectorsByFile(ctx context.Context, path string) (map[string][]float32, error) {
-	rows, err := p.pool.Query(ctx, `SELECT content, embedding::text FROM chunks WHERE file_path = $1`, slashPath(path))
+	rows, err := p.pool.Query(ctx, `SELECT content, embedding::text FROM chunks WHERE file_path = $1 AND embedding IS NOT NULL`, slashPath(path))
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/axitdev/onfly/internal/config"
@@ -123,6 +124,7 @@ type rulesOut struct {
 }
 
 type tools struct {
+	cfg       config.Config
 	root      string
 	store     vectorstore.Store
 	emb       embedder.Embedder
@@ -138,6 +140,11 @@ type tools struct {
 	tel       *telemetry.Log
 	seenMu    sync.Mutex
 	seen      map[string]bool
+	warmMu    sync.Mutex
+	tried     map[string]string
+	bg        context.Context
+	embedding atomic.Bool
+	bgWG      sync.WaitGroup
 }
 
 func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder, logger *slog.Logger) (*sdkmcp.Server, func(), error) {
@@ -149,7 +156,7 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 		maxTokens = config.DefaultMaxTokens
 	}
 	h := &tools{
-		root: cfg.ProjectRoot, store: store, emb: emb,
+		cfg: cfg, root: cfg.ProjectRoot, store: store, emb: emb,
 		workspace: cfg.Workspace, maxTokens: maxTokens, logger: logger,
 		engine: rules.Load(cfg),
 	}
@@ -174,12 +181,14 @@ func NewServer(cfg config.Config, store vectorstore.Store, emb embedder.Embedder
 	for _, msg := range h.engine.Report(maxTokens).Syntax {
 		logger.Warn("rules", "err", msg)
 	}
-	closer := func() {}
+	var stopBg context.CancelFunc
+	h.bg, stopBg = context.WithCancel(context.Background())
+	closer := stopBg
 	if tel, err := telemetry.Open(cfg.Server.TelemetryPath()); err != nil {
 		logger.Warn("telemetry disabled", "err", err)
 	} else {
 		h.tel = tel
-		closer = func() { tel.Close() }
+		closer = func() { stopBg(); tel.Close() }
 	}
 	if cfg.Server.TraceFile != "" {
 		f, err := os.OpenFile(cfg.Server.TraceFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

@@ -7,11 +7,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/axitdev/onfly/internal/config"
 	"github.com/axitdev/onfly/internal/embedder"
@@ -29,9 +32,23 @@ const (
 )
 
 type Options struct {
-	CI       bool
-	DryRun   bool
+	CI     bool
+	DryRun bool
+	// Lexical stores chunks without calling the embedder, keeping the vectors a
+	// file already has. Search by name, text and path works at once; a later run
+	// without Lexical adds the missing vectors.
+	Lexical  bool
 	Progress func(Event)
+}
+
+// LexicalSuffix marks the stored hash of a file whose chunks lack vectors, so
+// a run that can embed does not take the file for unchanged.
+const LexicalSuffix = "+lex"
+
+// Fresh reports whether the hash stored for a file describes this content.
+func Fresh(stored string, content []byte) bool {
+	h := ContentHash(content)
+	return stored == h || stored == h+LexicalSuffix
 }
 
 type Stats struct {
@@ -42,6 +59,9 @@ type Stats struct {
 	Pruned  int
 	Tokens  int
 	Reused  int
+	// Lexical counts files stored without vectors because the embedder was
+	// skipped or unreachable.
+	Lexical int
 }
 
 type FileResult struct {
@@ -50,6 +70,7 @@ type FileResult struct {
 	Reused  int
 	Tokens  int
 	Omit    bool
+	Lexical bool
 	Err     error
 }
 
@@ -118,6 +139,7 @@ func Open(ctx context.Context, cfg config.Config, logger *slog.Logger, opt Optio
 			store.Close()
 			return nil, err
 		}
+		emb = embedder.WithBreaker(emb, time.Minute)
 		if cfg.Embedder.Alt != nil {
 			if alt, err = embedder.New(*cfg.Embedder.Alt); err != nil {
 				store.Close()
@@ -236,6 +258,9 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 			continue
 		}
 		stats.Files++
+		if result.Lexical {
+			stats.Lexical++
+		}
 		stats.Chunks += result.Chunks
 		stats.Reused += result.Reused
 		stats.Tokens += result.Tokens
@@ -273,6 +298,10 @@ func (s *Session) indexAll(ctx context.Context, files []string, hashes map[strin
 	results := make([]FileResult, len(files))
 	done := make([]bool, len(files))
 	workers := max(1, s.cfg.Indexer.Concurrency)
+	if s.opt.Lexical && s.cfg.Indexer.Concurrency <= 0 {
+		// Nothing waits on the network, so parsing is the cost: use the cores.
+		workers = min(runtime.NumCPU(), 8)
+	}
 	if workers == 1 {
 		for i, rel := range files {
 			if err := ctx.Err(); err != nil {
@@ -520,7 +549,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	}
 	full := filepath.Join(s.cfg.ProjectRoot, filepath.FromSlash(rel))
 	hash := ContentHash(body)
-	if oldHash != "" && oldHash == hash {
+	if oldHash != "" && (oldHash == hash || s.opt.Lexical && oldHash == hash+LexicalSuffix) {
 		s.report("unchanged", rel)
 		return FileResult{Skipped: true}, nil
 	}
@@ -555,34 +584,71 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	var embedded []vectorstore.EmbeddedChunk
 	reused := 0
 	if len(chunks) > 0 {
-		s.report("embedding", rel)
 		prev, perr := s.store.VectorsByFile(ctx, rel)
 		if perr != nil {
 			s.logger.Warn("vectors by file", "path", rel, "err", perr)
 			prev = nil
 		}
-		if s.chat != nil {
-			s.report("summarising", rel)
-			if prev == nil {
-				prev = map[string][]float32{}
+		if !s.opt.Lexical {
+			s.report("embedding", rel)
+			embedded, reused, err = s.embedFile(ctx, rel, chunks, prev)
+			if err != nil {
+				if ctx.Err() != nil {
+					return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
+				}
+				s.logger.Warn("embedder unavailable, storing the file without vectors", "path", rel, "err", err)
+				embedded = nil
 			}
-			prev = s.addSummaries(ctx, rel, chunks, prev)
 		}
-		embedded, reused, err = s.embedWithReuse(ctx, chunks, prev)
-		if err != nil {
-			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
-		}
-		if err := s.addExtraVectors(ctx, rel, embedded, prev); err != nil {
-			return FileResult{}, fmt.Errorf("embed %s: %w", rel, err)
+		if embedded == nil {
+			embedded, reused = withoutVectors(chunks, prev, s.cfg.Embedder.Dimensions)
 		}
 		for i := range embedded {
 			embedded[i].Workspace = s.cfg.Workspace
 		}
 	}
-	if err := s.store.CommitFile(ctx, rel, hash, embedded); err != nil {
+	lexical := slices.ContainsFunc(embedded, func(e vectorstore.EmbeddedChunk) bool { return len(e.Vector) == 0 })
+	stored := hash
+	if lexical {
+		stored += LexicalSuffix
+	}
+	if err := s.store.CommitFile(ctx, rel, stored, embedded); err != nil {
 		return FileResult{}, fmt.Errorf("save %s: %w", rel, err)
 	}
-	return FileResult{Chunks: len(chunks), Reused: reused}, nil
+	return FileResult{Chunks: len(chunks), Reused: reused, Lexical: lexical}, nil
+}
+
+func (s *Session) embedFile(ctx context.Context, rel string, chunks []parser.Chunk, prev map[string][]float32) ([]vectorstore.EmbeddedChunk, int, error) {
+	if s.chat != nil {
+		s.report("summarising", rel)
+		if prev == nil {
+			prev = map[string][]float32{}
+		}
+		prev = s.addSummaries(ctx, rel, chunks, prev)
+	}
+	embedded, reused, err := s.embedWithReuse(ctx, chunks, prev)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.addExtraVectors(ctx, rel, embedded, prev); err != nil {
+		return nil, 0, err
+	}
+	return embedded, reused, nil
+}
+
+// withoutVectors keeps the vector of every chunk whose text is unchanged and
+// leaves the rest empty. It also counts the vectors kept.
+func withoutVectors(chunks []parser.Chunk, prev map[string][]float32, dims int) ([]vectorstore.EmbeddedChunk, int) {
+	out := make([]vectorstore.EmbeddedChunk, len(chunks))
+	kept := 0
+	for i, c := range chunks {
+		out[i] = vectorstore.EmbeddedChunk{Chunk: c}
+		if v, ok := prev[c.Content]; ok && len(v) == dims {
+			out[i].Vector = v
+			kept++
+		}
+	}
+	return out, kept
 }
 
 func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, prev map[string][]float32) ([]vectorstore.EmbeddedChunk, int, error) {

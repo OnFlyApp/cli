@@ -330,8 +330,10 @@ func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk,
 			metaJSON(c.Chunk.Metadata), outboundJSON(c.Chunk.Outbound), c.Workspace).Scan(&id); err != nil {
 			return err
 		}
-		if _, err := vec.ExecContext(ctx, id, vecLiteral(c.Vector)); err != nil {
-			return err
+		if len(c.Vector) > 0 {
+			if _, err := vec.ExecContext(ctx, id, vecLiteral(c.Vector)); err != nil {
+				return err
+			}
 		}
 		if text := summaryText(c.Chunk.Metadata); text != "" {
 			if _, err := sum.ExecContext(ctx, id, text); err != nil {

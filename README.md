@@ -27,12 +27,11 @@ git clone https://github.com/OnFlyApp/cli onfly && cd onfly && make build   # bi
 ollama pull qwen3-embedding:0.6b                                            # the default embedder, once
 
 cd ~/code/my-project
-onfly init            # .onfly/config.yaml, .onfly/ in .gitignore, parsers for the languages it finds
-onfly index           # build the index
+onfly init            # .onfly/config.yaml, .onfly/ in .gitignore, parsers for the languages it finds, first index
 onfly setup claude    # register the MCP server in .mcp.json and write the guide into CLAUDE.md
 ```
 
-Restart Claude Code and ask about your code. Later, `onfly stats` prints the index breakdown and, once the tools have run, requests served, estimated tokens and dollars saved, and rules injected. Cursor and VS Code: `onfly mcp-config cursor` or `onfly mcp-config vscode`. If `init` could not install a parser (no network), it prints the `onfly ext install <language>` line to run. Details: [Getting started](docs/getting-started.md).
+Restart Claude Code and ask about your code. The MCP tools build or refresh the index on first use if it is missing or stale, in about a second and without the embedder: names, text and paths are searchable at once, and the vectors for semantic search are added in the background when the embedder is up (`onfly index` runs it by hand; `onfly index --lexical` skips the embedder). Later, `onfly stats` prints the index breakdown and, once the tools have run, requests served, estimated tokens and dollars saved, and rules injected (`onfly stats --format json` prints just those totals for CI). Cursor and VS Code: `onfly mcp-config cursor` or `onfly mcp-config vscode`. If `init` could not install a parser (no network), it prints the `onfly ext install <language>` line to run. Details: [Getting started](docs/getting-started.md).
 
 ## What the tools return
 

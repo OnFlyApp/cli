@@ -49,6 +49,9 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 	if rel == ".." || strings.HasPrefix(rel, "../") || path.IsAbs(rel) {
 		return nil, struct{}{}, fmt.Errorf("target must be inside the project")
 	}
+	if err := h.warm(ctx, rel); err != nil {
+		return nil, struct{}{}, err
+	}
 	files, err := h.store.ListFiles(ctx)
 	if err != nil {
 		return nil, struct{}{}, err
@@ -64,7 +67,7 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 	default:
 		var defs []parser.Chunk
 		if defs, err = h.store.GetComponents(ctx, target); err != nil || len(defs) == 0 {
-			return nil, struct{}{}, fmt.Errorf("%q is not an indexed file, directory or symbol; run onfly index", target)
+			return nil, struct{}{}, fmt.Errorf("%q is not a file, directory or symbol in this project", target)
 		}
 		if focus == "" {
 			focus = defs[0].Metadata["name"]

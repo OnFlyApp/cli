@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,5 +84,32 @@ func TestPrintTelemetrySummarisesSavings(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in\n%s", want, out.String())
 		}
+	}
+}
+
+func TestWriteTelemetryJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "telemetry.db")
+	read := func() map[string]float64 {
+		var out strings.Builder
+		if err := writeTelemetryJSON(context.Background(), &out, path); err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]float64
+		if err := json.Unmarshal([]byte(out.String()), &got); err != nil {
+			t.Fatalf("not json: %q %v", out.String(), err)
+		}
+		return got
+	}
+	if got := read(); got["requests"] != 0 || got["tokens_saved"] != 0 || got["rules_injected"] != 0 {
+		t.Fatalf("no file reads as zeros: %v", got)
+	}
+	tel, err := telemetry.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tel.Record(context.Background(), telemetry.Event{Tool: "onfly_xray", Target: "a.go", RawBytes: 40000, CompressedBytes: 4000, Rules: 2})
+	tel.Close()
+	if got := read(); got["requests"] != 1 || got["tokens_saved"] != 9000 || got["rules_injected"] != 2 || got["ratio"] != 0.9 {
+		t.Fatalf("%v", got)
 	}
 }

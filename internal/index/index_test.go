@@ -812,3 +812,46 @@ func skipWithoutShell(t *testing.T) {
 		t.Skip("needs /bin/sh")
 	}
 }
+
+func TestUnreachableEmbedderStoresChunksWithoutVectorsUntilItReturns(t *testing.T) {
+	skipWithoutShell(t)
+	srv := fakeOllama(t)
+	dir := t.TempDir()
+	script := filepath.Join(dir, "chunk.sh")
+	body := "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '[{\"type\":\"function\",\"content\":\"func getUserId() {}\",\"metadata\":{\"name\":\"getUserId\"}}]'\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeProject(t, dir, "http://127.0.0.1:1", script)
+	if err := os.WriteFile(filepath.Join(dir, "user.go"), []byte("package p\nfunc getUserId() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustLoad(t, dir)
+	stats, err := Run(context.Background(), cfg, nil, Options{})
+	if err != nil || stats.Lexical != 1 || stats.Chunks != 1 {
+		t.Fatalf("a refused connection must not fail the index: %+v %v", stats, err)
+	}
+	store := openStore(t, cfg)
+	if got, _ := store.GetComponents(context.Background(), "getUserId"); len(got) != 1 {
+		t.Fatalf("the chunk is searchable by name: %v", got)
+	}
+	if v, _ := store.VectorsByFile(context.Background(), "user.go"); len(v) != 0 {
+		t.Fatalf("no vectors yet: %v", v)
+	}
+	store.Close()
+
+	// The embedder comes back: the same file, unchanged on disk, gets its vectors.
+	cfg.Embedder.Endpoint = srv.URL
+	stats, err = Run(context.Background(), cfg, nil, Options{})
+	if err != nil || stats.Lexical != 0 || stats.Files != 1 {
+		t.Fatalf("%+v %v", stats, err)
+	}
+	store = openStore(t, cfg)
+	defer store.Close()
+	if v, _ := store.VectorsByFile(context.Background(), "user.go"); len(v) != 1 {
+		t.Fatalf("vectors were not added: %v", v)
+	}
+	if stats, err = Run(context.Background(), cfg, nil, Options{}); err != nil || stats.Skipped != 1 {
+		t.Fatalf("a file with vectors is unchanged: %+v %v", stats, err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -21,8 +22,9 @@ const (
 
 type WasmParser struct {
 	rt       wazero.Runtime
+	cache    wazero.CompilationCache
 	compiled wazero.CompiledModule
-	mu       sync.Mutex
+	mu       sync.RWMutex // parses share the lock; Close takes it alone
 	closed   bool
 	Timeout  time.Duration
 }
@@ -39,21 +41,36 @@ func newWasmParser(ctx context.Context, path string) (*WasmParser, error) {
 	if err != nil {
 		return nil, err
 	}
-	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
+	rc := wazero.NewRuntimeConfig().
 		WithMemoryLimitPages(wasmMemoryPages).
-		WithCloseOnContextDone(true))
+		WithCloseOnContextDone(true)
+	// Compiling a language parser takes about a second; the cache on disk makes
+	// every later process start skip it. Without a cache directory it compiles
+	// each time.
+	var cache wazero.CompilationCache
+	if dir, err := os.UserCacheDir(); err == nil {
+		if cache, err = wazero.NewCompilationCacheWithDir(filepath.Join(dir, "onfly", "wasm")); err == nil {
+			rc = rc.WithCompilationCache(cache)
+		} else {
+			cache = nil
+		}
+	}
+	rt := wazero.NewRuntimeWithConfig(ctx, rc)
 	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
 	compiled, err := rt.CompileModule(ctx, wasm)
 	if err != nil {
 		_ = rt.Close(ctx)
+		if cache != nil {
+			_ = cache.Close(ctx)
+		}
 		return nil, fmt.Errorf("wasm compile: %w", err)
 	}
-	return &WasmParser{rt: rt, compiled: compiled}, nil
+	return &WasmParser{rt: rt, compiled: compiled, cache: cache}, nil
 }
 
 func (p *WasmParser) Parse(ctx context.Context, filePath string, content []byte) ([]Chunk, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	if p.closed {
 		return nil, fmt.Errorf("wasm parser closed")
 	}
@@ -97,5 +114,11 @@ func (p *WasmParser) Close() error {
 		return nil
 	}
 	p.closed = true
-	return p.rt.Close(context.Background())
+	err := p.rt.Close(context.Background())
+	if p.cache != nil {
+		if cerr := p.cache.Close(context.Background()); err == nil {
+			err = cerr
+		}
+	}
+	return err
 }

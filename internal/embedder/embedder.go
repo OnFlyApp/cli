@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/axitdev/onfly/internal/config"
@@ -94,6 +95,9 @@ func retryable(err error) bool {
 			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 			return true
 		}
+		return false
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
 		return false
 	}
 	var ne net.Error

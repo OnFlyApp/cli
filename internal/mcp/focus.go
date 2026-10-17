@@ -37,6 +37,9 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 	if strings.TrimSpace(in.Query) == "" {
 		return nil, struct{}{}, fmt.Errorf("query is required")
 	}
+	if err := h.warm(ctx, ""); err != nil {
+		return nil, struct{}{}, err
+	}
 	limit := in.Limit
 	if limit < 1 {
 		limit = defaultFocus

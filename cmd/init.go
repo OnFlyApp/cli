@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 
+	"github.com/axitdev/onfly/internal/index"
 	"github.com/spf13/cobra"
 )
 
@@ -108,6 +110,7 @@ var initCmd = &cobra.Command{
 		printInitReport(cmd.OutOrStdout(), created, initCI)
 		if !initCI {
 			bootstrapProject(cmd.Context(), cmd.OutOrStdout(), wd)
+			warmIndex(cmd.Context(), cmd.OutOrStdout())
 		}
 		return nil
 	},
@@ -190,16 +193,34 @@ func printInitReport(w io.Writer, created []string, ci bool) {
 Next steps:
   1. Start your embedder: ollama pull qwen3-embedding:0.6b
      (or edit "embedder:" in .onfly/config.yaml)
-  2. Build the index:    onfly index
-  3. Connect Claude Code: onfly setup claude
+  2. Connect Claude Code: onfly setup claude
      (Cursor or VS Code: onfly mcp-config cursor, onfly mcp-config vscode)
-  4. Try a search:       onfly search "your question"
+  3. Try a search:       onfly search "your question"
+
+init already built the name/text index, so xray and focus work offline.
+With the embedder up, run onfly index to add semantic search.
 
 A language parser is installed for each manifest found (go.mod, composer.json, ...).
 If that failed, run: onfly ext install <language>
 
 Check the setup any time with: onfly doctor
 `)
+}
+
+// warmIndex builds the first index without the embedder, so init stays fast
+// and works offline: xray, focus and search by name, text and path work at
+// once. "onfly index" (or the MCP server, in the background) adds the vectors.
+func warmIndex(ctx context.Context, w io.Writer) {
+	cfg, err := loadConfig()
+	if err == nil {
+		var stats index.Stats
+		stats, err = index.Run(ctx, cfg, nil, index.Options{Lexical: true})
+		if err == nil {
+			fmt.Fprintf(w, "indexed %d files, %d chunks (semantic vectors: run onfly index with your embedder up)\n", stats.Files, stats.Chunks)
+			return
+		}
+	}
+	fmt.Fprintf(w, "could not build the index yet (%v); run: onfly index\n", err)
 }
 
 func projectName(dir string) string {

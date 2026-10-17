@@ -26,6 +26,14 @@ func vecLiteral(v []float32) string {
 	return b.String()
 }
 
+// nullableVec is the SQL value of a chunk's vector: NULL when it has none.
+func nullableVec(v []float32) any {
+	if len(v) == 0 {
+		return nil
+	}
+	return vecLiteral(v)
+}
+
 func parseVecLiteral(s string) ([]float32, error) {
 	s = strings.TrimSpace(s)
 	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
@@ -241,7 +249,7 @@ func placeholders(n int) string {
 
 func checkVectors(chunks []EmbeddedChunk, dimensions int) error {
 	for _, c := range chunks {
-		if len(c.Vector) != dimensions {
+		if len(c.Vector) != 0 && len(c.Vector) != dimensions {
 			return fmt.Errorf("vectorstore: vector length %d, want %d", len(c.Vector), dimensions)
 		}
 	}

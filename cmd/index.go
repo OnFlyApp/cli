@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	indexCI     bool
-	indexDryRun bool
+	indexCI      bool
+	indexDryRun  bool
+	indexLexical bool
 )
 
 var indexCmd = &cobra.Command{
@@ -23,7 +24,7 @@ var indexCmd = &cobra.Command{
 		}
 		progress := newIndexProgress(os.Stderr, indexDryRun)
 		stats, err := index.Run(cmd.Context(), cfg, progress.logger(), index.Options{
-			CI: indexCI, DryRun: indexDryRun, Progress: progress.Event,
+			CI: indexCI, DryRun: indexDryRun, Lexical: indexLexical, Progress: progress.Event,
 		})
 		progress.Finish()
 		if indexDryRun {
@@ -34,11 +35,15 @@ var indexCmd = &cobra.Command{
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "indexed %d files, %d chunks, reused %d, skipped %d, pruned %d, failed %d\n", stats.Files, stats.Chunks, stats.Reused, stats.Skipped, stats.Pruned, stats.Failed)
+		if stats.Lexical > 0 {
+			fmt.Fprintf(os.Stderr, "%d files are stored without vectors (--lexical, or the embedder was unreachable): name, text and path search work; run onfly index once the embedder is up\n", stats.Lexical)
+		}
 		return err
 	},
 }
 
 func init() {
 	indexCmd.Flags().BoolVar(&indexCI, "ci", false, "embed 128 chunks per request")
+	indexCmd.Flags().BoolVar(&indexLexical, "lexical", false, "skip the embedder: store names, text and paths now; a later run without the flag adds the vectors")
 	indexCmd.Flags().BoolVar(&indexDryRun, "dry-run", false, "parse and count tokens without writing the index")
 }

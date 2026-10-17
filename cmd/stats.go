@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,13 +14,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var statsFormat string
+
 var statsCmd = &cobra.Command{
 	Use:   "stats",
 	Short: "Print index size and chunk breakdown",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if statsFormat != "text" && statsFormat != "json" {
+			return fmt.Errorf("unknown --format %q: use text or json", statsFormat)
+		}
 		cfg, err := loadConfig()
 		if err != nil {
 			return err
+		}
+		if statsFormat == "json" {
+			return writeTelemetryJSON(cmd.Context(), cmd.OutOrStdout(), cfg.Server.TelemetryPath())
 		}
 		if cfg.Database.Driver == "sqlite" && cfg.Database.DSN != ":memory:" {
 			if _, err := os.Stat(cfg.Database.DSN); err != nil {
@@ -52,7 +61,35 @@ var statsCmd = &cobra.Command{
 	},
 }
 
+func init() {
+	statsCmd.Flags().StringVar(&statsFormat, "format", "text", "text or json; json prints only the telemetry totals")
+}
+
 const usdPerMillionInputTokens = 3.0
+
+// writeTelemetryJSON prints the telemetry totals for CI. A missing telemetry
+// file reads as all zeros so a pipeline can parse the output either way.
+func writeTelemetryJSON(ctx context.Context, w io.Writer, path string) error {
+	var s telemetry.Summary
+	if _, err := os.Stat(path); err == nil {
+		tel, err := telemetry.Open(path)
+		if err != nil {
+			return err
+		}
+		defer tel.Close()
+		if s, err = tel.Summary(ctx); err != nil {
+			return err
+		}
+	}
+	saved := s.Saved()
+	return json.NewEncoder(w).Encode(map[string]any{
+		"requests":       s.Requests,
+		"tokens_saved":   saved,
+		"ratio":          s.Ratio(),
+		"usd_saved":      float64(saved) / 1e6 * usdPerMillionInputTokens,
+		"rules_injected": s.Rules,
+	})
+}
 
 // printTelemetry shows what onfly_xray and onfly_focus kept out of the model's
 // context. It stays silent until the server has recorded a call.
