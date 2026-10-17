@@ -151,7 +151,7 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 
 `{{ .Project.Name }}` comes from `go.mod`, then `composer.json`, then `package.json`, then `project`. `{{ .Env.OS }}` and `{{ .Env.Arch }}` are the host `GOOS` and `GOARCH`. `{{ .ActiveParsers }}` is a JSON list of languages derived from parser extensions, such as `["go","php"]`.
 
-`rules_engine.max_token_budget_percent` defaults to 15 and must be from 1 to 100. Injected rules stop at that share of `server.max_tokens`. Lower-priority rules are dropped first. When a whole rule is dropped, the text ends with `// [Truncated: N rules omitted due to context limits.]`. `search`, `search_keyword`, and `get_references` fit their code results into the tokens that remain. `get_project_rules` returns only the rules that apply to every request. Path and chunk-type rules are on the tool result, in the text and in the structured `rules` field. Global rules are also in the server instructions, so they are present before a search.
+`rules_engine.max_token_budget_percent` defaults to 15 and must be from 1 to 100. Injected rules stop at that share of `server.max_tokens`. Lower-priority rules are dropped first. When a whole rule is dropped, the text ends with `// [Truncated: N rules omitted due to context limits.]`. `onfly_xray` and `onfly_focus` (and `search`, `find` and `graph` with `server.atomic_tools`) fit their code results into the tokens that remain. The atomic `get_project_rules` returns only the rules that apply to every request. Path and chunk-type rules are on the tool result, in the text and in the structured `rules` field. Global rules are also in the server instructions, so they are present before a search.
 
 `auto_discovery.enabled` defaults to true. When `.onfly/rules/` and `rules` are both empty, Onfly reads the first existing file in `fallback_order` and stops. Set `enabled` to false to ignore those files. Fallback paths stay inside the project root.
 
@@ -223,7 +223,7 @@ Summaries are written during indexing, one model call per new or changed chunk. 
 
 ### Usage log
 
-With `server.usage_file` set, the MCP server appends one JSON line (`ts`, `query`, `file`, `symbol`, `rank`) whenever a tool opens a chunk that the most recent `search` returned, within ten minutes of it. Nothing is recorded without it, and the file holds your questions in plain text, so keep it out of git. Turn it into eval cases with [`onfly eval mine`](evaluation.md#real-questions).
+With `server.usage_file` set, the MCP server appends one JSON line (`ts`, `query`, `file`, `symbol`, `rank`) whenever an atomic tool (`get_component_ast`, `graph`, `get_file_outline`, `read_file_raw`) opens a chunk that the most recent atomic `search` returned, within ten minutes of it. The default tools do not write it. Nothing is recorded without it, and the file holds your questions in plain text, so keep it out of git. Turn it into eval cases with [`onfly eval mine`](evaluation.md#real-questions).
 
 ### Removed options
 
@@ -282,7 +282,7 @@ indexer:
 
 ### Summaries from the environment
 
-With no `indexer.summaries` in the config, `ONFLY_SLM_URL` and `ONFLY_SLM_MODEL` turn summaries on against a local server, for example `ONFLY_SLM_URL=http://127.0.0.1:8080/v1 ONFLY_SLM_MODEL=qwen2.5-coder-1.5b onfly index`. `ONFLY_SLM_PROVIDER` is `ollama` or `openai` (the default, except that a URL with port 11434 means Ollama). The config file wins when it sets `indexer.summaries`. If the server is down the summaries for that file are skipped and indexing continues.
+With no `indexer.summaries` in the config, `ONFLY_SLM_URL` and `ONFLY_SLM_MODEL` turn summaries on against a local server, for example `ONFLY_SLM_PROVIDER=openai ONFLY_SLM_URL=http://localhost:8080 ONFLY_SLM_MODEL=mlx-community/Qwen2.5-Coder-7B-Instruct-4bit onfly index`. `ONFLY_SLM_PROVIDER` is `ollama` or `openai` (the default, except that a URL with port 11434 means Ollama). The config file wins when it sets `indexer.summaries`. If the server is down the summaries for that file are skipped and indexing continues.
 
 ### Summary concurrency
 

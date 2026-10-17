@@ -1,3 +1,4 @@
+> **Status:** implemented (Phases 1, 2 and 4; Phase 3 is `indexer.summaries` with `ONFLY_SLM_*`). The tools are documented in [mcp.md](mcp.md), rule delivery in [rules.md](rules.md). This file is the original request and still names the old atomic tools.
 
 # Technical Specification: Onfly v2 Refactoring (Macro-MCP, Rule Piggybacking & Zero-Config DX)
 

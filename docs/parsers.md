@@ -29,7 +29,7 @@ Stdout is a JSON array. An empty file is `[]`. `null` is treated as an empty arr
 | `file_path` | Path the host passed in. If the plugin leaves it empty, the host fills it. |
 | `type` | Kind of chunk, such as `function`, `method`, `struct`, `interface`, `class`. |
 | `content` | Text that is embedded and returned by search. |
-| `metadata` | String map. `name` is required for `get_component_ast`; `onfly doctor` counts chunks without it. |
+| `metadata` | String map. `name` is required for symbol lookup (`onfly_xray` with a symbol, `get_component_ast`) and for the blast radius; PHP also sets `namespace`, `fqn`, `receiver` and `signature`, which call resolution and `onfly_xray` read; `onfly doctor` counts chunks without it. |
 
 The Go parser ([OnFlyApp/ext-parser-go](https://github.com/OnFlyApp/ext-parser-go)) emits `function`, `method`, `struct`, `interface`, and `type`. Methods set `metadata.receiver`. `onfly ext install go` installs a published release.
 

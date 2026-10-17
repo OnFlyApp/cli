@@ -65,4 +65,4 @@ Postgres keeps one `chunks` row with a `vector(N)` column and a stored `tsvector
 
 After indexing, outbound lists are filled from symbol names used as `Name(` or `.Name` in the chunk text. The chunk's own name is not added. An outbound value that contains `.` or `\` is kept when that text is still in the chunk.
 
-`get_component_ast` looks up `metadata.name`. Split parts of that symbol in the same file are joined in part order, and the shared overlap is kept once. A name stored in several files returns the earliest row.
+`onfly_xray` (given a symbol name) and the atomic `get_component_ast` look up `metadata.name`. Split parts of that symbol in the same file are joined in part order, and the shared overlap is kept once. A name stored in several files returns the earliest row.

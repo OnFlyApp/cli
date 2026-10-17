@@ -31,15 +31,15 @@ Claude Code and Cursor accept the same server entry. Set `cwd` to the project if
 
 `command` must be on `PATH`, or use the absolute path of `bin/onfly`.
 
-Global rules are in the server instructions, so the model sees them before it calls a tool. Matching rules are also text on the tool result and a structured `rules` field. A glob or a language name is included when the request path or a returned chunk path matches. A chunk type such as `interface` is included when a returned chunk has that type. The rules text is capped at `rules_engine.max_token_budget_percent` (default 15) of the token budget. Higher `priority` is kept. A dropped rule adds:
+Global rules are in the server instructions, so the model sees them before it calls a tool. `onfly_xray` and `onfly_focus` append the rules that match the files they return inside the result, in `<architectural_rules>`, and send each rule at most once per MCP session: the server keeps a set of the rules it has already sent, in memory only, so restarting the server (a new session) sends them again. The atomic tools (`server.atomic_tools`) put matching rules in a `rules` field on every result, without that deduplication. A glob or a language name is included when the request path or a returned chunk path matches. A chunk type such as `interface` is included when a returned chunk has that type. The rules text is capped at `rules_engine.max_token_budget_percent` (default 15) of the token budget. Higher `priority` is kept. A dropped rule adds:
 
 ```text
 // [Truncated: N rules omitted due to context limits.]
 ```
 
-`search`, `find` (text kind) and `graph` then fit their code results into the remaining tokens. Frontmatter, templates, and fallback files are described in [configuration.md](configuration.md).
+`onfly_xray` and `onfly_focus` (and, with `server.atomic_tools`, `search`, `find` and `graph`) then fit their code results into the remaining tokens. Frontmatter, templates, and fallback files are described in [configuration.md](configuration.md).
 
-`onfly serve --max-tokens N` sets the search budget when `N` is greater than 0. Otherwise the budget is `server.max_tokens`, default 8192. The budget applies to `search`, `find` (text kind) and `graph`. Rank order is kept. A chunk that does not fit beside the diagnostic line is dropped. If nothing fits, the only result is:
+`onfly serve --max-tokens N` sets the search budget when `N` is greater than 0. Otherwise the budget is `server.max_tokens`, default 8192. The budget applies to the same tools. Rank order is kept. A chunk that does not fit beside the diagnostic line is dropped. If nothing fits, the only result is:
 
 ```text
 // [Truncated: N matches omitted due to context limits.]
@@ -47,13 +47,13 @@ Global rules are in the server instructions, so the model sees them before it ca
 
 When `server.trace_file` is set, each tool call appends one JSON object to it (off by default): `ts`, `tool`, `args`, `duration_ms`, `tokens`, `chunks`. The line stores arguments, not file bodies.
 
-When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `graph`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned, up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
+When `server.usage_file` is set, the server also appends one line (`ts`, `query`, `file`, `symbol`, `rank`) each time `get_component_ast`, `graph`, `get_file_outline` or `read_file_raw` opens a chunk that the latest `search` returned (these are the atomic tools, so nothing is recorded with the default surface), up to ten minutes after it. It is off by default and the file contains your questions; see [configuration.md](configuration.md#usage-list).
 
 The server instructions carry a short routing guide (`onfly_xray` before reading a large file, `onfly_focus` for a flow, `get_tests` before a change, `get_history` for risk). `onfly setup claude` registers the server in `.mcp.json` and writes that guide into `CLAUDE.md` in one step. `onfly mcp-config claude-code --allow` prints the `.claude/settings.json` rule (`mcp__onfly`) that lets the read-only tools run without a prompt. `onfly guide` prints the same text and `onfly guide --write` puts it in `CLAUDE.md` between `<!-- onfly:start -->` and `<!-- onfly:end -->` markers, for clients that ignore server instructions.
 
 The server publishes resource `onfly://index`. A subscribed client is notified when the index generation changes. The server checks once a second. The first sample does not send a notification.
 
-Every result is one compact JSON text block: no output schema and no `structuredContent`, so tool definitions cost about 1,000 tokens per session (2,475 before the schemas were dropped and the tools merged). When rules apply, their text comes first and the JSON follows on the last line. Every tool is annotated read-only.
+Every result is one compact JSON text block: no output schema and no `structuredContent`, so the four default tools cost about 550 tokens per session, and all eleven (`server.atomic_tools` and `server.file_tools` on) about 1,500 (2,475 before the schemas were dropped and the tools merged). When rules apply, their text comes first and the JSON follows on the last line. Every tool is annotated read-only.
 
 A hit has `stale: true` when its file changed on disk after it was indexed (the content hash differs, or the file is gone); its line numbers may be wrong, so read the file before relying on them. Up to 20 files per result are checked.
 
@@ -61,11 +61,13 @@ Tool failures are tool results with `isError` set. They are not protocol errors.
 
 ## Tools
 
-By default the server registers `onfly_xray`, `onfly_focus`, `get_tests` and `get_history`. The single-purpose tools (`search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules`) are registered when `server.atomic_tools: true`; they overlap with an assistant's own `Read` and `Grep` and cost context on every session. The rest of this page describes the tool by name; those marked atomic need the flag.
+By default the server registers `onfly_xray`, `onfly_focus`, `get_tests` and `get_history`. The earlier single-purpose tools (`search`, `find`, `graph`, `get_component_ast`, `get_file_outline`, `get_project_rules`) are **legacy**: they are registered only when `server.atomic_tools: true`, because they overlap with an assistant's own `Read` and `Grep` and cost context on every session. `read_file_raw` and `list_directory` need `server.file_tools: true`. Sections marked *atomic* below describe those opt-in tools.
 
 ### `onfly_xray`
 
 Inspects a file, a directory or a symbol with far fewer tokens than reading it. `target` is a project-relative file, a directory, or a symbol name (which resolves to its file and keeps that symbol expanded). `focus_symbol` keeps one method fully expanded. `depth` (1 to 4, default 1) is how many caller levels `called_by` follows.
+
+`onfly_xray` does not rebuild code. The skeletonizer copies lines of the file on disk and replaces only the middle of long bodies, using the line ranges stored with each function and method chunk. Everything up to the line that opens the body is kept as written: the docblock, PHP 8 `#[...]` attributes, Go doc comments, a signature spread over several lines, a brace on its own line. The scanner reads the signature as code, so a `{` inside `(...)`, `[...]`, a string, a comment, `interface{}` or `struct{...}` does not end it. A body of 10 lines or fewer, the `focus_symbol`, and a span whose body brace cannot be found are left whole. The closing line is kept. Struct tags and type definitions are never touched.
 
 For a file the result is one text block:
 
@@ -81,7 +83,7 @@ For a file the result is one text block:
 </onfly_context>
 ```
 
-`calls` and `called_by` list one-line signatures. The index stores a call as a bare name, so each candidate is checked against the calling chunk's own text and its file's imports: `strings.Split` is not the project's `Split`, a bare call stays in its package, an imported package function must come from that import's directory, a call through a value must be a method, and a PHP `Class::method` must resolve (through `use` and the namespace) to that class. The check covers Go and PHP; other languages match by name. Calls through a value cannot be typed, so methods that many types implement (Go `String`, `Error`, `Read`, `Write`, `Close`, `Len`, `Less`, `Swap`, the JSON and text marshalers, `Scan`, `Value`; PHP `__construct`, `__toString`, `__invoke`, `toArray`, `jsonSerialize`, `handle` and the like) are attributed only to a definition in the caller's own file. Other value calls still match any method of that name. A directory lists each indexed file with its symbol names. The skeleton is cut to `server.max_tokens`. A target that is not indexed is a tool error that names `onfly index`.
+`calls` and `called_by` list one-line signatures. The index stores a call as a bare name, so each candidate is checked against the calling chunk's own text and its file's imports: `strings.Split` is not the project's `Split`, a bare call stays in its package, an imported package function must come from that import's directory, a call through a value must be a method, and a PHP `Class::method` must resolve (through `use` and the namespace) to that class. The check covers Go and PHP; other languages match by name. Calls through a value cannot be typed, so methods that many types implement (Go `String`, `Error`, `Read`, `Write`, `Close`, `Len`, `Less`, `Swap`, the JSON and text marshalers, `Scan`, `Value`; PHP `__construct`, `__toString`, `__invoke`, `toArray`, `jsonSerialize`, `handle` and the like) are attributed only to a definition in the caller's own file. Other value calls still match any method of that name. A directory lists each indexed file with its symbol names. The skeleton is cut to `server.max_tokens`. A target that is not indexed is a tool error that names `onfly index`. The blast radius costs a fixed number of batched queries (one for the definitions of everything the file references, two per caller level), not one per symbol.
 
 Each rule is sent once per MCP session, however many files match it, so the second call about the same directory carries no rules.
 
@@ -111,7 +113,7 @@ If the embedder fails, the result is keyword hits only and a warning goes to the
 
 If `workspace` is omitted, `query` is a single identifier, and that exact metadata name is stored in two or more workspaces, the tool returns an elicitation instead of searching. For the query `User` the message is `Which workspace should be searched for "User"?`. Decline does not embed. `*` and an explicit workspace do not ask.
 
-### `get_component_ast`
+### `get_component_ast` (atomic)
 
 Returns the chunk whose `metadata.name` equals `name`, as a JSON object with an optional `rules` field. Split parts of that symbol in the same file are joined. An unknown name is a tool error. When several definitions share the name (for example `Save` on two types), the earliest chunk is returned and the others are listed under `alternatives` as `{file_path, receiver, start_line}`, capped at 20 with the dropped count in `alternatives_omitted`. Pass `receiver` to pick one; an unknown receiver is a tool error.
 
@@ -142,7 +144,7 @@ Returns the commits that touched a symbol's lines, newest first: `{ "file_path",
 | `file_path` | no | Same. |
 | `limit` | no | 1 to 20, default 5. |
 
-### `find`
+### `find` (atomic)
 
 Exact lookup, no embedding. `kind: "text"` finds chunks whose text contains the string or identifier, case-insensitively (substring search plus the full-text index, 20 rows, `{ "hits" }` like `search`). `kind: "symbol"` lists definitions by name, from the index: a pattern with `*` or `?` is a wildcard match over the whole name, anything else is a prefix; the result is `{ "symbols", "omitted" }`. `kind` defaults to `symbol` when `query` contains `*` or `?`, otherwise `text`. For a description of behavior, call `search`.
 
@@ -153,7 +155,7 @@ Exact lookup, no embedding. `kind: "text"` finds chunks whose text contains the 
 | `limit` | no | Symbol results, 1 to 50, default 20. |
 | `workspace` | no | Text kind only. Same meaning as in `search`. |
 
-### `graph`
+### `graph` (atomic)
 
 Follows calls from a symbol. Returns `{ "hits" }`.
 
@@ -170,7 +172,7 @@ Follows calls from a symbol. Returns `{ "hits" }`.
 | `receiver` | no | Picks one of several same-name definitions. |
 | `file_path` | no | Same. |
 
-### `get_file_outline`
+### `get_file_outline` (atomic)
 
 Returns `{ "rules", "symbols", "omitted" }` for one indexed file, in file order. Each symbol has `name`, `type`, `receiver`, `part`, `start_line`, and `end_line`; unnamed chunks have no `name`. At most 300 symbols; `omitted` counts the rest. It reads the index only, so it costs far fewer tokens than `read_file_raw` and shows what a file defines. A path that is not indexed, or that leaves the project, is a tool error.
 
@@ -178,7 +180,7 @@ Returns `{ "rules", "symbols", "omitted" }` for one indexed file, in file order.
 | --- | --- |
 | `file_path` | yes |
 
-### `read_file_raw`
+### `read_file_raw` (file tools)
 
 Off by default; set `server.file_tools: true` to register it and `list_directory`. They duplicate an assistant's own file tools and cost context on every session.
 
@@ -190,7 +192,7 @@ Reads a file inside the project root. The path may be relative or absolute. `..`
 
 The result is `{ "rules", "path", "content" }`. `rules` is omitted when nothing matches.
 
-### `list_directory`
+### `list_directory` (file tools)
 
 Lists one directory level. An empty `path` lists the project root. Names are sorted. `kind` is `file` or `dir`. Symlinks are reported as files. The result is `{ "rules", "entries" }`.
 
@@ -198,7 +200,7 @@ Lists one directory level. An empty `path` lists the project root. Names are sor
 | --- | --- | --- |
 | `path` | no | Relative to the project root, or absolute inside it. |
 
-### `get_project_rules`
+### `get_project_rules` (atomic)
 
 No arguments. Returns the rendered rules that apply to every request, highest priority first, inside the rules token budget. A missing file from `rules` is a tool error. Path and syntax rules are not included here; they are on the tool call that requested that file or chunk, and global rules are in the server instructions.
 

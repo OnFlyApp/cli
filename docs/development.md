@@ -19,7 +19,7 @@ Postgres tests skip unless `ONFLY_TEST_POSTGRES_DSN` points at a disposable data
 
 `TestGoParserWASM` and `TestE2EGoParser` clone `OnFlyApp/ext-parser-go` with `gh` and build a WASI module.
 
-`onfly search` uses the same pipeline as the MCP `search` tool, through `internal/query`. `onfly eval` (see [evaluation.md](evaluation.md)), `onfly stats`, and `onfly mcp-config` are the other query-side commands.
+`onfly search` uses the same pipeline as the atomic MCP `search` tool, through `internal/query`; `onfly_focus` reuses it with lexical weights (`query.FocusParams`) and a path-segment boost. `internal/skeleton` collapses bodies, `internal/resolve` decides which definition a name in a chunk refers to (Go imports, PHP `use` and namespaces), and `internal/telemetry` keeps the token counts that `onfly stats` prints. `onfly eval` (see [evaluation.md](evaluation.md)), `onfly stats`, and `onfly mcp-config` are the other query-side commands.
 
 ## Layout
 

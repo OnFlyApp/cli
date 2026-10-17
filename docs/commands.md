@@ -5,6 +5,7 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | Command | What it does |
 | --- | --- |
 | `onfly init` | Create `.onfly/`, a commented starter config, and one rule file (`.onfly/rules/project.md`). The project name is the directory name. |
+| `onfly init` (continued) | Outside `--ci` it also adds `.onfly/` to `.gitignore` (when the project is a git repository or already has a `.gitignore`), and for each language found from a manifest (`go.mod` Go, `composer.json` PHP, `package.json` TypeScript, `Cargo.toml` Rust, `pyproject.toml` and `requirements.txt` Python, `Gemfile` Ruby, `pom.xml` and `build.gradle` Java) tries `onfly ext install`. A failed install prints the command to run by hand and does not fail `init`. |
 | `onfly init --force` | Overwrite that config and those rule files. Without it, an existing config is an error that names the flag. |
 | `onfly init --ci` | Also write `.github/workflows/onfly-index.yml`. An existing config is left in place. `--force` overwrites the workflow. |
 | `onfly index` | Parse matching files, embed the chunks, and update the database. |
@@ -19,7 +20,8 @@ Every command reads `.onfly/config.yaml`. It is found by walking up from the cur
 | `onfly eval` | Score search against `.onfly/eval.yaml` (recall@k, MRR). `--cases A,B` combines files, `--split even|odd`, `--file-level`, `--explain`, `--judge MODEL`. See [Evaluation](evaluation.md). |
 | `onfly eval tune` | Grid-search the fusion weights on half the cases and check them on the other half. |
 | `onfly eval mine` | Turn the recorded usage file (`server.usage_file`) into eval cases. |
-| `onfly stats` | Print file and chunk counts, with breakdowns by chunk type, workspace, and extension. Prints `hint:` lines when data or generated files (`.json`, `.lock`, `.svg` and similar) take 15% or more of the indexed text, when the embedder reads fewer tokens than `embedder.max_input_tokens`, and when chunks are longer than about 2000 tokens. The type list is what `indexer.skip_types` and `search.type_weights` take. |
+| `onfly stats` | Print file and chunk counts, with breakdowns by chunk type, workspace, and extension. Prints `hint:` lines when data or generated files (`.json`, `.lock`, `.svg` and similar) take 15% or more of the indexed text, when the embedder reads fewer tokens than `embedder.max_input_tokens`, and when chunks are longer than about 2000 tokens. The type list is what `indexer.skip_types` and `search.type_weights` take. When `onfly_xray` or `onfly_focus` has been called, it ends with a telemetry block: requests served, tokens saved and the share they represent, dollars at $3 per million input tokens, and rules injected; see [MCP server](mcp.md#telemetry). |
+| `onfly setup claude` | Register the server in `.mcp.json` (keeping its other servers) and write the usage guide into `CLAUDE.md` between the `onfly` markers. Run again to refresh both. `--config` is written into the server entry. Add `onfly mcp-config claude-code --allow` for the permission rule. |
 | `onfly guide` | Print the tool-routing guidance sent to MCP clients. `--write` puts it into `CLAUDE.md` (or `--file PATH`) between `<!-- onfly:start -->` markers; run again to replace it. |
 | `onfly mcp-config <claude-code\|cursor\|vscode>` | Print the MCP server entry for that IDE. JSON goes to stdout, the target file name to stderr. `--allow` (Claude Code) prints the permission rule that lets every onfly tool run without a prompt. |
 | `onfly optimize` | Compact the SQLite FTS index or reindex the Postgres indexes. |

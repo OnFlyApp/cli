@@ -1,6 +1,6 @@
 # Rules
 
-Rules are short Markdown notes that Onfly adds to MCP results, so an assistant sees your conventions next to the code it asked for. `onfly init` writes one starter file, `.onfly/rules/project.md`, and lists it under `rules` in the config. Add more files and list them there.
+Rules are short Markdown notes that Onfly adds to MCP results, so an assistant sees your conventions next to the code it asked for, without calling a tool to fetch them. `onfly_xray` and `onfly_focus` match each rule against the paths and chunk types of what they return and append the matches in `<architectural_rules>`. A rule is sent once per MCP session: the server remembers, in memory, which rules it has sent, so a second call about the same directory carries none and a restart sends them again. `onfly init` writes one starter file, `.onfly/rules/project.md`, and lists it under `rules` in the config. Add more files and list them there.
 
 A rule file can start with YAML frontmatter:
 
