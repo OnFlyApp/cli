@@ -12,7 +12,7 @@ Only to the embedder you choose. With **Ollama**, nothing leaves. With **OpenAI*
 
 ### Can I rerank with Ollama?
 
-Yes, with a chat model: `reranker.provider: ollama`. Ollama has no rerank endpoint, so Onfly asks the model to order the candidates in a single prompt. It works, but it is slower than a dedicated reranker and depends on the model following the format. A 7B instruction model is a sensible minimum. See [Reranker](configuration.md#ollama-llm-based).
+Yes, with a chat model: `reranker.provider: ollama`. Ollama has no rerank endpoint, so Onfly asks the model to order the candidates in a single prompt. It works, but it is slower than a dedicated reranker and depends on the model following the format. A 7B instruction model is a sensible minimum. See [Reranker](configuration.md#reranker).
 
 ### Are long chunks cut before they are embedded?
 
@@ -66,7 +66,7 @@ Check in this order:
 
 1. `onfly stats`. If it says `files: 0`, nothing is indexed. See "My files are not indexed".
 2. `onfly search "an exact function name from your code"`. If that works, the index is fine and your question was too vague. Try describing what the code does.
-3. `onfly doctor`. A broken embedder falls back to keyword-only search, which works for exact words but not for meaning.
+3. `onfly doctor`. A missing or broken embedder falls back to keyword, name and path search, which works for exact words but not for meaning. `onfly_focus` also tells a question about documentation from one about code: Markdown and text files are left out of its results unless the question contains a word like `docs`, `readme` or `guide`.
 
 ### My files are not indexed
 
@@ -76,11 +76,11 @@ A file must pass all three checks (see [Indexing](indexing.md)):
 - It is not in `indexer.exclude`, not git-ignored, and not a secret-looking name.
 - A parser handles its extension.
 
-`onfly index --dry-run` shows what would be indexed. The most common cause is a missing parser: `.go` files with no Go parser installed are skipped silently.
+`onfly index --dry-run` shows what would be indexed. The most common cause is a missing parser: `.go` files with no Go parser installed are skipped silently. Generated files (`Code generated ... DO NOT EDIT`, `zz_generated*`, `*.pb.go`) are left out on purpose; `indexer.index_generated: true` keeps them.
 
 ### Results are stale
 
-The index only changes when you run `onfly index`. Use `onfly serve --watch` (or `onfly watch`) to keep it current while you work, or run `onfly index` in CI.
+The MCP tools refresh a file that changed on disk when `onfly_xray` is asked about it, and build the index when it is empty. Anything else changes only when you run `onfly index`. Use `onfly serve --watch` (or `onfly watch`) to keep it current while you work, or run `onfly index` in CI.
 
 ### Search is slow
 
@@ -94,7 +94,7 @@ Write 20 or so real questions in `.onfly/eval.yaml`, then run `onfly eval`. It r
 
 ### `embedder: ... connection refused`
 
-Ollama is not running. Start it (`ollama serve`, or open the app) and check that the `endpoint` in the config is right.
+Ollama is not running. Indexing carries on without it and stores chunks without vectors (it says how many), and searches use names, text and paths. Start it (`ollama serve`, or open the app), check that the `endpoint` in the config is right, and run `onfly index` to add the vectors.
 
 ### `dimension mismatch`
 
@@ -102,7 +102,7 @@ The index was built with a different embedding size than `embedder.dimensions` i
 
 ### `database file missing`
 
-You have not indexed yet. Run `onfly index`.
+You have not indexed yet. Run `onfly init` (or `onfly index --lexical`); the MCP tools also build the index on their first call.
 
 ### `parser type "stdio" ... set ONFLY_ALLOW_STDIO=1`
 
@@ -117,6 +117,14 @@ Two parsers claim the same extension. Either remove one, or give each an `includ
 - The `command` in the MCP entry must be on the `PATH` the IDE uses, or be an absolute path.
 - Pass `--config` with an absolute path if the IDE does not start in your project folder (`onfly mcp-config ... --config /abs/path/.onfly/config.yaml`).
 - Check `.onfly/server.log`, which is where `serve` writes logs. Stdout is reserved for the protocol.
+
+### An assistant read a big file whole instead of calling `onfly_xray`
+
+`onfly audit` lists the large files that were read whole and how often, from Onfly's telemetry and the assistant's session logs. Check that `onfly setup claude` has written the routing guide into `CLAUDE.md`. A skeleton collapses long bodies; call `onfly_xray` with `target="file.go:Name"` to see one in full, with the line numbers of the original file.
+
+### Can I stop a change that breaks a convention?
+
+Yes: put `forbidden_calls` or `forbidden_imports` in a rule's frontmatter and run `onfly lint` in a pre-commit hook or in CI. See [Rules](rules.md#constraints-checked-by-onfly-lint).
 
 ## Working in a team or monorepo
 

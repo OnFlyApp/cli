@@ -20,7 +20,7 @@ Never concatenate SQL in {{ .Project.Name }}. Active parsers: {{ .ActiveParsers 
 
 Injected rules use at most `rules_engine.max_token_budget_percent` (default 15) of `server.max_tokens`. Lower-priority rules are dropped. `onfly doctor` fails when frontmatter or a template cannot be read. When the rules are larger than that budget it prints `rules: [WARNING]` and exits 0 if the other checks passed.
 
-With no file in `.onfly/rules/` and an empty `rules` list, serve reads the first existing path in `auto_discovery.fallback_order`. The default order starts `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, `AGENT.md`. Set `auto_discovery.enabled` to false to skip those files. Global rules are in the server instructions. Matching rules are also a `rules` field on the tool result. The field list is in [docs/configuration.md](docs/configuration.md).
+With no file in `.onfly/rules/` and an empty `rules` list, serve reads the first existing path in `auto_discovery.fallback_order`. The default order starts `.cursorrules`, `AGENTS.md`, `CLAUDE.md`, `AGENT.md`. Set `auto_discovery.enabled` to false to skip those files. Global rules are in the server instructions. Matching rules are also a `rules` field on the tool result. The field list is in [docs/configuration.md](configuration.md).
 
 ## Constraints checked by `onfly lint`
 
@@ -40,5 +40,5 @@ message: Log with slog; do not print.
 
 `forbidden_calls` entries are matched as text on one line, with strings and comments left out. A qualified entry (`fmt.Println`, `Foo::bar`, `$this->x`) is exact. A bare one (`dd`) matches a call that is not a method and not qualified, so `$this->dd()` and `Foo::dd()` are not flagged; a declaration `function dd(` is, since it looks like a call. `forbidden_imports` match the import forms of Go, PHP `use`, JavaScript and TypeScript `from` and `require`, and Python `import` and `from`, for the path and the paths below it. There is no type information, so a method that shares the name of a forbidden function in another package is not told apart; use the qualified form.
 
-`scope` and `ignore` select files as for injection. The body of the rule is still injected into tool results, so the same text can tell the assistant and check its work. See [Commands](commands.md#onfly-lint).
+`scope` and `ignore` select files as for injection. The body of the rule is still injected into tool results, so the same text can tell the assistant and check its work. See [Commands](commands.md).
 

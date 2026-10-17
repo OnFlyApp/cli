@@ -120,13 +120,13 @@ Every command is in [Commands](docs/commands.md). Results too noisy for your lan
 ## How it works
 
 ```text
- your files ──► parser ──► chunks ──► embedder ──► index (SQLite or Postgres)
- (.go, .php …) (WASM, per    (functions,   (text to          │
-                language)     sections)     vectors)         ▼
-                                           assistant ◄── MCP ◄── onfly serve
+ your files ──► parser ──► chunks ──► index (SQLite or Postgres) ◄── embedder (optional,
+ (.go, .php …) (WASM, per    (functions,       │                        text to vectors,
+                language)     sections)        ▼                        added in the background)
+                                  assistant ◄── MCP ◄── onfly serve
 ```
 
-Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or reranker (Voyage, Cohere, Jina).
+Chunks are searchable by name, text and path as soon as they are parsed; the embedder adds search by meaning when it is running, and a missing or failing embedder never stops indexing. Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or reranker (Voyage, Cohere, Jina). Beyond the two tools, `onfly lint`, `onfly audit` and `onfly env` use the same index; see [Commands](docs/commands.md) and the [v3 roadmap](docs/ROADMAP-V3.md).
 
 ## Guides
 

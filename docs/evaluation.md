@@ -53,7 +53,7 @@ Compare `recall` and `mrr`, then look at the per-case `rank` for what moved.
 
 ## Real questions
 
-Generated cases are written from the code, so they favour retrieval. Real questions are better. Set `server.usage_file` (see [configuration](configuration.md#usage-list)), work with your assistant for a while, then:
+Generated cases are written from the code, so they favour retrieval. Real questions are better. Set `server.usage_file` (see [configuration](configuration.md#usage-log)), work with your assistant for a while, then:
 
 ```
 onfly eval mine [--usage FILE] [--out .onfly/eval-mined.yaml]
@@ -82,7 +82,9 @@ Retrieval only, without an agent: for each question, `onfly_focus` with `limit: 
 
 `onfly_xray` used 40 to 60% of the tokens of reading the files it covers (cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies, such as an interface, costs about the same as the file. On the five largest Laravel files it answers in 100 to 220 ms, on Kubernetes' `validation.go` (373 chunks) in 0.4 s.
 
-Two agents, same questions, one with `Grep` and `Read` and one with the Onfly tools: on this repository (10 questions) and on Laravel (8 questions: routing middleware, container resolution, `Model::save`, callers of one method, Blade, queue, filesystem, validation) every answer was correct in both arms, at about the same tokens (50k each), 33 to 48 seconds. Onfly's answers were no better, and on Laravel two were less complete; its line numbers for PHP were off by the docblock length before the declaration-line fix. On a well-named codebase, direct questions are answered by a capable agent with grep. The gain is in tokens per lookup, in reading large files, and in questions about who calls what.
+The questions, the pinned commits and the script are in [`scripts/bench`](../scripts/bench/README.md), so a change can be scored the same way.
+
+Two agents, same questions, one with `Grep` and `Read` and one with the Onfly tools: on this repository (10 questions) and on Laravel (8 questions: routing middleware, container resolution, `Model::save`, callers of one method, Blade, queue, filesystem, validation) every answer was correct in both arms, at about the same tokens (50k each), 33 to 48 seconds. Onfly's answers were no better, and on Laravel two were less complete; its line numbers for PHP were off by the docblock length before the declaration-line fix. On Kubernetes (8 questions on the scheduler, admission chain, ReplicaSet and eviction code, a lexical index) the same held in two runs: every answer correct in both arms, the onfly arm 24 to 40% more tokens (68.8k against 55.6k after the numbered-skeleton change, 73.0k against 52.8k before it). Before that change the onfly arm reported wrong line numbers, because a skeleton with bodies cut out has no line numbers of its own; every skeleton line now carries its number in the file. On a well-named codebase, direct questions are answered by a capable agent with grep. The gain is in tokens per lookup, in reading large files, and in questions about who calls what.
 
 What the larger repositories exposed, all fixed: the split overlap tokenized the whole chunk once per rune it dropped (59% of the CPU on Kubernetes); the resolvers recompiled a regular expression per candidate (5 s for `Model.php`); "who references this name" scanned every chunk; document frequencies of common words were counted in full; 17% of the Kubernetes chunks were generated files; a PHP `$this->getName()` resolved to unrelated classes; and Markdown sections appeared as callers. Still open: the PHP parser's 80 KB limit and per-file cost ([Parsers](parsers.md#known-limits-of-the-published-parsers)).
 

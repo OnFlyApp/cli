@@ -205,6 +205,50 @@ reranker:
   endpoint: http://localhost:8081
 ```
 
+## Fail a pull request that breaks a convention
+
+Put the constraint in a rule:
+
+```markdown
+---
+name: No debug output
+scope: ["**/*.go"]
+ignore: ["**/*_test.go"]
+forbidden_calls: [fmt.Println]
+message: Log with slog.
+---
+Log with slog; do not print.
+```
+
+Then run `onfly lint` where you want it. As a pre-commit hook it checks the staged lines, in CI the pull request's:
+
+```sh
+onfly lint --staged                       # .git/hooks/pre-commit
+onfly lint --base origin/main --format json   # CI
+```
+
+## Let the assistant run your tests
+
+`onfly_run` starts nothing that is not listed. Allow the test commands and switch the tool on:
+
+```yaml
+server:
+  tools: [onfly_run]
+run:
+  commands: ["go test", "vendor/bin/phpunit"]
+  timeout_seconds: 180
+```
+
+The assistant gets the failures, with the code of the functions they point at, not a screen of log. See [`onfly_run`](mcp.md#onfly_run-optional).
+
+## Find out where tokens go
+
+```sh
+onfly audit                    # telemetry, large files read whole, tips
+onfly audit --since 7          # the last week
+onfly env --strict             # exit 1 if code reads a variable no .env file defines
+```
+
 ## Tell if a change helped
 
 Create `.onfly/eval.yaml` with real questions:

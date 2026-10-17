@@ -25,7 +25,7 @@ Postgres tests skip unless `ONFLY_TEST_POSTGRES_DSN` points at a disposable data
 
 ```text
 main.go                 process entry
-cmd/                    cobra commands: init, index, watch, serve, search, eval, mcp-config, doctor, stats, optimize, ext
+cmd/                    cobra commands: init, index, watch, serve, search, eval, mcp-config, doctor, stats, optimize, ext, env, lint, audit
 internal/config/        YAML load, env expansion, git-root merge
 internal/ext/           plugin registry, checksum download, lockfile
 internal/ignore/        gitignore, secret-name list, and Filter (the one scope check)
@@ -41,12 +41,21 @@ internal/gitx/          changed-since file lists from git
 internal/usage/         usage log: which hit an assistant opens after a search
 internal/query/         one search: embed, semantic, keyword, rank fusion, optional rerank (5s bound)
 internal/eval/          eval cases file, recall@k and MRR scoring
-internal/rules/         rule frontmatter, templates, token budget, fallback files
+internal/rules/         rule frontmatter (scope, forbidden_calls, ...), templates, token budget, fallback files
+internal/logger/        log/slog loggers: stderr or a file, never stdout; --verbose, --json-logs
+internal/envscan/       .env keys (names only) and the reads of them found in code
+internal/lint/          forbidden_calls and forbidden_imports against the lines a git diff adds
+internal/audit/         telemetry, large files and assistant session logs into a token report
+internal/runner/        allowlisted command runner and test-output parsers behind onfly_run
+internal/resolve/       which definition a name in a chunk refers to (Go imports, PHP use and namespaces)
+internal/skeleton/      numbered skeletons: long bodies collapsed, original line numbers kept
+internal/telemetry/     tokens saved per call, per tool and per target
+scripts/bench/          pinned repositories, question sets and bench.py for the retrieval benchmark
 ```
 
 ## Store interface
 
-`CommitFile` takes a path, a content hash, and `[]EmbeddedChunk` (each a `parser.Chunk`, a `[]float32`, and a workspace string). It replaces that file's chunks and records the hash in one transaction. The store also has `DeleteFiles`, `ListFiles`, `FileHash`, `FileHashes`, `ChunksByFiles`, `Names`, `ListChunks`, `UpdateOutbound`, `GetReferences`, `ComponentsByNames` and `ReferencesByNames` (the batched forms the MCP blast radius uses), `Generation`, and `Optimize`. Tests that need a populated store call `storetest.Save`.
+`CommitFile` takes a path, a content hash, and `[]EmbeddedChunk` (each a `parser.Chunk`, a `[]float32`, and a workspace string). It replaces that file's chunks and records the hash in one transaction. The store also has `DeleteFiles`, `ListFiles`, `FileHash`, `FileHashes`, `ChunksByFiles`, `Names`, `ListChunks`, `UpdateOutbound`, `GetReferences`, `ComponentsByNames` and `ReferencesByNames` (the batched forms the MCP blast radius uses; SQLite answers references from the `chunk_refs` table), `Generation`, and `Optimize`. A `EmbeddedChunk` may have no vector: it is stored and found by name and text, and a file stored that way has `+lex` after its hash. SQLite also has `DocFreq` (the optional `TermStats` interface: how many chunks contain a word), and a context from `vectorstore.WithoutProse` leaves documentation files out of keyword queries. The SQLite store reopens its file if another process replaces it. Tests that need a populated store call `storetest.Save`.
 
 `Init` records `dimensions`. A different size returns `ErrDimensionMismatch` and leaves the tables in place.
 
@@ -57,7 +66,9 @@ SQLite is `modernc.org/sqlite` with a blank import of `modernc.org/sqlite/vec`. 
 - `onfly --help` contains the text `onfly index`.
 - `.blade.php` is routed ahead of `.php`.
 - A reindex does not duplicate chunks, and a deleted file is pruned.
-- `serve` logs the line `onfly serve` in the log file and does not write it to stdout. Every stdout line of a session is JSON.
+- `serve` logs the line `onfly serve` in the log file and does not write it to stdout, with any log format. Every stdout line of a session is JSON-RPC.
+- No logger made by `internal/logger` writes to standard output.
+- Every skeleton line is the line of the same number in the file.
 - `read_file_raw` rejects `..` and a symlink that leaves the project root.
 - A second `Init` with a different dimension fails and the old rows remain.
 - A workspace-filtered semantic search still returns `limit` rows when another workspace owns the nearest vectors.
