@@ -22,6 +22,9 @@ const (
 	maxXrayNames  = 20
 	maxXrayRefs   = 100
 	maxDirEntries = 40
+
+	baselineDepTokens = 150
+	bytesPerToken     = 4
 )
 
 type xrayIn struct {
@@ -104,19 +107,25 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int) (*sd
 		}
 	}
 	sk := cutToBudget(skeleton.Collapse(string(src), spans, focus, collapseOver), h.maxTokens)
-	calls, calledBy := h.blastRadius(ctx, rel, chunks, depth)
+	srcs := h.newSources()
+	srcs.text[rel] = string(src)
+	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)
 	var b strings.Builder
 	b.WriteString("<skeleton>\n" + sk + "\n</skeleton>\n<blast_radius>\n<calls>\n" + calls + "</calls>\n<called_by>\n" + calledBy + "</called_by>\n</blast_radius>\n")
 	text, n := h.rulesOnce(chunkQuery(chunks))
-	return h.finishMacro(ctx, "onfly_xray", rel, len(src), fmt.Sprintf("target=%q", rel), b.String(), text, n), nil
+	// Without onfly the assistant reads the file and spends about 150 tokens of
+	// grep and read context on each file it depends on or that depends on it.
+	raw := len(src) + depFiles*baselineDepTokens*bytesPerToken
+	return h.finishMacro(ctx, "onfly_xray", rel, raw, fmt.Sprintf("target=%q", rel), b.String(), text, n), nil
 }
 
 // blastRadius needs a fixed number of queries whatever the size of the file:
 // one for the definitions of everything it references and, per caller level,
 // two for the references to its symbols.
-func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chunk, depth int) (string, string) {
+func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chunk, depth int, srcs *sources) (string, string, int) {
 	var calls, calledBy strings.Builder
-	h.writeCalls(ctx, &calls, rel, chunks)
+	deps := map[string]bool{}
+	h.writeCalls(ctx, &calls, rel, chunks, srcs, deps)
 	var targets []definition
 	seenName := map[string]bool{}
 	for _, c := range chunks {
@@ -130,9 +139,9 @@ func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chu
 			targets = append(targets, definition{name, rel})
 		}
 	}
-	refs, err := h.impactFrom(ctx, targets, max(depth, 1))
+	refs, err := h.impactFrom(ctx, targets, max(depth, 1), srcs)
 	if err != nil {
-		return calls.String(), ""
+		return calls.String(), "", len(deps)
 	}
 	seen := map[string]bool{}
 	n := 0
@@ -143,49 +152,68 @@ func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chu
 		}
 		seen[key] = true
 		fmt.Fprintf(&calledBy, "- %s [%s]\n", signature(r), location(r))
+		deps[r.FilePath] = true
 		n++
 	}
-	return calls.String(), calledBy.String()
+	return calls.String(), calledBy.String(), len(deps)
 }
 
-func (h *tools) writeCalls(ctx context.Context, w *strings.Builder, rel string, chunks []parser.Chunk) {
-	defs, from := h.referencedDefinitions(ctx, chunks, maxXrayRefs)
+func (h *tools) writeCalls(ctx context.Context, w *strings.Builder, rel string, chunks []parser.Chunk, srcs *sources, deps map[string]bool) {
+	defs, src := h.referencedDefinitions(ctx, chunks, maxXrayRefs, srcs)
 	n := 0
-	for _, ref := range from.order {
+	for _, ref := range src.order {
 		cands := defs[ref]
 		if len(cands) == 0 || n >= maxXrayEdges {
 			continue
 		}
-		d := nearestDefinition(cands, from.by[ref])
+		d := nearestDefinition(cands, src.by[ref][0])
 		if d.FilePath == rel {
 			continue
 		}
 		fmt.Fprintf(w, "- %s [%s]\n", signature(d), location(d))
+		deps[d.FilePath] = true
 		n++
 	}
 }
 
 type refSources struct {
 	order []string
-	by    map[string]parser.Chunk
+	by    map[string][]parser.Chunk
 }
 
-// referencedDefinitions resolves the names the chunks call with one query. It
-// also returns, for each name, the first chunk that called it.
-func (h *tools) referencedDefinitions(ctx context.Context, chunks []parser.Chunk, limit int) (map[string][]parser.Chunk, refSources) {
-	src := refSources{by: map[string]parser.Chunk{}}
+// referencedDefinitions resolves the names the chunks use with one query, then
+// keeps only the definitions a calling chunk can actually be referring to. It
+// also returns, for each name, the chunks that use it.
+func (h *tools) referencedDefinitions(ctx context.Context, chunks []parser.Chunk, limit int, srcs *sources) (map[string][]parser.Chunk, refSources) {
+	src := refSources{by: map[string][]parser.Chunk{}}
 	for _, c := range chunks {
 		for _, ref := range c.Outbound {
-			if _, ok := src.by[ref]; ok || len(src.order) >= limit || builtins[ref] {
+			if builtins[ref] {
 				continue
 			}
-			src.by[ref] = c
-			src.order = append(src.order, ref)
+			if _, seen := src.by[ref]; !seen {
+				if len(src.order) >= limit {
+					continue
+				}
+				src.order = append(src.order, ref)
+			}
+			src.by[ref] = append(src.by[ref], c)
 		}
 	}
-	defs, err := h.store.ComponentsByNames(ctx, src.order)
+	all, err := h.store.ComponentsByNames(ctx, src.order)
 	if err != nil {
-		return nil, refSources{by: map[string]parser.Chunk{}}
+		return nil, refSources{by: map[string][]parser.Chunk{}}
+	}
+	defs := make(map[string][]parser.Chunk, len(all))
+	for ref, cands := range all {
+		for _, d := range cands {
+			for _, caller := range src.by[ref] {
+				if srcs.accepts(caller, d) {
+					defs[ref] = append(defs[ref], d)
+					break
+				}
+			}
+		}
 	}
 	return defs, src
 }

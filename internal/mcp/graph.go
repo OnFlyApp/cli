@@ -114,13 +114,13 @@ func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error)
 		}
 		target.file = d.FilePath
 	}
-	return h.impactFrom(ctx, []definition{target}, in.Depth)
+	return h.impactFrom(ctx, []definition{target}, in.Depth, h.newSources())
 }
 
 // impactFrom walks callers level by level. Each level costs two queries, one
 // for the references to every name on the frontier and one for their
 // definitions, however many targets there are.
-func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int) ([]parser.Chunk, error) {
+func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int, srcs *sources) ([]parser.Chunk, error) {
 	if depth < 1 {
 		depth = defaultDepth
 	}
@@ -154,6 +154,7 @@ func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int)
 			refs := refsBy[t.name]
 			if t.file != "" {
 				refs = attributedWith(defsBy[t.name], t, refs)
+				refs = resolvable(srcs, defsBy[t.name], t, refs)
 			}
 			for _, c := range refs {
 				key := query.ChunkKey(c)
@@ -177,6 +178,30 @@ func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int)
 		frontier = next
 	}
 	return out, nil
+}
+
+// resolvable drops callers whose text cannot be referring to the definition in
+// t.file: a call to strings.Split is not a call to the project's Split.
+func resolvable(srcs *sources, defs []parser.Chunk, t definition, refs []parser.Chunk) []parser.Chunk {
+	var here []parser.Chunk
+	for _, d := range defs {
+		if d.FilePath == t.file {
+			here = append(here, d)
+		}
+	}
+	if len(here) == 0 {
+		return refs
+	}
+	var out []parser.Chunk
+	for _, c := range refs {
+		for _, d := range here {
+			if srcs.accepts(c, d) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func attributedWith(defs []parser.Chunk, t definition, refs []parser.Chunk) []parser.Chunk {

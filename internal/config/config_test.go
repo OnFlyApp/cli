@@ -432,3 +432,30 @@ search:
 		}
 	}
 }
+
+func TestSLMEnvEnablesSummariesOnlyWhenUnconfigured(t *testing.T) {
+	t.Setenv("ONFLY_SLM_URL", "http://127.0.0.1:8080/v1")
+	t.Setenv("ONFLY_SLM_MODEL", "qwen2.5-coder-1.5b")
+	var cfg Config
+	applySLMEnv(&cfg)
+	if s := cfg.Indexer.Summaries; s.Provider != "openai" || s.Endpoint != "http://127.0.0.1:8080/v1" || s.Model != "qwen2.5-coder-1.5b" {
+		t.Fatalf("%+v", s)
+	}
+	t.Setenv("ONFLY_SLM_URL", "http://localhost:11434")
+	cfg = Config{}
+	applySLMEnv(&cfg)
+	if cfg.Indexer.Summaries.Provider != "ollama" {
+		t.Fatalf("port 11434 is Ollama: %+v", cfg.Indexer.Summaries)
+	}
+	cfg = Config{Indexer: Indexer{Summaries: Summaries{LLM: LLM{Provider: "ollama", Model: "mine"}}}}
+	applySLMEnv(&cfg)
+	if cfg.Indexer.Summaries.Model != "mine" {
+		t.Fatalf("config wins over the environment: %+v", cfg.Indexer.Summaries)
+	}
+	t.Setenv("ONFLY_SLM_MODEL", "")
+	cfg = Config{}
+	applySLMEnv(&cfg)
+	if cfg.Indexer.Summaries.Provider != "" {
+		t.Fatalf("no model, no summaries: %+v", cfg.Indexer.Summaries)
+	}
+}

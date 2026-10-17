@@ -280,6 +280,10 @@ indexer:
 
 `mlx_lm.server` serves chat models; keep an embedding model on Ollama, vLLM or LM Studio. Use the `model` name the server was started with.
 
+### Summaries from the environment
+
+With no `indexer.summaries` in the config, `ONFLY_SLM_URL` and `ONFLY_SLM_MODEL` turn summaries on against a local server, for example `ONFLY_SLM_URL=http://127.0.0.1:8080/v1 ONFLY_SLM_MODEL=qwen2.5-coder-1.5b onfly index`. `ONFLY_SLM_PROVIDER` is `ollama` or `openai` (the default, except that a URL with port 11434 means Ollama). The config file wins when it sets `indexer.summaries`. If the server is down the summaries for that file are skipped and indexing continues.
+
 ### Summary concurrency
 
 Without `indexer.summaries.concurrency` Onfly sends one chunk at a time per file, which suits Ollama's default. A server that batches requests answers many at once in nearly the time of one, so raising it shortens the first index in proportion, up to the server's limits. It multiplies with `indexer.concurrency` (files in parallel); keep the product within what the server accepts. The answers are applied in order and cached, so a failure or an interrupted run loses nothing already written.

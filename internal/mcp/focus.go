@@ -12,11 +12,13 @@ import (
 )
 
 const (
-	defaultFocus   = 5
-	maxFocus       = 20
-	maxFocusDeps   = 12
-	maxFocusRefs   = 60
-	focusBodyLimit = 6000
+	defaultFocus = 5
+	maxFocus     = 20
+	maxFocusDeps = 12
+	maxFocusRefs = 60
+
+	baselineFocusFiles = 3
+	focusBodyLimit     = 6000
 )
 
 type focusIn struct {
@@ -40,19 +42,17 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 		limit = defaultFocus
 	}
 	limit = min(limit, maxFocus)
-	top, err := h.searcher.Run(ctx, query.Request{Query: in.Query, Limit: limit, Workspace: h.scope("")})
+	top, err := h.searcher.RunFocus(ctx, query.Request{Query: in.Query, Limit: limit, Workspace: h.scope("")})
 	if err != nil {
 		return nil, struct{}{}, err
 	}
 	if len(top) > limit {
 		top = top[:limit]
 	}
-	files := map[string]bool{}
 	inTop := map[string]bool{}
 	var b strings.Builder
 	b.WriteString("<symbols>\n")
 	for _, c := range top {
-		files[c.FilePath] = true
 		inTop[c.Metadata["name"]+"|"+c.FilePath] = true
 		body := c.Content
 		if len(body) > focusBodyLimit {
@@ -61,25 +61,31 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 		fmt.Fprintf(&b, "<symbol name=%q at=\"%s\">\n%s\n</symbol>\n", c.Metadata["name"], location(c), body)
 	}
 	b.WriteString("</symbols>\n<related>\n")
-	defs, src := h.referencedDefinitions(ctx, top, maxFocusRefs)
+	defs, src := h.referencedDefinitions(ctx, top, maxFocusRefs, h.newSources())
 	n := 0
 	for _, ref := range src.order {
 		cands := defs[ref]
 		if len(cands) == 0 || n >= maxFocusDeps {
 			continue
 		}
-		d := nearestDefinition(cands, src.by[ref])
+		d := nearestDefinition(cands, src.by[ref][0])
 		if inTop[d.Metadata["name"]+"|"+d.FilePath] {
 			continue
 		}
-		files[d.FilePath] = true
 		fmt.Fprintf(&b, "- %s [%s]\n", signature(d), location(d))
 		n++
 	}
 	b.WriteString("</related>\n")
-	raw := 0
-	for f := range files {
-		raw += h.fileSize(f)
+	// Without onfly the assistant would read the files of the best three matches.
+	raw, counted := 0, map[string]bool{}
+	for _, c := range top {
+		if len(counted) == baselineFocusFiles {
+			break
+		}
+		if !counted[c.FilePath] {
+			counted[c.FilePath] = true
+			raw += h.fileSize(c.FilePath)
+		}
 	}
 	text, nRules := h.rulesOnce(chunkQuery(append([]parser.Chunk(nil), top...)))
 	body := cutToBudget(b.String(), h.maxTokens)

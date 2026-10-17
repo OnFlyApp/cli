@@ -81,17 +81,17 @@ For a file the result is one text block:
 </onfly_context>
 ```
 
-A directory lists each indexed file with its symbol names. The skeleton is cut to `server.max_tokens`. A target that is not indexed is a tool error that names `onfly index`.
+`calls` and `called_by` list one-line signatures. The index stores a call as a bare name, so each candidate is checked against the calling chunk's own text and its file's imports: `strings.Split` is not the project's `Split`, a bare call stays in its package, an imported package function must come from that import's directory, a call through a value must be a method, and a PHP `Class::method` must resolve (through `use` and the namespace) to that class. The check covers Go and PHP; other languages match by name. Calls through a value cannot be typed, so `b.String()` can still list a `String` method of an unrelated type. A directory lists each indexed file with its symbol names. The skeleton is cut to `server.max_tokens`. A target that is not indexed is a tool error that names `onfly index`.
 
 Each rule is sent once per MCP session, however many files match it, so the second call about the same directory carries no rules.
 
 ### `onfly_focus`
 
-Searches by meaning and by name (the same fusion as `search`) and returns a bundle: `<symbols>` with the full code of the top `limit` matches (default 5, at most 20), `<related>` with one-line signatures of what they use, and the matching rules once per session.
+Searches by meaning and by name and returns a bundle. Ranking weights the lexical lists (keyword, per-word, symbol and path) 0.65 and the semantic ones 0.35, unlike `search`, and moves declarations of four lines or fewer (small structs, types, constants) behind everything else unless the query names them. The bundle is: `<symbols>` with the full code of the top `limit` matches (default 5, at most 20), `<related>` with one-line signatures of what they use, and the matching rules once per session.
 
 ### Telemetry
 
-Both tools append one row per call to `telemetry.db` beside `server.log_file`: tool, target, the size of the files the answer replaced, the size of the answer, and the number of rules sent. `tokens_saved` in the result is the difference at four bytes per token. `onfly stats` totals them: requests, tokens saved and the share they represent, dollars at $3 per million input tokens, and rules enforced. The file holds sizes and paths only.
+Both tools append one row per call to `telemetry.db` beside `server.log_file`: tool, target, the size of the files the answer replaced, the size of the answer, and the number of rules sent. `tokens_saved` in the result is the difference at four bytes per token, against a deliberately modest baseline: for `onfly_xray` the target file plus 150 tokens for each file it calls or is called from; for `onfly_focus` the whole files of the best three matches. `onfly stats` totals them: requests, tokens saved and the share they represent, dollars at $3 per million input tokens, and rules enforced. The file holds sizes and paths only.
 
 ### `search` (atomic)
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axitdev/onfly/internal/parser"
+	"github.com/axitdev/onfly/internal/resolve"
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/skeleton"
 	"github.com/axitdev/onfly/internal/telemetry"
@@ -55,6 +56,9 @@ func (h *tools) finishMacro(ctx context.Context, tool, target string, raw int, h
 }
 
 func signature(c parser.Chunk) string {
+	if sig := c.Metadata["signature"]; sig != "" {
+		return clip(sig, 200)
+	}
 	return clip(skeleton.Signature(c.Content), 200)
 }
 
@@ -88,4 +92,35 @@ func resultText(res *sdkmcp.CallToolResult) string {
 		return t.Text
 	}
 	return ""
+}
+
+// sources reads project files once per request, for resolving which definition
+// a name in a chunk refers to.
+type sources struct {
+	root string
+	text map[string]string
+}
+
+func (h *tools) newSources() *sources { return &sources{root: h.root, text: map[string]string{}} }
+
+func (s *sources) get(rel string) string {
+	if s == nil {
+		return ""
+	}
+	if t, ok := s.text[rel]; ok {
+		return t
+	}
+	t := ""
+	if raw, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(rel))); err == nil && len(raw) <= 1<<20 {
+		t = string(raw)
+	}
+	s.text[rel] = t
+	return t
+}
+
+func (s *sources) accepts(caller, def parser.Chunk) bool {
+	if s == nil {
+		return true
+	}
+	return resolve.Accepts(s.get(caller.FilePath), caller, def)
 }

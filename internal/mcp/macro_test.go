@@ -202,7 +202,7 @@ func TestBlastRadiusUsesBatchedQueries(t *testing.T) {
 		src.WriteString("func " + name + "() {}\n")
 		out := []string{"Ext" + strconv.Itoa(i), "Missing" + strconv.Itoa(i)}
 		chunks = append(chunks,
-			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "big.go", Type: "function", Content: "func " + name + "() {}", Metadata: map[string]string{"name": name, "start_line": strconv.Itoa(i + 2), "end_line": strconv.Itoa(i + 2)}, Outbound: out}, Vector: vec},
+			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "big.go", Type: "function", Content: "func " + name + "() { Ext" + strconv.Itoa(i) + "(); Missing" + strconv.Itoa(i) + "() }", Metadata: map[string]string{"name": name, "start_line": strconv.Itoa(i + 2), "end_line": strconv.Itoa(i + 2)}, Outbound: out}, Vector: vec},
 			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "ext.go", Type: "function", Content: "func Ext" + strconv.Itoa(i) + "() {}", Metadata: map[string]string{"name": "Ext" + strconv.Itoa(i)}}, Vector: vec},
 			vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "use.go", Type: "function", Content: "func Use" + strconv.Itoa(i) + "() { " + name + "() }", Metadata: map[string]string{"name": "Use" + strconv.Itoa(i)}, Outbound: []string{name}}, Vector: vec},
 		)
@@ -234,5 +234,36 @@ func TestRuleDedupIsPerServerAndInMemory(t *testing.T) {
 		if out := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go"}); !strings.Contains(out, "Use the repository layer.") {
 			t.Fatalf("server %d: a new server starts with no rules sent:\n%s", i, out)
 		}
+	}
+}
+
+func TestBlastRadiusDoesNotMatchStdlibCallsToProjectNames(t *testing.T) {
+	root := t.TempDir()
+	src := "package pay\n\nimport (\n\t\"strings\"\n\n\t\"example.com/app/internal/tokens\"\n)\n\nfunc Charge(s string) int {\n\tparts := strings.Split(s, \",\")\n\tn, _ := tokens.Count(s)\n\treturn len(parts) + n\n}\n"
+	if err := os.MkdirAll(filepath.Join(root, "internal", "pay"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "internal", "pay", "pay.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t)
+	vec := []float32{1, 0, 0, 1}
+	meta := func(name string) map[string]string {
+		return map[string]string{"name": name, "start_line": "9", "end_line": "13"}
+	}
+	if err := storetest.Save(context.Background(), store, []vectorstore.EmbeddedChunk{
+		{Chunk: parser.Chunk{FilePath: "internal/pay/pay.go", Type: "function", Content: "func Charge(s string) int {\n\tparts := strings.Split(s, \",\")\n\tn, _ := tokens.Count(s)\n\treturn len(parts) + n\n}", Metadata: meta("Charge"), Outbound: []string{"Split", "Count", "len"}}, Vector: vec},
+		{Chunk: parser.Chunk{FilePath: "internal/eval/eval.go", Type: "function", Content: "func Split(cases []Case) {}", Metadata: map[string]string{"name": "Split"}}, Vector: vec},
+		{Chunk: parser.Chunk{FilePath: "internal/tokens/tokens.go", Type: "function", Content: "func Count(s string) int { return 0 }", Metadata: map[string]string{"name": "Count"}}, Vector: vec},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := openServer(t, config.Config{ProjectRoot: root, Server: config.Server{MaxTokens: 8192}}, store, fakeEmbedder{})
+	out := callText(t, session, "onfly_xray", map[string]any{"target": "internal/pay/pay.go"})
+	if strings.Contains(out, "func Split") {
+		t.Fatalf("strings.Split resolved to the project's Split:\n%s", out)
+	}
+	if !strings.Contains(out, "func Count(s string) int") {
+		t.Fatalf("tokens.Count must resolve through the import:\n%s", out)
 	}
 }

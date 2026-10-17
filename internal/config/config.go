@@ -211,12 +211,37 @@ func readFile(path string) (Config, error) {
 }
 
 func finish(cfg Config) (Config, error) {
+	applySLMEnv(&cfg)
 	ApplyDefaults(&cfg)
 	resolve(&cfg)
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// applySLMEnv turns on index-time summaries from the environment when the
+// config does not configure them: ONFLY_SLM_URL and ONFLY_SLM_MODEL name a local
+// server (Ollama, llama-server, mlx_lm.server, LM Studio, vLLM), and
+// ONFLY_SLM_PROVIDER picks ollama or openai (the default, except for port
+// 11434). Nothing is enabled unless both URL and model are set; a server that
+// is down only skips the summaries.
+func applySLMEnv(cfg *Config) {
+	if cfg.Indexer.Summaries.Provider != "" {
+		return
+	}
+	url, model := strings.TrimSpace(os.Getenv("ONFLY_SLM_URL")), strings.TrimSpace(os.Getenv("ONFLY_SLM_MODEL"))
+	if url == "" || model == "" {
+		return
+	}
+	provider := strings.TrimSpace(os.Getenv("ONFLY_SLM_PROVIDER"))
+	if provider == "" {
+		provider = "openai"
+		if strings.Contains(url, ":11434") {
+			provider = "ollama"
+		}
+	}
+	cfg.Indexer.Summaries.LLM = LLM{Provider: provider, Endpoint: url, Model: model}
 }
 
 func ApplyDefaults(cfg *Config) {
