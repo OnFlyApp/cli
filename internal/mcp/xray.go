@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,6 +17,9 @@ import (
 	"github.com/axitdev/onfly/internal/vectorstore"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// smallFile is the length in lines under which a file is shown whole.
+var smallFile = 120
 
 const (
 	collapseOver  = 10
@@ -134,7 +138,11 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 			spans = append(spans, skeleton.Span{Start: s, End: e, Name: c.Metadata["name"]})
 		}
 	}
-	sk := cutToBudget(skeleton.CollapseNumbered(string(src), spans, focus, collapseOver), h.maxTokens)
+	over := collapseOver
+	if strings.Count(string(src), "\n")+1 <= smallFile {
+		over = math.MaxInt // one handler or calculator: its body is the answer
+	}
+	sk := cutToBudget(skeleton.CollapseNumbered(string(src), spans, focus, over), h.maxTokens)
 	srcs := h.newSources()
 	srcs.text[rel] = string(src)
 	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)
@@ -274,7 +282,14 @@ func (h *tools) xrayDir(ctx context.Context, rel string, files []string) (*sdkmc
 	var all []parser.Chunk
 	for _, r := range rows {
 		all = append(all, r.Chunk)
-		if n := r.Chunk.Metadata["name"]; n != "" {
+		// Declarations come first so the cap of 8 names never hides a class
+		// behind its methods; loose statements are not a name worth listing.
+		n, typ := r.Chunk.Metadata["name"], strings.ToLower(r.Chunk.Type)
+		switch {
+		case n == "" || typ == "statement":
+		case typ == "class" || typ == "interface" || typ == "trait" || typ == "struct" || typ == "enum":
+			byFile[r.Chunk.FilePath] = append([]string{n}, byFile[r.Chunk.FilePath]...)
+		default:
 			byFile[r.Chunk.FilePath] = append(byFile[r.Chunk.FilePath], n)
 		}
 	}

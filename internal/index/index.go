@@ -301,7 +301,7 @@ func (s *Session) indexAll(ctx context.Context, files []string, hashes map[strin
 	workers := max(1, s.cfg.Indexer.Concurrency)
 	if s.opt.Lexical && s.cfg.Indexer.Concurrency <= 0 {
 		// Nothing waits on the network, so parsing is the cost: use the cores.
-		workers = min(runtime.NumCPU(), 8)
+		workers = runtime.NumCPU()
 	}
 	if workers == 1 {
 		for i, rel := range files {
@@ -540,6 +540,11 @@ func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResul
 	return nil, &res, err
 }
 
+// importTypes are one-line declarations of what a file imports or which
+// namespace it is in. Their name is a full class path, so they match queries
+// better than the classes they name; resolve reads imports from the source.
+var importTypes = []string{"use", "namespace", "import"}
+
 func dropTypes(chunks []parser.Chunk, skip []string) []parser.Chunk {
 	if len(skip) == 0 {
 		return chunks
@@ -576,7 +581,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		s.report("failed", rel)
 		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
-	chunks = dropTypes(chunks, s.cfg.Indexer.SkipTypes)
+	chunks = dropTypes(chunks, append(slices.Clone(s.cfg.Indexer.SkipTypes), importTypes...))
 	overlap := s.cfg.Embedder.MaxInputTokens * 12 / 100
 	chunks = split.Split(chunks, s.cfg.Embedder.MaxInputTokens, overlap, s.count)
 	for i := range chunks {

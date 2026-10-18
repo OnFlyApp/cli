@@ -5,6 +5,7 @@ import (
 	"math"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -66,7 +67,7 @@ func (s *Searcher) focusRank(ctx context.Context, r Request) ([]parser.Chunk, *G
 	}
 	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
 	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights, g.Absent)
-	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.CodeOnly)
+	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.Terms, g.CodeOnly)
 	return boostPathTokens(ranked, extras, g.Terms, g.Weights), g, nil
 }
 
@@ -147,8 +148,8 @@ func isTestPath(p string) bool {
 }
 
 var boilerplateTypes = map[string]bool{
-	"struct": true, "type": true, "interface": true, "constant": true,
-	"property": true, "enum_case": true, "trait_use": true, "class": true,
+	"struct": true, "type": true, "constant": true,
+	"property": true, "enum_case": true, "trait_use": true,
 	// One-line declarations of what a file imports or which namespace it is in.
 	"use": true, "namespace": true, "statement": true,
 }
@@ -231,7 +232,7 @@ func boostPathTokens(ranked, extras []parser.Chunk, terms []string, weights map[
 // pathCandidates returns named symbols of the few files whose name a query term
 // equals, in file order. The keyword lists only read chunk text, so a file that
 // the query names but whose code never says the word is otherwise invisible.
-func (s *Searcher) pathCandidates(ctx context.Context, terms []string, codeOnly bool) []parser.Chunk {
+func (s *Searcher) pathCandidates(ctx context.Context, terms, all []string, codeOnly bool) []parser.Chunk {
 	files, err := s.Store.ListFiles(ctx)
 	if err != nil {
 		return nil
@@ -243,6 +244,13 @@ func (s *Searcher) pathCandidates(ctx context.Context, terms []string, codeOnly 
 		}
 	}
 	sort.Slice(picked, func(i, j int) bool { return baseNamed(picked[i], terms) && !baseNamed(picked[j], terms) })
+	cover := coveringFiles(files, all, codeOnly)
+	for _, f := range picked {
+		if !slices.Contains(cover, f) {
+			cover = append(cover, f)
+		}
+	}
+	picked = cover
 	if len(picked) > pathFiles {
 		picked = picked[:pathFiles]
 	}
@@ -269,6 +277,52 @@ func (s *Searcher) pathCandidates(ctx context.Context, terms []string, codeOnly 
 	return out
 }
 
+// coveringFiles returns the files whose path words (camelCase split, so
+// StatementCycle/Command/EndCycleHandler.php holds statement, cycle, command,
+// end and handler) cover most of the query's words, best first. Words that
+// are common in the index still count: together they name the file.
+func coveringFiles(files, terms []string, codeOnly bool) []string {
+	var words []string
+	for _, t := range terms {
+		if len(t) >= 3 {
+			words = append(words, strings.ToLower(t))
+		}
+	}
+	need := (3*len(words) + 3) / 4
+	if len(words) < 3 || need < 3 {
+		return nil
+	}
+	type scored struct {
+		f string
+		n int
+	}
+	var hits []scored
+	for _, f := range files {
+		if isTestPath(f) || codeOnly && vectorstore.IsProse(f) {
+			continue
+		}
+		have := splitWords(strings.TrimSuffix(f, filepath.Ext(f)))
+		n := 0
+		for _, w := range words {
+			if countHitsOne(w, have) || countHitsOne(strings.TrimSuffix(w, "s"), have) {
+				n++
+			}
+		}
+		if n >= need {
+			hits = append(hits, scored{f, n})
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].n > hits[j].n })
+	var out []string
+	for i, h := range hits {
+		if i == pathFiles {
+			break
+		}
+		out = append(out, h.f)
+	}
+	return out
+}
+
 func baseNamed(file string, terms []string) bool {
 	base := strings.ToLower(filepath.Base(file))
 	base = strings.TrimSuffix(base, filepath.Ext(base))
@@ -281,17 +335,32 @@ func baseNamed(file string, terms []string) bool {
 }
 
 // pathWeight is the highest weight among the terms that name a directory or
-// file of the path, and 0 when none does or the only ones are too common.
+// file of the path, and 0 when none does or the only ones are too common. When
+// two or more terms each match a word of the path (StatementCycle/EndCycleHandler
+// holds statement, cycle, end and handler), the share of the query's weight
+// they cover counts too, so a path that names the whole question beats one
+// that names part of it.
 func pathWeight(file string, terms []string, weights map[string]float64) float64 {
 	best := 0.0
+	var total, got float64
+	words := splitWords(strings.TrimSuffix(file, filepath.Ext(file)))
+	hits := 0
 	for _, t := range terms {
 		w := weightOf(weights, t)
-		if w < minTermWeight || w <= best {
+		if w < minTermWeight {
 			continue
 		}
-		if pathNamed(file, []string{t}) {
+		total += w
+		if countHitsOne(strings.ToLower(t), words) {
+			got += w
+			hits++
+		}
+		if w > best && pathNamed(file, []string{t}) {
 			best = w
 		}
+	}
+	if hits >= 2 && total > 0 {
+		best = math.Max(best, got/total)
 	}
 	return best
 }

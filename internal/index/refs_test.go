@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/axitdev/onfly/internal/parser"
@@ -109,5 +110,13 @@ func TestLinkRefsIncrementalOnlyTouchesChangedFiles(t *testing.T) {
 	b, err := st.GetComponentAST(ctx, "B")
 	if err != nil || len(b.Outbound) != 1 || b.Outbound[0] != "C" {
 		t.Fatalf("b outbound %+v %v", b, err)
+	}
+}
+
+func TestMentionedFindsInjectedAndThrownClasses(t *testing.T) {
+	names := map[string]struct{}{"ClawbackCalculator": {}, "Clock": {}, "FrozenException": {}, "int": {}}
+	got := mentioned("/** @throws \\App\\FrozenException */\npublic function __construct(\n private readonly ClawbackCalculator $calc, ?Clock $c, int $n)", "x", names)
+	if fmt.Sprint(got) != "[ClawbackCalculator Clock FrozenException]" {
+		t.Fatalf("%v", got)
 	}
 }

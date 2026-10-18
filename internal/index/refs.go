@@ -12,6 +12,11 @@ import (
 var (
 	callRef = regexp.MustCompile(`(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\(`)
 	selRef  = regexp.MustCompile(`\.([A-Za-z_][A-Za-z0-9_]*)`)
+	// A class a PHP method takes as a typed parameter (constructor injection
+	// included) or declares in @throws is a reference to it, so looking up a
+	// service finds every handler that receives it.
+	typedParamRef = regexp.MustCompile(`[(,]\s*(?:(?:private|protected|public|readonly)\s+)*\??\\?(?:\w+\\)*([A-Z]\w*)\s+(?:\.\.\.)?&?\$\w`)
+	throwsRef     = regexp.MustCompile(`@throws\s+\\?(?:\w+\\)*([A-Z]\w*)`)
 )
 
 func mentioned(content, self string, names map[string]struct{}) []string {
@@ -30,6 +35,11 @@ func mentioned(content, self string, names map[string]struct{}) []string {
 	}
 	for _, m := range selRef.FindAllStringSubmatch(content, -1) {
 		add(m[1])
+	}
+	for _, re := range []*regexp.Regexp{typedParamRef, throwsRef} {
+		for _, m := range re.FindAllStringSubmatch(content, -1) {
+			add(m[1])
+		}
 	}
 	out := make([]string, 0, len(found))
 	for name := range found {

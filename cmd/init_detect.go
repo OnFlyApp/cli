@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/axitdev/onfly/internal/ext"
@@ -23,15 +24,35 @@ var manifestLanguages = []struct{ file, parser string }{
 	{"build.gradle", "java"},
 }
 
+// manifestDepth is how many directories below the project root are searched
+// for manifests: a monorepo keeps them under services/*/ or packages/*/.
+const manifestDepth = 3
+
+var skipDirs = map[string]bool{"vendor": true, "node_modules": true, ".git": true, ".onfly": true}
+
 func detectLanguages(dir string) []string {
 	var out []string
 	seen := map[string]bool{}
-	for _, m := range manifestLanguages {
-		if seen[m.parser] {
-			continue
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
-		if _, err := os.Stat(filepath.Join(dir, m.file)); err == nil {
-			seen[m.parser] = true
+		if d.IsDir() {
+			rel, _ := filepath.Rel(dir, p)
+			if skipDirs[d.Name()] || rel != "." && strings.Count(rel, string(filepath.Separator)) >= manifestDepth {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		for _, m := range manifestLanguages {
+			if d.Name() == m.file {
+				seen[m.parser] = true
+			}
+		}
+		return nil
+	})
+	for _, m := range manifestLanguages {
+		if seen[m.parser] && !slices.Contains(out, m.parser) {
 			out = append(out, m.parser)
 		}
 	}

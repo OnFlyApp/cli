@@ -96,6 +96,8 @@ func callText(t *testing.T, s *sdkmcp.ClientSession, name string, args map[strin
 }
 
 func TestXrayFileSkeletonBlastRadiusAndRulesOnce(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
 	cfg, store, _ := macroFixture(t)
 	cfg.Server.LogFile = filepath.Join(t.TempDir(), "server.log")
 	session := openServer(t, cfg, store, fakeEmbedder{})
@@ -292,5 +294,15 @@ func TestBlastRadiusDoesNotMatchStdlibCallsToProjectNames(t *testing.T) {
 	}
 	if !strings.Contains(out, "func Count(s string) int") {
 		t.Fatalf("tokens.Count must resolve through the import:\n%s", out)
+	}
+}
+
+func TestXrayShowsASmallFileWhole(t *testing.T) {
+	cfg, store, _ := macroFixture(t)
+	cfg.Server.LogFile = filepath.Join(t.TempDir(), "server.log")
+	session := openServer(t, cfg, store, fakeEmbedder{})
+	got := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go"})
+	if strings.Contains(got, "body omitted") || !strings.Contains(got, "a := 1") {
+		t.Fatalf("a file under %d lines keeps its bodies:\n%s", smallFile, got)
 	}
 }

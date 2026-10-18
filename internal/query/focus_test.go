@@ -119,3 +119,30 @@ func TestDemoteBoilerplateMovesImportsAndNamespacesLast(t *testing.T) {
 		t.Fatalf("code leads imports: %v", got)
 	}
 }
+
+func TestPathWeightCountsCamelCaseWordsOfTheWholePath(t *testing.T) {
+	terms := []string{"statement", "cycle", "end", "handler"}
+	both := pathWeight("src/StatementCycle/Command/EndCycleHandler.php", terms, nil)
+	part := pathWeight("src/CashbackCycle/Command/EndCashbackCycleHandler.php", terms, nil)
+	if both <= part || both < 0.9 {
+		t.Fatalf("a path naming all four words must beat one naming three: %v %v", both, part)
+	}
+}
+
+func TestCoveringFilesFindsThePathThatNamesTheQuestion(t *testing.T) {
+	files := []string{
+		"src/StatementCycle/Command/EndCycleHandler.php",
+		"tests/Unit/StatementCycle/Command/EndCycleHandlerTest.php",
+		"src/CashbackCycle/Command/EndCashbackCycleHandler.php",
+		"src/Other/Thing.php",
+	}
+	got := coveringFiles(files, []string{"handler", "ends", "statement", "cycle"}, true)
+	if len(got) == 0 || got[0] != files[0] {
+		t.Fatalf("%v", got)
+	}
+	for _, f := range got {
+		if f == files[1] {
+			t.Fatal("tests are not picked")
+		}
+	}
+}

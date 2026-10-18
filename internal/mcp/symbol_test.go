@@ -149,6 +149,8 @@ func bigFixture(t *testing.T) *tools {
 }
 
 func TestXrayExpandsTheNamedSymbolInOneCall(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
 	h := bigFixture(t)
 	for _, target := range []string{"big.go:Second", "pkg/big.go:Second", "Second"} {
 		out := xrayText(t, h, target)
