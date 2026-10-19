@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tetratelabs/wazero"
@@ -16,7 +17,7 @@ import (
 )
 
 const (
-	wasmMemoryPages = 4096
+	wasmMemoryPages = 8192
 	parseTimeout    = 5 * time.Second
 )
 
@@ -27,6 +28,9 @@ type WasmParser struct {
 	mu       sync.RWMutex // parses share the lock; Close takes it alone
 	closed   bool
 	Timeout  time.Duration
+	batch    atomic.Bool // the plugin answers many files per run
+	slots    chan struct{}
+	idle     chan *batchProc
 }
 
 func timeoutOr(d time.Duration) time.Duration {
@@ -39,7 +43,7 @@ func timeoutOr(d time.Duration) time.Duration {
 // perKiB is what a parse may take per KiB of source on top of the base timeout
 // when none is configured: a 17 MB PHP parser needs a few seconds for a 70 KB
 // file, more when every core is busy.
-const perKiB = 150 * time.Millisecond
+const perKiB = 300 * time.Millisecond
 
 // timeoutFor is the configured timeout, or the default grown with the file.
 func (p *WasmParser) timeoutFor(size int) time.Duration {
@@ -78,7 +82,9 @@ func newWasmParser(ctx context.Context, path string) (*WasmParser, error) {
 		}
 		return nil, fmt.Errorf("wasm compile: %w", err)
 	}
-	return &WasmParser{rt: rt, compiled: compiled, cache: cache}, nil
+	p := &WasmParser{rt: rt, compiled: compiled, cache: cache}
+	p.enableBatch(wasm)
+	return p, nil
 }
 
 func (p *WasmParser) Parse(ctx context.Context, filePath string, content []byte) ([]Chunk, error) {
@@ -86,6 +92,17 @@ func (p *WasmParser) Parse(ctx context.Context, filePath string, content []byte)
 	defer p.mu.RUnlock()
 	if p.closed {
 		return nil, fmt.Errorf("wasm parser closed")
+	}
+	if p.batch.Load() {
+		chunks, fallback, err := p.parseBatch(ctx, filePath, content)
+		switch fallback {
+		case nil:
+			return chunks, err
+		case errBatchStart:
+			// This plugin keeps running once per file.
+			p.batch.Store(false)
+		}
+		// errBatchDied: this file runs once on its own below.
 	}
 	stdout := &maxBuf{max: maxStdout}
 	stderr := &capBuf{max: 1 << 20}
@@ -127,6 +144,7 @@ func (p *WasmParser) Close() error {
 		return nil
 	}
 	p.closed = true
+	p.closeBatch()
 	err := p.rt.Close(context.Background())
 	if p.cache != nil {
 		if cerr := p.cache.Close(context.Background()); err == nil {
