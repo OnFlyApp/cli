@@ -306,3 +306,16 @@ func TestXrayShowsASmallFileWhole(t *testing.T) {
 		t.Fatalf("a file under %d lines keeps its bodies:\n%s", smallFile, got)
 	}
 }
+
+func TestXrayFocusBodySurvivesTheSkeletonBudget(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
+	cfg, store, _ := macroFixture(t)
+	cfg.Server.LogFile = filepath.Join(t.TempDir(), "server.log")
+	cfg.Server.MaxTokens = 40 // too small for the whole skeleton
+	session := openServer(t, cfg, store, fakeEmbedder{})
+	got := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go", "focus_symbol": "Charge"})
+	if !strings.Contains(got, "a := 1") {
+		t.Fatalf("the focused body must be given even when the skeleton is cut:\n%s", got)
+	}
+}

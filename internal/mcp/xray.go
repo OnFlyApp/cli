@@ -142,7 +142,14 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	if strings.Count(string(src), "\n")+1 <= smallFile {
 		over = math.MaxInt // one handler or calculator: its body is the answer
 	}
-	sk := cutToBudget(skeleton.CollapseNumbered(string(src), spans, focus, over), h.maxTokens)
+	full := skeleton.CollapseNumbered(string(src), spans, focus, over)
+	sk, focusText := cutToBudget(full, h.maxTokens), ""
+	if focus != "" && sk != full {
+		// The expanded body lies past the point where a long file's skeleton is
+		// cut, so it would be dropped: collapse everything and give the body apart.
+		sk = cutToBudget(skeleton.CollapseNumbered(string(src), spans, "", over), h.maxTokens)
+		focusText = focusBody(string(src), spans, focus, h.maxTokens)
+	}
 	srcs := h.newSources()
 	srcs.text[rel] = string(src)
 	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)
@@ -151,6 +158,9 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 		b.WriteString("> " + note + "\n")
 	}
 	b.WriteString("## skeleton\n" + sk + "\n")
+	if focusText != "" {
+		b.WriteString("## " + focus + "\n" + focusText + "\n")
+	}
 	if calls != "" {
 		b.WriteString("## calls\n" + calls)
 	}
@@ -376,4 +386,20 @@ func (h *tools) missingSymbolNote(ctx context.Context, file, target string) stri
 		}
 	}
 	return fmt.Sprintf("no symbol %q in this file (showing the whole skeleton). Functions and methods here: %s", name, strings.Join(names, ", "))
+}
+
+// focusBody is the numbered source of every function called name, cut to the
+// token budget.
+func focusBody(src string, spans []skeleton.Span, name string, maxTokens int) string {
+	lines := strings.Split(src, "\n")
+	var b strings.Builder
+	for _, sp := range spans {
+		if sp.Name != name || sp.Start < 1 || sp.End > len(lines) {
+			continue
+		}
+		for n := sp.Start; n <= sp.End; n++ {
+			fmt.Fprintf(&b, "%d| %s\n", n, lines[n-1])
+		}
+	}
+	return strings.TrimRight(cutToBudget(b.String(), maxTokens), "\n")
 }
