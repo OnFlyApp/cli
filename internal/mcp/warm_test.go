@@ -78,7 +78,7 @@ func TestXrayBuildsAndRefreshesTheIndexWithoutAnEmbedder(t *testing.T) {
 	}
 	h.bgWG.Wait()
 	text := resultText(res)
-	if !strings.Contains(text, "<skeleton>") || !strings.Contains(text, "NewlyAddedFunc") {
+	if !strings.Contains(text, "## skeleton") || !strings.Contains(text, "NewlyAddedFunc") {
 		t.Fatalf("%s", text)
 	}
 	if defs, _ := h.store.GetComponents(ctx, "NewlyAddedFunc"); len(defs) != 1 {

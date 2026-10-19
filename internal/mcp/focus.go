@@ -54,16 +54,16 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 	}
 	inTop := map[string]bool{}
 	var b strings.Builder
-	b.WriteString("<symbols>\n")
+	b.WriteString("## symbols\n")
 	for _, c := range top {
 		inTop[c.Metadata["name"]+"|"+c.FilePath] = true
 		body := c.Content
 		if len(body) > focusBodyLimit {
 			body = body[:focusBodyLimit] + "\n// ... [truncated] ..."
 		}
-		fmt.Fprintf(&b, "<symbol name=%q at=\"%s\">\n%s\n</symbol>\n", c.Metadata["name"], location(c), body)
+		fmt.Fprintf(&b, "### %s @ %s\n%s\n", c.Metadata["name"], location(c), body)
 	}
-	b.WriteString("</symbols>\n<related>\n")
+	var rel strings.Builder
 	defs, src := h.referencedDefinitions(ctx, top, maxFocusRefs, h.newSources())
 	n := 0
 	for _, ref := range src.order {
@@ -75,10 +75,12 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 		if inTop[d.Metadata["name"]+"|"+d.FilePath] {
 			continue
 		}
-		fmt.Fprintf(&b, "- %s [%s]\n", signature(d), location(d))
+		fmt.Fprintf(&rel, "- %s [%s]\n", signature(d), location(d))
 		n++
 	}
-	b.WriteString("</related>\n")
+	if rel.Len() > 0 {
+		b.WriteString("## related\n" + rel.String())
+	}
 	// Without onfly the assistant would read the files of the best three matches.
 	raw, counted := 0, map[string]bool{}
 	for _, c := range top {

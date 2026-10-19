@@ -38,12 +38,14 @@ func TestGoResolution(t *testing.T) {
 		{"imported under an alias", "sdkmcp.AddTool(srv)", fn("vendor/x/mcp/mcp.go", "AddTool"), false},
 		{"bare call stays in the package", "return indentOf(line)", fn("internal/skeleton/skeleton.go", "indentOf"), true},
 		{"bare call does not cross packages", "return indentOf(line)", fn("internal/other/x.go", "indentOf"), false},
-		{"method call on a value", "h.store.GetComponents(ctx, n)", method("internal/vectorstore/postgres.go", "GetComponents", "Postgres"), true},
+		{"method of a package the caller neither lives in nor imports", "h.store.GetComponents(ctx, n)", method("internal/vectorstore/postgres.go", "GetComponents", "Postgres"), false},
+		{"method of an imported package", "c.Count(s)", method("internal/tokens/tokens.go", "Count", "Counter"), true},
+		{"method of the caller's own package", "sc.line(x)", method("internal/skeleton/scan.go", "line", "scanner"), true},
 		{"predeclared append is not a method", "out = append(out, x)", method("internal/usage/usage.go", "append", "Log"), false},
 		{"a field read is not a method call", "srcs.text[rel] = src", method("internal/rules/rules.go", "text", "Rule"), false},
 		{"String on a value does not cross files", "b.String()", method("internal/rules/rules.go", "String", "parserNames"), false},
 		{"String on a value in the same file", "b.String()", method("internal/skeleton/skeleton.go", "String", "scanner"), true},
-		{"a domain method on a value still resolves", "h.record(x)", method("internal/mcp/server.go", "record", "tools"), true},
+		{"a same-named method of an unrelated package is not a caller", "h.record(x)", method("internal/mcp/server.go", "record", "tools"), false},
 		{"a function is not called through a value", "x.Count()", fn("internal/tokens/tokens.go", "Count"), false},
 		{"name not in the text", "return 1", fn("internal/skeleton/skeleton.go", "Collapse"), false},
 	}
@@ -116,5 +118,18 @@ func TestPHPResolution(t *testing.T) {
 				t.Fatalf("Accepts = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPHPPropertyChainIsACallOnAValue(t *testing.T) {
+	src := "<?php\nnamespace App\\Queue;\nuse App\\Cache\\RateLimiter;\n"
+	def := ch("src/Cache/RateLimiter.php", "", map[string]string{"name": "tooManyAttempts", "receiver": "App\\Cache\\RateLimiter", "namespace": "App\\Cache"})
+	caller := ch("src/Queue/RateLimited.php", "return $this->limiter->tooManyAttempts($key, 1);", map[string]string{"name": "handle", "namespace": "App\\Queue"})
+	if !Accepts(src, caller, def) {
+		t.Fatal("a call through a property of a class the caller imports is a caller")
+	}
+	stranger := ch("src/Queue/Other.php", "return $this->limiter->tooManyAttempts($key, 1);", map[string]string{"name": "handle", "namespace": "App\\Queue"})
+	if Accepts("<?php\nnamespace App\\Queue;\n", stranger, def) {
+		t.Fatal("without importing the class or sharing its namespace it is not")
 	}
 }

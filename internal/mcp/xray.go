@@ -148,11 +148,17 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	calls, calledBy, depFiles := h.blastRadius(ctx, rel, chunks, depth, srcs)
 	var b strings.Builder
 	if note != "" {
-		b.WriteString("<note>" + note + "</note>\n")
+		b.WriteString("> " + note + "\n")
 	}
-	b.WriteString("<skeleton>\n" + sk + "\n</skeleton>\n<blast_radius>\n<calls>\n" + calls + "</calls>\n<called_by>\n" + calledBy + "</called_by>\n</blast_radius>\n")
+	b.WriteString("## skeleton\n" + sk + "\n")
+	if calls != "" {
+		b.WriteString("## calls\n" + calls)
+	}
+	if calledBy != "" {
+		b.WriteString("## called_by\n" + calledBy)
+	}
 	if symbols != "" {
-		b.WriteString("<definitions>\n" + symbols + "</definitions>\n")
+		b.WriteString("## definitions\n" + symbols)
 	}
 	if symbols == "" {
 		b.WriteString(h.implementationsBlock(ctx, chunks))
@@ -295,7 +301,7 @@ func (h *tools) xrayDir(ctx context.Context, rel string, files []string) (*sdkmc
 	}
 	raw := 0
 	var b strings.Builder
-	b.WriteString("<skeleton>\n")
+	b.WriteString("## skeleton\n")
 	for _, f := range shown {
 		raw += h.fileSize(f)
 		names := byFile[f]
@@ -308,7 +314,6 @@ func (h *tools) xrayDir(ctx context.Context, rel string, files []string) (*sdkmc
 	if len(under) > len(shown) {
 		fmt.Fprintf(&b, "// ... [%d more files omitted] ...\n", len(under)-len(shown))
 	}
-	b.WriteString("</skeleton>\n")
 	text, n := h.rulesOnce(rules.Query{Targets: chunkQuery(all).Targets})
 	return h.finishMacro(ctx, "onfly_xray", rel, raw, fmt.Sprintf("target=%q", rel+"/"), b.String(), text, n), nil
 }

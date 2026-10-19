@@ -98,7 +98,7 @@ func TestGoInterfacesAreSatisfiedByMethodSets(t *testing.T) {
 		t.Fatalf("a type needs every method of the interface: %s", got)
 	}
 	block := h.implementationsBlock(ctx, defs)
-	if !strings.Contains(block, `<implementations of="Store">`) || !strings.Contains(block, "likely: has all its methods") {
+	if !strings.Contains(block, `implementations of Store:`) || !strings.Contains(block, "likely: has all its methods") {
 		t.Fatalf("%s", block)
 	}
 }

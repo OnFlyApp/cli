@@ -291,7 +291,7 @@ func TestCollapseSignaturesWithBracesInsideThem(t *testing.T) {
 					t.Errorf("kept %q in\n%s", d, got)
 				}
 			}
-			if !strings.Contains(got, "body omitted: original "+tc.lines) {
+			if !strings.Contains(got, "body omitted: "+tc.lines) {
 				t.Errorf("want marker %q in\n%s", tc.lines, got)
 			}
 		})
@@ -346,7 +346,7 @@ func TestCollapseNumberedKeepsTheNumbersOfTheOriginalFile(t *testing.T) {
 			t.Fatalf("line %d of the skeleton is %q, line %d of the file is %q", n, rest, n, original[n-1])
 		}
 	}
-	for _, want := range []string{" 5| ", "original lines 5-17", "~13 lines", `focus_symbol="Big" expands it`} {
+	for _, want := range []string{" 5| ", "lines 5-17", "~62 tokens", `focus_symbol="Big"`} {
 		if !strings.Contains(marker, want) {
 			t.Fatalf("marker %q lacks %q", marker, want)
 		}

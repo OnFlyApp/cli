@@ -55,6 +55,7 @@ func names(list ...string) map[string]bool {
 type phpCall struct {
 	qual  string
 	isNew bool
+	arrow bool // after ->: a call on a value, whatever the qualifier text
 }
 
 var (
@@ -80,6 +81,7 @@ func phpUsesOf(name, content string) []phpCall {
 		u := phpCall{isNew: m[6] >= 0}
 		if m[2] >= 0 {
 			u.qual = content[m[2]:m[3]]
+			u.arrow = strings.HasSuffix(content[m[4]:m[5]], "->")
 		}
 		out = append(out, u)
 	}
@@ -251,9 +253,22 @@ func goAccepts(src string, caller, def parser.Chunk, name string) bool {
 				return true
 			}
 		default:
-			if isMethod && m.paren && (!goUbiquitous[name] || def.FilePath == caller.FilePath) {
+			// A call on a value of unknown type: the method can be def's only if
+			// the caller lives in def's package or imports it. A method of an
+			// unrelated package that shares the name is not a caller.
+			if isMethod && m.paren && (!goUbiquitous[name] || def.FilePath == caller.FilePath) &&
+				(path.Dir(caller.FilePath) == path.Dir(def.FilePath) || importsAnyDir(imports, path.Dir(def.FilePath))) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func importsAnyDir(imports map[string]string, dir string) bool {
+	for _, p := range imports {
+		if importsDir(p, dir) {
+			return true
 		}
 	}
 	return false
@@ -336,7 +351,7 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 			case !isMethod && !classLike && def.Metadata["namespace"] == ns:
 				return true
 			}
-		case strings.HasPrefix(qual, "$") || qual == "self" || qual == "static" || qual == "parent":
+		case strings.HasPrefix(qual, "$") || qual == "self" || qual == "static" || qual == "parent" || m.arrow:
 			if isMethod && phpRelated(def, caller, uses, ns) && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
 				return true
 			}

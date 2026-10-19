@@ -219,7 +219,7 @@ func (h *tools) implementationsBlock(ctx context.Context, chunks []parser.Chunk)
 			continue
 		}
 		n++
-		fmt.Fprintf(&b, "<implementations of=%q>\n", c.Metadata["name"])
+		fmt.Fprintf(&b, "implementations of %s:\n", c.Metadata["name"])
 		for i, im := range impls {
 			if i == maxImplementations {
 				fmt.Fprintf(&b, "// ... [%d more] ...\n", len(impls)-i)
@@ -231,7 +231,6 @@ func (h *tools) implementationsBlock(ctx context.Context, chunks []parser.Chunk)
 			}
 			fmt.Fprintf(&b, "- %s [%s] (%s)\n", signature(im.chunk), location(im.chunk), note)
 		}
-		b.WriteString("</implementations>\n")
 	}
 	return b.String()
 }

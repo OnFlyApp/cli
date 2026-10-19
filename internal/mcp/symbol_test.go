@@ -67,7 +67,7 @@ func TestXrayQualifiedSymbolResolvesToItsPackage(t *testing.T) {
 	h := symbolFixture(t)
 	for _, target := range []string{"telemetry.Open", "internal/telemetry/telemetry.go:Open", "Summary.Saved", "telemetry.Summary.Saved"} {
 		out := xrayText(t, h, target)
-		if !strings.Contains(out, `<skeleton>`) || !strings.Contains(out, "package telemetry") {
+		if !strings.Contains(out, `## skeleton`) || !strings.Contains(out, "package telemetry") {
 			t.Fatalf("%s should open the telemetry file:\n%s", target, out)
 		}
 		if strings.Contains(out, "package index") {
@@ -82,12 +82,12 @@ func TestXrayQualifiedSymbolResolvesToItsPackage(t *testing.T) {
 func TestXrayAmbiguousNameShowsEveryDefinitionWithItsCallers(t *testing.T) {
 	h := symbolFixture(t)
 	out := xrayText(t, h, "Open")
-	for _, want := range []string{`matches="2"`, `<definition at="internal/telemetry/telemetry.go:3">`, `<definition at="internal/index/index.go:3">`, "func printTelemetry", "func runIndex"} {
+	for _, want := range []string{`matches="2"`, `### internal/telemetry/telemetry.go:3`, `### internal/index/index.go:3`, "func printTelemetry", "func runIndex"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "<skeleton>") {
+	if strings.Contains(out, "## skeleton") {
 		t.Fatalf("an ambiguous name is not expanded into one file:\n%s", out)
 	}
 	if strings.Contains(out, "CHANGELOG.md") {
@@ -95,8 +95,8 @@ func TestXrayAmbiguousNameShowsEveryDefinitionWithItsCallers(t *testing.T) {
 	}
 	// Each definition lists only its own caller.
 	// Definitions are ordered by path: index.go, then telemetry.go.
-	idx := strings.Index(out, `<definition at="internal/index/index.go:3">`)
-	tel := strings.Index(out, `<definition at="internal/telemetry/telemetry.go:3">`)
+	idx := strings.Index(out, `### internal/index/index.go:3`)
+	tel := strings.Index(out, `### internal/telemetry/telemetry.go:3`)
 	if idx < 0 || tel < idx {
 		t.Fatalf("unexpected order:\n%s", out)
 	}
@@ -109,7 +109,7 @@ func TestXrayAmbiguousNameShowsEveryDefinitionWithItsCallers(t *testing.T) {
 
 func TestXrayUnmatchedQualifierFallsBackToAllDefinitions(t *testing.T) {
 	out := xrayText(t, symbolFixture(t), "nosuch.Open")
-	if !strings.Contains(out, "<note>no definition of Open matches") || !strings.Contains(out, `matches="2"`) {
+	if !strings.Contains(out, "> no definition of Open matches") || !strings.Contains(out, `matches="2"`) {
 		t.Fatalf("%s", out)
 	}
 	if _, _, err := symbolFixture(t).runXray(context.Background(), nil, xrayIn{Target: "Nothing.Here"}); err == nil {
@@ -160,7 +160,7 @@ func TestXrayExpandsTheNamedSymbolInOneCall(t *testing.T) {
 		if !strings.Contains(out, "20| func Second() int {") || !strings.Contains(out, "21| \tb := b + 1") || !strings.Contains(out, "34| \treturn b") {
 			t.Fatalf("%s: Second must be expanded with its own line numbers:\n%s", target, out)
 		}
-		if strings.Contains(out, "a := a + 1") || !strings.Contains(out, `original lines 4-17`) || !strings.Contains(out, `focus_symbol="First" expands it`) {
+		if strings.Contains(out, "a := a + 1") || !strings.Contains(out, `lines 4-17`) || !strings.Contains(out, `focus_symbol="First"`) {
 			t.Fatalf("%s: First stays collapsed and says how to expand it:\n%s", target, out)
 		}
 	}
@@ -173,7 +173,7 @@ func TestXrayExpandsTheNamedSymbolInOneCall(t *testing.T) {
 
 func TestXrayWithAnUnknownSymbolInARealFileReturnsTheFileAndWhatItHas(t *testing.T) {
 	out := xrayText(t, bigFixture(t), "big.go:Nope")
-	if !strings.Contains(out, `<note>no symbol "Nope" in this file`) || !strings.Contains(out, "First, Second") || !strings.Contains(out, "<skeleton>") {
+	if !strings.Contains(out, `> no symbol "Nope" in this file`) || !strings.Contains(out, "First, Second") || !strings.Contains(out, "## skeleton") {
 		t.Fatalf("%s", out)
 	}
 	if _, _, err := bigFixture(t).runXray(context.Background(), nil, xrayIn{Target: "nothere.go:Nope"}); err == nil {
@@ -183,7 +183,7 @@ func TestXrayWithAnUnknownSymbolInARealFileReturnsTheFileAndWhatItHas(t *testing
 
 func TestXrayAmbiguousNameCarriesTheCodeOfEachDefinition(t *testing.T) {
 	out := xrayText(t, symbolFixture(t), "Open")
-	if strings.Count(out, "<code>\nfunc Open() {}\n</code>") != 2 {
+	if strings.Count(out, "\nfunc Open() {}\n") != 2 {
 		t.Fatalf("with two definitions each comes with its code:\n%s", out)
 	}
 }

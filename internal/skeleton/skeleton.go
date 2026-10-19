@@ -39,7 +39,7 @@ type line struct {
 }
 
 // ExpandTip tells a reader what a collapsed body is and how to get it.
-const ExpandTip = `// [Tip: a "body omitted" line is a collapsed function; the numbers on the left are line numbers of the original file. To read one body call onfly_xray with focus_symbol="<name>" (or read those lines).]`
+const ExpandTip = `// [N| = line number in the file; "body omitted" = collapsed function, expand with focus_symbol="<name>"]`
 
 // CollapseNumbered is Collapse with the number of each line in src in front of
 // it, so a position read from the skeleton is a position in the file. A marker
@@ -90,9 +90,9 @@ func collapse(src string, spans []Span, focus string, minLines int) []line {
 		n, _ := tokens.Count(omitted)
 		hint := ""
 		if sp.Name != "" {
-			hint = fmt.Sprintf("; focus_symbol=%q expands it", sp.Name)
+			hint = fmt.Sprintf("; focus_symbol=%q", sp.Name)
 		}
-		out = append(out, line{n: open + 1, marker: true, text: fmt.Sprintf("%s// ... [body omitted: original lines %d-%d, ~%d lines, ~%d tokens%s] ...", indentOf(lines[open-1])+"\t", open+1, sp.End-1, sp.End-1-open, n, hint)})
+		out = append(out, line{n: open + 1, marker: true, text: fmt.Sprintf("%s// ... [body omitted: lines %d-%d, ~%d tokens%s] ...", indentOf(lines[open-1])+"\t", open+1, sp.End-1, n, hint)})
 		keep(sp.End, sp.End)
 		next, covered = sp.End+1, sp.End
 	}

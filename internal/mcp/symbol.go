@@ -168,10 +168,18 @@ func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, 
 	impls := h.implementationsBlock(ctx, []parser.Chunk{d})
 	code := ""
 	if withCode {
-		code = "<code>\n" + clipLines(d.Content, maxDefinitionCode) + "\n</code>\n"
+		code = clipLines(d.Content, maxDefinitionCode) + "\n"
 	}
-	return fmt.Sprintf("<definition at=%q>\n%s\n%s<calls>\n%s</calls>\n<called_by>\n%s</called_by>\n%s</definition>\n",
-		location(d), signature(d), code, calls.String(), calledBy.String(), impls), len(deps)
+	var out strings.Builder
+	fmt.Fprintf(&out, "### %s\n%s\n%s", location(d), signature(d), code)
+	if calls.Len() > 0 {
+		out.WriteString("calls:\n" + calls.String())
+	}
+	if calledBy.Len() > 0 {
+		out.WriteString("called_by:\n" + calledBy.String())
+	}
+	out.WriteString(impls)
+	return out.String(), len(deps)
 }
 
 // xraySymbols answers a name that has several definitions with a block for
@@ -184,9 +192,9 @@ func (h *tools) xraySymbols(ctx context.Context, target, note string, defs []par
 	srcs := h.newSources()
 	var b strings.Builder
 	if note != "" {
-		fmt.Fprintf(&b, "<note>%s</note>\n", note)
+		fmt.Fprintf(&b, "> %s\n", note)
 	}
-	b.WriteString("<definitions>\n")
+	b.WriteString("## definitions\n")
 	files := map[string]bool{}
 	depFiles := 0
 	for _, d := range shown {
@@ -198,7 +206,6 @@ func (h *tools) xraySymbols(ctx context.Context, target, note string, defs []par
 	if len(defs) > len(shown) {
 		fmt.Fprintf(&b, "// ... [%d more definitions omitted; qualify the name, e.g. pkg.Name] ...\n", len(defs)-len(shown))
 	}
-	b.WriteString("</definitions>\n")
 	raw := depFiles * baselineDepTokens * bytesPerToken
 	for f := range files {
 		raw += h.fileSize(f)
