@@ -117,6 +117,7 @@ func TestFocusExpandsAQuestionThatSharesNoWordsWithTheCode(t *testing.T) {
 func TestFocusDoesNotAskTheModelWhenTheTopResultIsNamedForTheQuestion(t *testing.T) {
 	chat := &fakeChat{answer: `["Other"]`}
 	s := expansionCorpus(t, chat)
+	s.Emb = vecEmb{v: []float32{0, 1, 0, 0}} // the vectors agree with the name
 	got, err := s.RunFocus(context.Background(), Request{Query: "access policy", Limit: 5})
 	if err != nil || !inTop(got, "auth/policy.go") {
 		t.Fatalf("%v %v", got, err)

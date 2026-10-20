@@ -1,0 +1,33 @@
+cases:
+  - query: where are required flags validated before a command runs
+    expect: [{file: command.go, symbol: ValidateRequiredFlags}]
+  - query: check that flags which must be used together are all set
+    expect: [{file: flag_groups.go}]
+  - query: suggest similar command names when the user mistypes
+    expect: [{file: command.go, symbol: SuggestionsFor}]
+  - query: levenshtein distance between two strings
+    expect: [{file: cobra.go, symbol: ld}]
+  - query: set a custom usage template for a command
+    expect: [{file: command.go, symbol: SetUsageTemplate}]
+  - query: run persistent pre-run and post-run hooks in order
+    expect: [{file: command.go, symbol: execute}]
+  - query: find the subcommand that matches the given arguments
+    expect: [{file: command.go, symbol: Find}]
+  - query: generate the bash completion script version 2
+    expect: [{file: bash_completionsV2.go, symbol: GenBashCompletionV2}]
+  - query: how the hidden __complete command computes completions
+    expect: [{file: completions.go, symbol: getCompletions}]
+  - query: require exactly n positional arguments
+    expect: [{file: args.go, symbol: ExactArgs}]
+  - query: does a command have this alias
+    expect: [{file: command.go, symbol: HasAlias}]
+  - query: add the default help command
+    expect: [{file: command.go, symbol: InitDefaultHelpCmd}]
+  - query: functions to run before any command executes
+    expect: [{file: cobra.go, symbol: OnInitialize}]
+  - query: default argument validation when no Args is set
+    expect: [{file: args.go, symbol: legacyArgs}]
+  - query: mark a flag as required
+    expect: [{file: shell_completions.go, symbol: MarkFlagRequired}]
+  - query: generate fish shell completions
+    expect: [{file: fish_completions.go, symbol: GenFishCompletion}]

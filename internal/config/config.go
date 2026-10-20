@@ -109,13 +109,17 @@ func (r Reranker) Timeout() time.Duration {
 	return 0
 }
 
+// WithContext says whether a chunk is embedded with its path, kind and symbol
+// ahead of the code; it is on unless embed_context is false.
+func (i Indexer) WithContext() bool { return i.EmbedContext == nil || *i.EmbedContext }
+
 type Indexer struct {
 	Include        []string       `yaml:"include"`
 	Exclude        []string       `yaml:"exclude"`
 	Parsers        []ParserConfig `yaml:"parsers"`
 	DebounceMS     int            `yaml:"debounce_ms"`
 	Concurrency    int            `yaml:"concurrency"`
-	EmbedContext   bool           `yaml:"embed_context"`
+	EmbedContext   *bool          `yaml:"embed_context"`
 	ParseTimeoutMS int            `yaml:"parse_timeout_ms"`
 	SkipTypes      []string       `yaml:"skip_types"`
 	// IndexGenerated keeps machine-generated files (Go "Code generated ... DO NOT
@@ -483,8 +487,8 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 		childParsers[i] = p
 	}
 	out.Indexer.Parsers = mergeParsers(parent.Indexer.Parsers, childParsers)
-	if child.Indexer.EmbedContext {
-		out.Indexer.EmbedContext = true
+	if child.Indexer.EmbedContext != nil {
+		out.Indexer.EmbedContext = child.Indexer.EmbedContext
 	}
 	if child.Search.SemanticWeight != 0 {
 		out.Search.SemanticWeight = child.Search.SemanticWeight

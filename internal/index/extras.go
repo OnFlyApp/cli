@@ -15,7 +15,7 @@ func (s *Session) addExtraVectors(ctx context.Context, rel string, chunks []vect
 	slots := map[string]func(vectorstore.EmbeddedChunk) string{}
 	embs := map[string]embedder.Embedder{}
 	if s.alt != nil {
-		with := s.cfg.Indexer.EmbedContext
+		with := s.cfg.Indexer.WithContext()
 		slots[slotAlt] = func(c vectorstore.EmbeddedChunk) string { return embedText(c.Chunk, with) }
 		embs[slotAlt] = s.alt
 	}

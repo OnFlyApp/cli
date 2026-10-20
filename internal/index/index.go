@@ -692,7 +692,7 @@ func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, pre
 	for j, i := range todo {
 		fresh[j] = chunks[i]
 	}
-	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt), s.cfg.Indexer.EmbedContext)
+	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt), s.cfg.Indexer.WithContext())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -795,6 +795,9 @@ func embedText(c parser.Chunk, withContext bool) string {
 	var b strings.Builder
 	if withContext {
 		b.WriteString("path: " + c.FilePath + "\n")
+		if c.Type != "" {
+			b.WriteString("kind: " + c.Type + "\n")
+		}
 		if name := c.Metadata["name"]; name != "" {
 			sym := name
 			if r := c.Metadata["receiver"]; r != "" {

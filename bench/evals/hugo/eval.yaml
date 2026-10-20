@@ -1,0 +1,15 @@
+cases:
+  - query: where does a content file get split into its metadata header and its body before a page is built
+    expect: [{file: parser/pageparser/pageparser.go}]
+  - query: how does the development server make the browser refresh itself after an edit
+    expect: [{file: livereload/livereload.go}]
+  - query: where are the kinds of output a page can be written as, such as HTML and RSS, defined
+    expect: [{file: output/outputFormat.go}]
+  - query: where is the site configuration read and combined with the settings that come from themes
+    expect: [{file: config/allconfig/load.go}]
+  - query: how is the special inline syntax for reusable snippets inside content broken into tokens
+    expect: [{file: parser/pageparser/pagelexer_shortcode.go}]
+  - query: which code decides which layout file is used to render a given page
+    expect: [{file: tpl/tplimpl/templatestore.go}]
+  - query: where are the steps that load content, order it and write the final files run in sequence
+    expect: [{file: hugolib/hugo_sites_build.go}]

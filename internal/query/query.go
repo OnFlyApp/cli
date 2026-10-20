@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -123,11 +124,31 @@ func queryWords(q string) []string {
 			break
 		}
 	}
+	// An identifier in the question (rateLimiter, max_token_budget) also
+	// brings its parts, so that the words it is made of find code that spells
+	// them differently. The parts come after every whole word.
+	for _, w := range slices.Clone(out) {
+		parts := splitWords(w)
+		if len(parts) < 2 {
+			continue
+		}
+		for _, p := range parts {
+			if len(p) < 3 || stopWords[p] || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+			if len(out) == maxQueryWords+maxPartWords {
+				return out
+			}
+		}
+	}
 	return out
 }
 
 const (
 	maxQueryWords     = 6
+	maxPartWords      = 4
 	defaultWordWeight = 0.25
 )
 

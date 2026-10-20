@@ -18,6 +18,8 @@ var (
 	evalCases     []string
 	evalSplit     string
 	evalFileLevel bool
+	evalFocus     bool
+	evalLexical   bool
 	evalExplain   bool
 	evalJudge     string
 	evalJudgeURL  string
@@ -54,7 +56,12 @@ var evalCmd = &cobra.Command{
 		ws := query.Scope(cfg.Workspace, "")
 		results := map[string][]parser.Chunk{}
 		rep, err := eval.RunLevel(cmd.Context(), cases, func(ctx context.Context, q string, limit int) ([]parser.Chunk, error) {
-			got, err := s.Search(ctx, q, limit, ws)
+			req := query.Request{Query: q, Limit: limit, Workspace: ws, LexicalOnly: evalLexical}
+			search := s.Run
+			if evalFocus {
+				search = s.RunFocus
+			}
+			got, err := search(ctx, req)
 			results[q] = got
 			return got, err
 		}, evalK, evalFileLevel)
@@ -125,6 +132,8 @@ func init() {
 	evalCmd.Flags().StringVar(&evalJudgeURL, "judge-endpoint", "", "Ollama endpoint for --judge (default http://localhost:11434)")
 	evalCmd.Flags().BoolVar(&evalExplain, "explain", false, "list the cases whose expected chunk was not first, with what outranked it")
 	evalCmd.Flags().BoolVar(&evalFileLevel, "file-level", false, "count a hit when the file matches, whatever the symbol")
+	evalCmd.Flags().BoolVar(&evalFocus, "focus", false, "rank the way onfly_focus does (test and boilerplate demotion, path boosts) instead of the plain hybrid search")
+	evalCmd.Flags().BoolVar(&evalLexical, "lexical", false, "leave the embedder out: words are matched by name, text and path")
 	evalCmd.Flags().IntVar(&evalK, "k", 10, "rank cutoff")
 	evalCmd.Flags().Float64Var(&evalMinRecall, "min-recall", 0, "exit non-zero when recall is below this value")
 	evalCmd.Flags().StringVar(&evalBaseline, "baseline", "", "baseline file, relative to the project root; exit non-zero when recall or mrr drops below it")

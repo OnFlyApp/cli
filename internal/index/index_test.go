@@ -762,7 +762,12 @@ func TestEmbedText(t *testing.T) {
 	if got := embedText(c, true); got != want {
 		t.Fatalf("context = %q", got)
 	}
-	c.Metadata = nil
+	c.Type = "method"
+	want = "path: a/b.go\nkind: method\nsymbol: User.Save\n\nfunc (u *User) Save() {}"
+	if got := embedText(c, true); got != want {
+		t.Fatalf("kind = %q", got)
+	}
+	c.Type, c.Metadata = "", nil
 	if got := embedText(c, true); got != "path: a/b.go\n\nfunc (u *User) Save() {}" {
 		t.Fatalf("unnamed = %q", got)
 	}

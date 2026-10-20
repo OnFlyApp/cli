@@ -1,0 +1,17 @@
+cases:
+  - query: what happens to leftover words on the command line that match no subcommand
+    expect: [{file: args.go}]
+  - query: where are the checks that refuse to run a command when a mandatory option was not given
+    expect: [{file: command.go}]
+  - query: how can two options be declared so that using one forbids the other
+    expect: [{file: flag_groups.go}]
+  - query: how does tab completion get candidate words from the program while the user is typing
+    expect: [{file: completions.go}]
+  - query: where is the typo suggestion for a mistyped command computed
+    expect: [{file: command.go}]
+  - query: which code runs setup and cleanup steps around the main action of a command
+    expect: [{file: command.go}]
+  - query: where is the generated shell script for bash completion written
+    expect: [{file: bash_completionsV2.go}]
+  - query: how are the usage and help screens laid out from a template
+    expect: [{file: command.go}]

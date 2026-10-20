@@ -1,0 +1,21 @@
+cases:
+  - query: what decides that the first search results are weak and asks a model for extra identifiers to search
+    expect: [{file: internal/query/focus.go}]
+  - query: how does the tool avoid sending the same project guideline twice in one conversation
+    expect: [{file: internal/mcp/macro.go}]
+  - query: where is a long function replaced by a one line placeholder when showing a file cheaply
+    expect: [{file: internal/skeleton/skeleton.go}]
+  - query: what stops indexing from hammering a text embedding server that is down
+    expect: [{file: internal/embedder/embedder.go}]
+  - query: where do we mine the assistant's past sessions to see which of our tools it called
+    expect: [{file: internal/audit/audit.go}]
+  - query: where is a rule that forbids a function call or import enforced across the code
+    expect: [{file: internal/lint/lint.go}]
+  - query: how does the server notice a file changed on disk since it was indexed and refresh it before answering
+    expect: [{file: internal/mcp/warm.go}]
+  - query: where is the figure for how many tokens a response saved the user worked out
+    expect: [{file: internal/mcp/macro.go}]
+  - query: how are the language parsers fetched and checked before first use
+    expect: [{file: internal/ext/install.go}]
+  - query: where is a sandboxed language module run once per source file to get its symbols
+    expect: [{file: internal/parser/wasm.go}]

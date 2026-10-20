@@ -34,9 +34,9 @@ func TestDemoteBoilerplateMovesTinyUnnamedTypesLast(t *testing.T) {
 	}
 }
 
-func TestFocusParamsWeighLexicalListsMore(t *testing.T) {
+func TestFocusParamsWeighVectorsMore(t *testing.T) {
 	p := FocusParams(Params{Semantic: 2, Keyword: 0.5, Word: 0.3, Field: 0.5, Alt: 1, RRFK: 20})
-	if p.Keyword/p.Semantic < 1.8 || p.Word != 1 || p.Field != 1 || p.Alt != focusSemantic || p.RRFK != 20 {
+	if p.Semantic/p.Keyword < 3.5 || p.Word != 1 || p.Field != 1 || p.Alt != focusSemantic || p.RRFK != 20 {
 		t.Fatalf("%+v", p)
 	}
 }

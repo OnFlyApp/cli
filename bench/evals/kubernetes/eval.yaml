@@ -1,0 +1,17 @@
+cases:
+  - query: where is the machine chosen for a pod after unsuitable machines are removed and the rest are ranked
+    expect: [{file: pkg/scheduler/schedule_one.go}, {file: pkg/scheduler/algorithm.go}]
+  - query: how does the system remove dependents when the thing that owned them is deleted
+    expect: [{file: pkg/controller/garbagecollector/garbagecollector.go}]
+  - query: where does a node start throwing out workloads because it is short of memory or disk
+    expect: [{file: pkg/kubelet/eviction/eviction_manager.go}]
+  - query: how many extra copies may exist and how many may be missing while an app is being replaced
+    expect: [{file: pkg/controller/deployment/util/deployment_util.go}]
+  - query: where does a batch task get marked as failed after too many retries
+    expect: [{file: pkg/controller/job/job_controller.go}]
+  - query: how does the scheduled recurring task controller decide that it is time to start a run
+    expect: [{file: pkg/controller/cronjob/cronjob_controllerv2.go}]
+  - query: where are external services called to approve or modify a request before it is stored
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/mutating/dispatcher.go}, {file: staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/validating/dispatcher.go}]
+  - query: how is the caller identified from the credential in the authorization header of a request
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/authentication/request/bearertoken/bearertoken.go}]

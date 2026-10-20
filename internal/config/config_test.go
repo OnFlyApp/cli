@@ -459,3 +459,10 @@ func TestSLMEnvEnablesSummariesOnlyWhenUnconfigured(t *testing.T) {
 		t.Fatalf("no model, no summaries: %+v", cfg.Indexer.Summaries)
 	}
 }
+
+func TestIndexerEmbedsWithContextUnlessTurnedOff(t *testing.T) {
+	off := false
+	if !(Indexer{}).WithContext() || (Indexer{EmbedContext: &off}).WithContext() {
+		t.Fatal("embed_context is on by default and off only when set to false")
+	}
+}

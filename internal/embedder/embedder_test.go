@@ -439,3 +439,15 @@ func TestOpenAIEmbedderLocalServerNeedsNoKeyAndNoDimensions(t *testing.T) {
 		t.Fatal("the hosted endpoint needs a key")
 	}
 }
+
+func TestQueryPrefixDefaultsToTheQwen3Instruction(t *testing.T) {
+	if got := queryPrefix(config.Embedder{Model: "qwen3-embedding:0.6b"}); got != qwen3Instruct {
+		t.Fatalf("qwen3 = %q", got)
+	}
+	if got := queryPrefix(config.Embedder{Model: "Qwen3-Embedding-4B", QueryPrefix: "search: "}); got != "search: " {
+		t.Fatalf("an explicit prefix wins: %q", got)
+	}
+	if got := queryPrefix(config.Embedder{Model: "nomic-embed-text"}); got != "" {
+		t.Fatalf("other models get none: %q", got)
+	}
+}

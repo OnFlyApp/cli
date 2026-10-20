@@ -1,0 +1,17 @@
+cases:
+  - query: which middleware turns away visitors who are not logged in and where is the page they are sent to decided
+    expect: [{file: src/Illuminate/Auth/Middleware/Authenticate.php}]
+  - query: where does a request get refused with too many requests after a client calls too often
+    expect: [{file: src/Illuminate/Routing/Middleware/ThrottleRequests.php}]
+  - query: how are cookies sent by the browser unscrambled on every request
+    expect: [{file: src/Illuminate/Cookie/Middleware/EncryptCookies.php}]
+  - query: where is a form submission rejected because its anti forgery token does not match
+    expect: [{file: src/Illuminate/Foundation/Http/Middleware/PreventRequestForgery.php}, {file: src/Illuminate/Foundation/Http/Middleware/ValidateCsrfToken.php}, {file: src/Illuminate/Foundation/Http/Middleware/VerifyCsrfToken.php}]
+  - query: where are related records loaded for many parent rows in one go to avoid a query per row
+    expect: [{file: src/Illuminate/Database/Eloquent/Builder.php}]
+  - query: which command bundles every setting into a single file so the app boots faster
+    expect: [{file: src/Illuminate/Foundation/Console/ConfigCacheCommand.php}]
+  - query: what is thrown when submitted data breaks the rules and how does it carry the messages
+    expect: [{file: src/Illuminate/Validation/ValidationException.php}]
+  - query: how does a background job get tried again later after it throws
+    expect: [{file: src/Illuminate/Queue/Worker.php}]

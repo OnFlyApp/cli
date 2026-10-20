@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -201,9 +202,17 @@ func TestChangedSinceKeepsOnlyChangedFiles(t *testing.T) {
 	}
 }
 
+func TestQueryWordsBringThePartsOfAnIdentifier(t *testing.T) {
+	got := queryWords("where is max_token_budget checked by rateLimiter")
+	want := []string{"max_token_budget", "checked", "rateLimiter", "max", "token", "budget", "rate", "limiter"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("%v, want %v", got, want)
+	}
+}
+
 func TestQueryWordsDropsStopWordsAndShortWords(t *testing.T) {
 	got := queryWords("How does the retry on 429 work in getUserId, retry?")
-	want := []string{"retry", "429", "work", "getUserId"}
+	want := []string{"retry", "429", "work", "getUserId", "user"}
 	if len(got) != len(want) {
 		t.Fatalf("%v", got)
 	}

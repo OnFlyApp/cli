@@ -13,12 +13,14 @@ import (
 	"github.com/axitdev/onfly/internal/vectorstore"
 )
 
-// Lexical lists (keyword, per-word, symbol and path) get 0.65 of the weight and
-// semantic ones 0.35. A question about "skeleton body collapse" names things;
-// the embedder alone puts small unrelated types ahead of the code that does it.
+// The vector list weighs four times the lexical ones. A question that
+// describes behavior shares few words with the code, and on the symbol-less
+// suites the vectors found the file where the lexical lists did not (Hugo 0.29
+// to 0.57, this repository 0.40 to 0.60 at recall@5); tiny declarations the
+// embedder likes are moved back by demoteBoilerplate and the tiny-declaration rule.
 const (
-	focusLexical  = 0.65
-	focusSemantic = 0.35
+	focusLexical  = 0.5
+	focusSemantic = 2.0
 	tinyLines     = 4
 	pathBoost     = 0.5 // a chunk in a file the query names moves to half its rank position
 )
@@ -66,7 +68,13 @@ func (s *Searcher) focusRank(ctx context.Context, r Request) ([]parser.Chunk, *G
 		return nil, nil, err
 	}
 	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
-	ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights, g.Absent)
+	// Cohesion rewards a file that holds the question's words anywhere in its
+	// text. That is the evidence a lexical index has; next to a vector list it
+	// favours big files that hold every common word over the file that is about
+	// the question, so it is left out when vectors took part.
+	if len(g.Semantic) == 0 {
+		ranked = s.boostCohesion(ctx, ranked, g.Terms, g.Weights, g.Absent)
+	}
 	extras := s.pathCandidates(ctx, specificTerms(g.Terms, g.Weights), g.Terms, g.CodeOnly)
 	return boostPathTokens(ranked, extras, g.Terms, g.Weights), g, nil
 }

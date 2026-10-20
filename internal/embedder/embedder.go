@@ -27,7 +27,18 @@ func New(cfg config.Embedder) (Embedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	return WithPrefixes(e, cfg.QueryPrefix, cfg.DocumentPrefix), nil
+	return WithPrefixes(e, queryPrefix(cfg), cfg.DocumentPrefix), nil
+}
+
+// qwen3Instruct is the task line Qwen3-Embedding is trained to read ahead of a
+// query; documents take none. Without it retrieval of a question drops.
+const qwen3Instruct = "Instruct: Given a question about how a code base works, retrieve the source code that implements it\nQuery: "
+
+func queryPrefix(cfg config.Embedder) string {
+	if cfg.QueryPrefix == "" && strings.Contains(strings.ToLower(cfg.Model), "qwen3-embedding") {
+		return qwen3Instruct
+	}
+	return cfg.QueryPrefix
 }
 
 func newProvider(cfg config.Embedder) (Embedder, error) {
