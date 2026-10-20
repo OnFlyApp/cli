@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -545,6 +546,20 @@ func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResul
 // better than the classes they name; resolve reads imports from the source.
 var importTypes = []string{"use", "namespace", "import"}
 
+// directive matches a file-level declare(strict_types=1); on its own, which
+// says nothing about the code and would be returned as a symbol.
+var directive = regexp.MustCompile(`^\s*declare\s*\([^)]*\)\s*;?\s*$`)
+
+func dropDirectives(chunks []parser.Chunk) []parser.Chunk {
+	out := chunks[:0:0]
+	for _, c := range chunks {
+		if !(strings.EqualFold(c.Type, "statement") && directive.MatchString(c.Content)) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func dropTypes(chunks []parser.Chunk, skip []string) []parser.Chunk {
 	if len(skip) == 0 {
 		return chunks
@@ -581,7 +596,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		s.report("failed", rel)
 		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
-	chunks = dropTypes(chunks, append(slices.Clone(s.cfg.Indexer.SkipTypes), importTypes...))
+	chunks = dropDirectives(dropTypes(chunks, append(slices.Clone(s.cfg.Indexer.SkipTypes), importTypes...)))
 	overlap := s.cfg.Embedder.MaxInputTokens * 12 / 100
 	chunks = split.Split(chunks, s.cfg.Embedder.MaxInputTokens, overlap, s.count)
 	for i := range chunks {
@@ -776,7 +791,7 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 		for i, chunk := range part {
 			texts[i] = embedText(chunk, withContext)
 		}
-		vecs, err := emb.EmbedBatch(ctx, texts)
+		vecs, err := embedTexts(ctx, emb, texts)
 		if err != nil {
 			return nil, err
 		}
@@ -785,6 +800,29 @@ func embedChunks(ctx context.Context, emb embedder.Embedder, chunks []parser.Chu
 		}
 	}
 	return out, nil
+}
+
+// embedTexts asks for a batch and, when the server times out on it, for each
+// half separately, down to one text: a model with one slot cannot always embed
+// 128 long chunks inside the client timeout, and the same request would fail again.
+func embedTexts(ctx context.Context, emb embedder.Embedder, texts []string) ([][]float32, error) {
+	vecs, err := emb.EmbedBatch(ctx, texts)
+	if err == nil || ctx.Err() != nil || !embedder.IsTimeout(err) {
+		return vecs, err
+	}
+	if len(texts) == 1 {
+		return emb.EmbedBatch(ctx, texts) // once more: a lone text has nothing to split
+	}
+	mid := len(texts) / 2
+	first, err := embedTexts(ctx, emb, texts[:mid])
+	if err != nil {
+		return nil, err
+	}
+	second, err := embedTexts(ctx, emb, texts[mid:])
+	if err != nil {
+		return nil, err
+	}
+	return append(first, second...), nil
 }
 
 func embedText(c parser.Chunk, withContext bool) string {

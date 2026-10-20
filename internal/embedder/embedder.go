@@ -55,7 +55,7 @@ func newProvider(cfg config.Embedder) (Embedder, error) {
 }
 
 func newHTTP() *http.Client {
-	return &http.Client{Timeout: 60 * time.Second}
+	return &http.Client{Timeout: 120 * time.Second}
 }
 
 type statusError struct {
@@ -111,8 +111,17 @@ func retryable(err error) bool {
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return false
 	}
+	// A request that timed out is not sent again whole: the caller splits a
+	// batch that is too big for the server, and a single text is retried there.
 	var ne net.Error
-	return errors.As(err, &ne)
+	return errors.As(err, &ne) && !ne.Timeout()
+}
+
+// IsTimeout says that the server did not answer in time, which a smaller
+// batch may cure.
+func IsTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func backoff(retry int) time.Duration {

@@ -451,3 +451,15 @@ func TestQueryPrefixDefaultsToTheQwen3Instruction(t *testing.T) {
 		t.Fatalf("other models get none: %q", got)
 	}
 }
+
+type deadline struct{}
+
+func (deadline) Error() string   { return "deadline" }
+func (deadline) Timeout() bool   { return true }
+func (deadline) Temporary() bool { return true }
+
+func TestATimeoutIsNotRetriedWholeButIsReported(t *testing.T) {
+	if retryable(deadline{}) || !IsTimeout(deadline{}) || IsTimeout(errors.New("boom")) {
+		t.Fatal("a timed-out batch goes back to the caller to be split")
+	}
+}

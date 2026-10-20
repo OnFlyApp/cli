@@ -22,7 +22,7 @@ const (
 )
 
 type focusIn struct {
-	Query string `json:"query" jsonschema:"what you are looking for: behavior in words or symbol keywords"`
+	Query string `json:"query" jsonschema:"what you are looking for: the concept in words plus likely code-level synonyms and verbs, e.g. retry release attempts backoff, or expiration expire ttl timeout"`
 	Limit int    `json:"limit,omitempty" jsonschema:"symbols to expand with full code; default 5"`
 }
 

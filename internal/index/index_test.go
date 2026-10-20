@@ -878,3 +878,67 @@ func TestIsGenerated(t *testing.T) {
 		}
 	}
 }
+
+func TestDropDirectivesRemovesOnlyAStandaloneDeclare(t *testing.T) {
+	in := []parser.Chunk{
+		{Type: "statement", Content: "declare(strict_types=1);"},
+		{Type: "statement", Content: "  declare(ticks=1)  "},
+		{Type: "statement", Content: "declare(strict_types=1);\n$projectDir = __DIR__;"},
+		{Type: "statement", Content: "return static function () {};"},
+		{Type: "function", Content: "declare(strict_types=1);"},
+	}
+	got := dropDirectives(in)
+	if len(got) != 3 || got[0].Content != in[2].Content || got[2].Type != "function" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "i/o timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+// slotEmb times out on any batch over limit, as a one-slot server does.
+type slotEmb struct {
+	limit, calls int
+}
+
+func (e *slotEmb) Embed(context.Context, string) ([]float32, error) {
+	return []float32{1, 2, 3, 4}, nil
+}
+
+func (e *slotEmb) EmbedBatch(_ context.Context, texts []string) ([][]float32, error) {
+	e.calls++
+	if len(texts) > e.limit {
+		return nil, timeoutErr{}
+	}
+	out := make([][]float32, len(texts))
+	for i, t := range texts {
+		out[i] = []float32{float32(len(t)), 0, 0, 1}
+	}
+	return out, nil
+}
+
+func TestEmbedChunksSplitsABatchTheServerTimesOutOn(t *testing.T) {
+	emb := &slotEmb{limit: 3}
+	var chunks []parser.Chunk
+	for i := 0; i < 10; i++ {
+		chunks = append(chunks, parser.Chunk{Content: strings.Repeat("x", i+1), Metadata: map[string]string{}})
+	}
+	got, err := embedChunks(context.Background(), emb, chunks, 10, false)
+	if err != nil || len(got) != 10 {
+		t.Fatalf("%v %d", err, len(got))
+	}
+	for i, g := range got {
+		if g.Vector[0] != float32(i+1) {
+			t.Fatalf("the vectors must stay in the order of the chunks: %d has %v", i, g.Vector)
+		}
+	}
+	if emb.calls > 10 {
+		t.Fatalf("splitting in halves, not one by one: %d calls", emb.calls)
+	}
+	if _, err := embedChunks(context.Background(), &slotEmb{limit: 0}, chunks[:2], 2, false); err == nil {
+		t.Fatal("a text the server cannot embed at all is still an error")
+	}
+}
