@@ -54,7 +54,7 @@ func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, err
 			}
 		}
 	}
-	fused := s.rerank(ctx, r.Query, ranked)
+	fused := s.expandFileSummaries(ctx, s.rerank(ctx, r.Query, ranked))
 	if n := ClampLimit(r.Limit); len(fused) > n {
 		fused = fused[:n]
 	}

@@ -639,3 +639,43 @@ func TestSQLiteDocFreqCountsWordsAndCapsCommonOnes(t *testing.T) {
 		t.Fatalf("df=%d n=%d", df, n)
 	}
 }
+
+func TestSQLiteAddChunksKeepsTheFileAndFilesWithoutTypeFindsThem(t *testing.T) {
+	st, err := OpenSQLite(filepath.Join(t.TempDir(), "v.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	ctx := context.Background()
+	if err := st.Init(ctx, 4); err != nil {
+		t.Fatal(err)
+	}
+	fn := func(file string) EmbeddedChunk {
+		return EmbeddedChunk{Chunk: parser.Chunk{FilePath: file, Type: "function", Content: "func f() {}", Metadata: map[string]string{"name": "f"}}, Vector: []float32{1, 0, 0, 0}}
+	}
+	for _, f := range []string{"a.go", "b.go"} {
+		if err := st.CommitFile(ctx, f, "h-"+f, []EmbeddedChunk{fn(f)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	missing, err := st.FilesWithoutType(ctx, parser.FileSummaryType)
+	if err != nil || strings.Join(missing, ",") != "a.go,b.go" {
+		t.Fatalf("%v %v", missing, err)
+	}
+	sum := EmbeddedChunk{Chunk: parser.Chunk{FilePath: "a.go", Type: parser.FileSummaryType, Content: "File a.go", Metadata: map[string]string{}}, Vector: []float32{0, 1, 0, 0}}
+	if err := st.AddChunks(ctx, []EmbeddedChunk{sum}); err != nil {
+		t.Fatal(err)
+	}
+	if missing, _ = st.FilesWithoutType(ctx, parser.FileSummaryType); strings.Join(missing, ",") != "b.go" {
+		t.Fatalf("a.go has its summary now: %v", missing)
+	}
+	rows, _ := st.ChunksByFiles(ctx, []string{"a.go"})
+	hash, _, _ := st.FileHash(ctx, "a.go")
+	if len(rows) != 2 || hash != "h-a.go" {
+		t.Fatalf("the chunk the file had stays, and so does its hash: %d %s", len(rows), hash)
+	}
+	hits, err := st.SearchSemantic(ctx, []float32{0, 1, 0, 0}, 1, "")
+	if err != nil || len(hits) != 1 || hits[0].Type != parser.FileSummaryType {
+		t.Fatalf("the summary has a vector: %+v %v", hits, err)
+	}
+}

@@ -28,6 +28,11 @@ type Store interface {
 	Init(ctx context.Context, dimensions int) error
 	CommitFile(ctx context.Context, path, hash string, chunks []EmbeddedChunk) error
 	DeleteFiles(ctx context.Context, filePaths []string) error
+	// AddChunks stores chunks beside the ones their files already have. Their
+	// files keep their hash.
+	AddChunks(ctx context.Context, chunks []EmbeddedChunk) error
+	// FilesWithoutType lists the indexed files that have no chunk of the type.
+	FilesWithoutType(ctx context.Context, chunkType string) ([]string, error)
 	ListFiles(ctx context.Context) ([]string, error)
 	ListChunks(ctx context.Context) ([]StoredChunk, error)
 	ChunksByFiles(ctx context.Context, paths []string) ([]StoredChunk, error)

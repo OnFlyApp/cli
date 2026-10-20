@@ -246,6 +246,46 @@ func (p *Postgres) CommitFile(ctx context.Context, path, hash string, chunks []E
 	return tx.Commit(ctx)
 }
 
+func (p *Postgres) AddChunks(ctx context.Context, chunks []EmbeddedChunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if err := checkVectors(chunks, p.dimensions); err != nil {
+		return err
+	}
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err := insertPGChunks(ctx, tx, chunks, p.extra); err != nil {
+		return err
+	}
+	if err := bumpPostgres(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Postgres) FilesWithoutType(ctx context.Context, chunkType string) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT DISTINCT f.file_path FROM chunks f
+		WHERE NOT EXISTS (SELECT 1 FROM chunks t WHERE t.file_path = f.file_path AND t.type = $1)
+		ORDER BY f.file_path`, chunkType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		out = append(out, slashPath(path))
+	}
+	return out, rows.Err()
+}
+
 func insertPGChunks(ctx context.Context, tx pgx.Tx, chunks []EmbeddedChunk, extra map[string]int) error {
 	if len(chunks) == 0 {
 		return nil

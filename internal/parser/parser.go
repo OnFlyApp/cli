@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// FileSummaryType is the type of the synthetic chunk that stands for a whole
+// file: its path, namespace, types and the names it defines.
+const FileSummaryType = "file_summary"
+
 type Chunk struct {
 	FilePath string            `json:"file_path"`
 	Type     string            `json:"type"`

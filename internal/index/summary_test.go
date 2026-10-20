@@ -71,7 +71,7 @@ func TestSummariesStoredAndReusedAcrossReindex(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := stored(t)
-	if len(got) != 1 || got[0].Chunk.Metadata["summary"] != "Retries failed network requests." || calls.Load() != 1 {
+	if len(got) != 2 || got[0].Chunk.Metadata["summary"] != "Retries failed network requests." || calls.Load() != 1 {
 		t.Fatalf("calls=%d chunks=%+v", calls.Load(), got)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package p\n// touched\n"), 0o644); err != nil {
@@ -81,7 +81,7 @@ func TestSummariesStoredAndReusedAcrossReindex(t *testing.T) {
 		t.Fatal(err)
 	}
 	got = stored(t)
-	if calls.Load() != 1 || len(got) != 1 || got[0].Chunk.Metadata["summary"] == "" {
+	if calls.Load() != 1 || len(got) != 2 || got[0].Chunk.Metadata["summary"] == "" {
 		t.Fatalf("reindex must not call the model again: calls=%d chunks=%+v", calls.Load(), got)
 	}
 }
@@ -97,7 +97,7 @@ func TestSummaryModelFailureDoesNotFailIndexing(t *testing.T) {
 		t.Fatalf("a failing summary model must not fail the run: %v", err)
 	}
 	got := stored(t)
-	if len(got) != 1 || got[0].Chunk.Metadata["summary"] != "" {
+	if len(got) != 2 || got[0].Chunk.Metadata["summary"] != "" { // the function and the summary of its file
 		t.Fatalf("%+v", got)
 	}
 }
@@ -149,7 +149,7 @@ func TestSummaryCacheSurvivesDeletingTheDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := stored(t)
-	if calls.Load() != 1 || len(got) != 1 || got[0].Chunk.Metadata["summary"] == "" {
+	if calls.Load() != 1 || len(got) != 2 || got[0].Chunk.Metadata["summary"] == "" {
 		t.Fatalf("a rebuilt index must take the summary from the cache: calls=%d %+v", calls.Load(), got)
 	}
 	cfg.Indexer.Summaries.Model = "other"
@@ -207,10 +207,13 @@ func TestSummariesOverOpenAIChatWithConcurrency(t *testing.T) {
 	}
 	defer st.Close()
 	got, err := st.ChunksByFiles(context.Background(), []string{"a.go"})
-	if err != nil || len(got) != 6 {
+	if err != nil || len(got) != 7 { // six functions and the summary of the file
 		t.Fatalf("%+v %v", got, err)
 	}
 	for _, c := range got {
+		if c.Chunk.Type == FileSummaryType {
+			continue
+		}
 		if c.Chunk.Metadata["summary"] != "Does one thing." {
 			t.Fatalf("every chunk gets its summary: %+v", c.Chunk.Metadata)
 		}

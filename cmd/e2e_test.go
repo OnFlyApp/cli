@@ -82,7 +82,7 @@ func TestE2EGoParser(t *testing.T) {
 		t.Fatalf("%v %+v", err, chunk)
 	}
 	hits, err := store.SearchKeyword(ctx, "execute", 20, "")
-	if err != nil || len(hits) != 1 {
+	if err != nil || len(hits) != 2 { // the method and the summary of its file
 		t.Fatalf("%v %+v", err, hits)
 	}
 	cfg.Server.AtomicTools = true

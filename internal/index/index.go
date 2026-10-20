@@ -287,6 +287,9 @@ func (s *Session) Run(ctx context.Context) (Stats, error) {
 	if err := s.linkRefs(ctx, nil); err != nil {
 		return stats, err
 	}
+	if err := s.addFileSummaries(ctx); err != nil {
+		return stats, err
+	}
 	if stats.Failed > 0 {
 		if first == nil {
 			first = fmt.Errorf("index failed")
@@ -606,6 +609,10 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		}
 	}
 	fillChunkLines(body, chunks)
+	counted := len(chunks) // the summary of the file is not one of the file's chunks in the stats
+	if sum, ok := FileSummary(rel, chunks); ok && !s.opt.Lexical {
+		chunks = append(chunks, sum)
+	}
 	if s.opt.DryRun {
 		n := 0
 		for _, chunk := range chunks {
@@ -615,7 +622,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 			}
 			n += count
 		}
-		return FileResult{Chunks: len(chunks), Tokens: n}, nil
+		return FileResult{Chunks: counted, Tokens: n}, nil
 	}
 	var embedded []vectorstore.EmbeddedChunk
 	reused := 0
@@ -651,7 +658,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 	if err := s.store.CommitFile(ctx, rel, stored, embedded); err != nil {
 		return FileResult{}, fmt.Errorf("save %s: %w", rel, err)
 	}
-	return FileResult{Chunks: len(chunks), Reused: reused, Lexical: lexical}, nil
+	return FileResult{Chunks: counted, Reused: reused, Lexical: lexical}, nil
 }
 
 func (s *Session) embedFile(ctx context.Context, rel string, chunks []parser.Chunk, prev map[string][]float32) ([]vectorstore.EmbeddedChunk, int, error) {

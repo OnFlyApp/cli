@@ -199,6 +199,12 @@ func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	if s.SummaryKeyword && len(g.Terms) > 0 {
 		g.SummaryWords = s.wordMatchesWith(ctx, g.Terms, pool, r.Workspace, s.Store.SearchSummary, g.Weights)
 	}
+	if r.LexicalOnly {
+		// An index with no vectors has no file summaries; one that has them is
+		// searched here as if it did not, so the two can be compared.
+		noSummary := func(c parser.Chunk) bool { return c.Type != parser.FileSummaryType }
+		g.Keyword, g.Words, g.SummaryWords = filterChunks(g.Keyword, noSummary), filterChunks(g.Words, noSummary), filterChunks(g.SummaryWords, noSummary)
+	}
 	if filtered {
 		g.Semantic, g.Keyword, g.Words = filterChunks(g.Semantic, keep), filterChunks(g.Keyword, keep), filterChunks(g.Words, keep)
 		g.Alt, g.SummaryWords = filterChunks(g.Alt, keep), filterChunks(g.SummaryWords, keep)
@@ -221,14 +227,14 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 			lists, weights = append(lists, f), append(weights, p.Field*p.Keyword)
 		}
 	}
-	var typeW func(parser.Chunk) float64
-	if len(s.TypeWeights) > 0 {
-		typeW = func(c parser.Chunk) float64 {
-			if w, ok := s.TypeWeights[strings.ToLower(c.Type)]; ok {
-				return w
-			}
-			return 1
+	typeW := func(c parser.Chunk) float64 {
+		if w, ok := s.TypeWeights[strings.ToLower(c.Type)]; ok {
+			return w
 		}
+		if c.Type == parser.FileSummaryType {
+			return summaryWeight
+		}
+		return 1
 	}
 	ranked := fuseTyped(p.RRFK, weights, typeW, lists...)
 	if p.Section != 1 && p.Section > 0 {

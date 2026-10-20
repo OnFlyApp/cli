@@ -415,6 +415,46 @@ func (s *SQLite) CommitFile(ctx context.Context, path, hash string, chunks []Emb
 	return tx.Commit()
 }
 
+func (s *SQLite) AddChunks(ctx context.Context, chunks []EmbeddedChunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	if err := checkVectors(chunks, s.dimensions); err != nil {
+		return err
+	}
+	tx, err := s.conn().BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := insertSQLiteChunks(ctx, tx, chunks, s.extra); err != nil {
+		return err
+	}
+	if err := bumpSQLite(ctx, tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *SQLite) FilesWithoutType(ctx context.Context, chunkType string) ([]string, error) {
+	rows, err := s.conn().QueryContext(ctx, `SELECT DISTINCT f.file_path FROM chunk_meta f
+		WHERE NOT EXISTS (SELECT 1 FROM chunk_meta t WHERE t.file_path = f.file_path AND t.type = ?)
+		ORDER BY f.file_path`, chunkType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, err
+		}
+		out = append(out, path)
+	}
+	return out, rows.Err()
+}
+
 func insertSQLiteChunks(ctx context.Context, tx *sql.Tx, chunks []EmbeddedChunk, extra map[string]int) error {
 	if len(chunks) == 0 {
 		return nil

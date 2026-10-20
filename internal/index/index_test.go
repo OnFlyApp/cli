@@ -706,7 +706,7 @@ func TestReindexEmbedsOnlyChangedChunks(t *testing.T) {
 	if _, err := Run(context.Background(), cfg, nil, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if texts.Load() != 2 {
+	if texts.Load() != 3 { // two functions and the summary of the file
 		t.Fatalf("run 1 embedded %d", texts.Load())
 	}
 	write("func beta2() {}")
@@ -714,13 +714,14 @@ func TestReindexEmbedsOnlyChangedChunks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if texts.Load() != 3 || stats.Reused != 1 {
+	if texts.Load() != 4 || stats.Reused != 2 { // only beta2: alpha and the summary (same names) are reused
+
 		t.Fatalf("run 2 embedded total %d, reused %d", texts.Load(), stats.Reused)
 	}
 	store := openStore(t, cfg)
 	defer store.Close()
 	got, err := store.SearchKeyword(context.Background(), "alpha", 10, "")
-	if err != nil || len(got) != 1 {
+	if err != nil || len(got) != 2 { // the function and the summary of its file
 		t.Fatalf("keyword = %+v %v", got, err)
 	}
 }
@@ -853,7 +854,7 @@ func TestUnreachableEmbedderStoresChunksWithoutVectorsUntilItReturns(t *testing.
 	}
 	store = openStore(t, cfg)
 	defer store.Close()
-	if v, _ := store.VectorsByFile(context.Background(), "user.go"); len(v) != 1 {
+	if v, _ := store.VectorsByFile(context.Background(), "user.go"); len(v) != 2 {
 		t.Fatalf("vectors were not added: %v", v)
 	}
 	if stats, err = Run(context.Background(), cfg, nil, Options{}); err != nil || stats.Skipped != 1 {
@@ -940,5 +941,26 @@ func TestEmbedChunksSplitsABatchTheServerTimesOutOn(t *testing.T) {
 	}
 	if _, err := embedChunks(context.Background(), &slotEmb{limit: 0}, chunks[:2], 2, false); err == nil {
 		t.Fatal("a text the server cannot embed at all is still an error")
+	}
+}
+
+func TestFileSummaryNamesTheFileItsTypesAndWhatItDefines(t *testing.T) {
+	chunks := []parser.Chunk{
+		{Type: "class", Content: "class Worker {}", Metadata: map[string]string{"name": "Worker", "namespace": "Illuminate\\Queue"}},
+		{Type: "method", Content: "function run() {}", Metadata: map[string]string{"name": "run"}},
+		{Type: "method", Content: "function run() {}", Metadata: map[string]string{"name": "run"}},
+		{Type: "method", Content: "function handleJobException() {}", Metadata: map[string]string{"name": "handleJobException"}},
+		{Type: "property", Content: "$x", Metadata: map[string]string{"name": "x"}},
+	}
+	sum, ok := FileSummary("src/Queue/Worker.php", chunks)
+	want := "File src/Queue/Worker.php\nNamespace: Illuminate\\Queue\nTypes: Worker\nDefines: run, handleJobException"
+	if !ok || sum.Content != want || sum.Type != FileSummaryType || sum.FilePath != "src/Queue/Worker.php" {
+		t.Fatalf("%v %q", ok, sum.Content)
+	}
+	if _, ok := FileSummary("README.md", []parser.Chunk{{Type: "section", Content: "# x", Metadata: map[string]string{"name": "x"}}}); ok {
+		t.Fatal("a document has no summary")
+	}
+	if _, ok := FileSummary("a.go", append(chunks, sum)); ok {
+		t.Fatal("a file that has its summary does not get another")
 	}
 }
