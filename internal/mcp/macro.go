@@ -55,6 +55,11 @@ func (h *tools) finishMacro(ctx context.Context, tool, target string, raw int, h
 }
 
 func signature(c parser.Chunk) string {
+	// A later part of a long function starts mid-body, so its first line is not a
+	// signature: name the function and the part.
+	if part := c.Metadata["part"]; part != "" && !strings.HasPrefix(part, "1/") && c.Metadata["name"] != "" {
+		return clip(fmt.Sprintf("%s (part %s)", c.Metadata["name"], part), 120)
+	}
 	if sig := c.Metadata["signature"]; sig != "" {
 		return clip(sig, 120)
 	}

@@ -133,3 +133,30 @@ func TestPHPPropertyChainIsACallOnAValue(t *testing.T) {
 		t.Fatal("without importing the class or sharing its namespace it is not")
 	}
 }
+
+func TestPHPPropertyTypeDecidesBeforeTheNamespace(t *testing.T) {
+	src := "<?php\nnamespace App\\Queue;\nuse App\\Cache\\RateLimiter;\nclass RateLimited {\n    protected $limiter;\n    function __construct() { $this->limiter = Container::make(RateLimiter::class); }\n}\n"
+	call := "return $this->limiter->tooManyAttempts($key, 1);"
+	caller := ch("src/Queue/RateLimited.php", call, map[string]string{"name": "handleJob", "namespace": "App\\Queue"})
+	cache := ch("src/Cache/RateLimiter.php", "", map[string]string{"name": "tooManyAttempts", "receiver": "App\\Cache\\RateLimiter", "namespace": "App\\Cache"})
+	neighbour := ch("src/Queue/RateLimitedWithRedis.php", "", map[string]string{"name": "tooManyAttempts", "receiver": "App\\Queue\\RateLimitedWithRedis", "namespace": "App\\Queue"})
+	if !Accepts(src, caller, cache) {
+		t.Fatal("the property holds a RateLimiter")
+	}
+	if Accepts(src, caller, neighbour) {
+		t.Fatal("a class in the same namespace is not what the property holds")
+	}
+	// Without a type the namespace still counts, as before.
+	untyped := "<?php\nnamespace App\\Queue;\nclass A { protected $limiter; }\n"
+	if !Accepts(untyped, caller, neighbour) {
+		t.Fatal("an untyped property keeps the namespace rule")
+	}
+	for name, typed := range map[string]string{
+		"docblock": "<?php\nnamespace App\\Queue;\nuse App\\Cache\\RateLimiter;\nclass A {\n    /**\n     * The limiter.\n     *\n     * @var \\App\\Cache\\RateLimiter\n     */\n    protected $limiter;\n}\n",
+		"promoted": "<?php\nnamespace App\\Queue;\nuse App\\Cache\\RateLimiter;\nclass A { function __construct(protected RateLimiter $limiter) {} }\n",
+	} {
+		if !Accepts(typed, caller, cache) || Accepts(typed, caller, neighbour) {
+			t.Fatalf("%s: the declared type decides", name)
+		}
+	}
+}

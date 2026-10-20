@@ -142,12 +142,10 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	if strings.Count(string(src), "\n")+1 <= smallFile {
 		over = math.MaxInt // one handler or calculator: its body is the answer
 	}
-	full := skeleton.CollapseNumbered(string(src), spans, focus, over)
-	sk, focusText := cutToBudget(full, h.maxTokens), ""
-	if focus != "" && sk != full {
-		// The expanded body lies past the point where a long file's skeleton is
-		// cut, so it would be dropped: collapse everything and give the body apart.
-		sk = cutToBudget(skeleton.CollapseNumbered(string(src), spans, "", over), h.maxTokens)
+	// The body asked for comes first and apart: in a long file the skeleton is cut
+	// to the budget, and a body expanded inside it can fall past the cut.
+	sk, focusText := cutToBudget(skeleton.CollapseNumbered(string(src), spans, "", over), h.maxTokens), ""
+	if focus != "" && over != math.MaxInt {
 		focusText = focusBody(string(src), spans, focus, h.maxTokens)
 	}
 	srcs := h.newSources()
@@ -157,10 +155,10 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	if note != "" {
 		b.WriteString("> " + note + "\n")
 	}
-	b.WriteString("## skeleton\n" + sk + "\n")
 	if focusText != "" {
 		b.WriteString("## " + focus + "\n" + focusText + "\n")
 	}
+	b.WriteString("## skeleton\n" + sk + "\n")
 	if calls != "" {
 		b.WriteString("## calls\n" + calls)
 	}

@@ -153,7 +153,7 @@ func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int,
 		for _, t := range frontier {
 			refs := refsBy[t.name]
 			if t.file != "" {
-				refs = attributedWith(defsBy[t.name], t, refs)
+				refs = attributedWith(srcs, defsBy[t.name], t, refs)
 				refs = resolvable(srcs, defsBy[t.name], t, refs)
 			}
 			for _, c := range refs {
@@ -204,13 +204,16 @@ func resolvable(srcs *sources, defs []parser.Chunk, t definition, refs []parser.
 	return out
 }
 
-func attributedWith(defs []parser.Chunk, t definition, refs []parser.Chunk) []parser.Chunk {
+// attributedWith gives a call to the definition nearest its file, unless the
+// language's rules say the call cannot be to that one: a property typed as
+// Cache\RateLimiter is not a call to the RateLimitedWithRedis next to it.
+func attributedWith(srcs *sources, defs []parser.Chunk, t definition, refs []parser.Chunk) []parser.Chunk {
 	var out []parser.Chunk
 	for _, c := range refs {
 		own := pathCloseness(c.FilePath, t.file)
 		keep := true
 		for _, d := range defs {
-			if d.FilePath != t.file && pathCloseness(c.FilePath, d.FilePath) > own {
+			if d.FilePath != t.file && pathCloseness(c.FilePath, d.FilePath) > own && srcs.accepts(c, d) {
 				keep = false
 				break
 			}

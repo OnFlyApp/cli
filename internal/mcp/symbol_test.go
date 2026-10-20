@@ -187,3 +187,59 @@ func TestXrayAmbiguousNameCarriesTheCodeOfEachDefinition(t *testing.T) {
 		t.Fatalf("with two definitions each comes with its code:\n%s", out)
 	}
 }
+
+func TestXrayGivesTheNamedBodyBeforeTheSkeleton(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
+	h := bigFixture(t)
+	for _, in := range []xrayIn{{Target: "big.go:Second"}, {Target: "Second"}, {Target: "pkg/big.go", FocusSymbol: "Second"}} {
+		res, _, err := h.runXray(context.Background(), nil, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := resultText(res)
+		body, skel := strings.Index(got, "21| \tb := b + 1"), strings.Index(got, "## skeleton")
+		if body < 0 || skel < 0 || body > skel {
+			t.Fatalf("%+v: the body of Second must come before the skeleton:\n%s", in, got)
+		}
+		if strings.Count(got, "21| \tb := b + 1") != 1 || !strings.Contains(got, `focus_symbol="Second"`) {
+			t.Fatalf("%+v: the skeleton keeps Second collapsed so the body is given once:\n%s", in, got)
+		}
+	}
+}
+
+func TestXrayExpandsEverySymbolOfTheSameName(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
+	root := t.TempDir()
+	method := func(recv, v string) string {
+		s := "func (" + recv + ") Run() int {\n"
+		for i := 0; i < 13; i++ {
+			s += "\t" + v + " := " + v + " + 1\n"
+		}
+		return s + "\treturn " + v + "\n}\n"
+	}
+	src := "package twin\n\n" + method("a A", "x") + "\n" + method("b B", "y")
+	if err := os.WriteFile(filepath.Join(root, "twin.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chunk := func(start, end int) vectorstore.EmbeddedChunk {
+		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "twin.go", Type: "method", Content: strings.Join(strings.Split(src, "\n")[start-1:end], "\n"),
+			Metadata: map[string]string{"name": "Run", "start_line": itoa(start), "end_line": itoa(end)}}, Vector: []float32{1, 0, 0, 1}}
+	}
+	store := openTestStore(t)
+	if err := saveHashed(store, root, []vectorstore.EmbeddedChunk{chunk(3, 18), chunk(20, 35)}); err != nil {
+		t.Fatal(err)
+	}
+	h := &tools{root: root, store: store, maxTokens: 8192}
+	res, _, err := h.runXray(context.Background(), nil, xrayIn{Target: "twin.go", FocusSymbol: "Run"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := resultText(res)
+	for _, want := range []string{"4| \tx := x + 1", "21| \ty := y + 1"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("both methods called Run must be expanded, lost %q:\n%s", want, got)
+		}
+	}
+}

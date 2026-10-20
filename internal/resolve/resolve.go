@@ -328,6 +328,47 @@ func phpRelated(def, caller parser.Chunk, uses map[string]string, ns string) boo
 	return ns != "" && def.Metadata["namespace"] == ns
 }
 
+var propTypeCache = map[string]map[string][]string{}
+
+// phpPropertyTypes lists the class names the file gives to $this->prop: a
+// docblock @var, a typed or promoted property, a constructor parameter of that
+// name, or the class an assignment makes or resolves (new Foo, Foo::class).
+// None means the file does not say.
+func phpPropertyTypes(src, prop string) []string {
+	cacheMu.Lock()
+	t, ok := propTypeCache[src][prop]
+	cacheMu.Unlock()
+	if ok {
+		return t
+	}
+	q := regexp.QuoteMeta(prop)
+	var out []string
+	for _, pat := range []string{
+		`@var\s+\??([\\\w]+)[^\n]*\n(?:\s*\*[^\n]*\n)*\s*\*/\s*\n\s*(?:(?:public|protected|private|static|readonly)\s+)+[^\n$;]*\$` + q + `\b`,
+		`\??([A-Z\\][\\\w]*)\s+\$` + q + `\b`,
+		`\$this->` + q + `\s*=[^;]*?(?:\bnew\s+\\?([\\\w]+)|([\\\w]+)::class)`,
+	} {
+		re := cachedRegexp("phpprop|"+pat, func() string { return pat })
+		for _, m := range re.FindAllStringSubmatch(src, -1) {
+			for _, g := range m[1:] {
+				if g != "" {
+					out = append(out, g)
+				}
+			}
+		}
+	}
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if len(propTypeCache) >= cacheLimit {
+		propTypeCache = map[string]map[string][]string{}
+	}
+	if propTypeCache[src] == nil {
+		propTypeCache[src] = map[string][]string{}
+	}
+	propTypeCache[src][prop] = out
+	return out
+}
+
 func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 	uses := cachedUses(src)
 	ns := caller.Metadata["namespace"]
@@ -352,6 +393,18 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 				return true
 			}
 		case strings.HasPrefix(qual, "$") || qual == "self" || qual == "static" || qual == "parent" || m.arrow:
+			// $this->limiter->tooManyAttempts(): when the file says what the property
+			// holds, that class decides, not a neighbour in the same namespace.
+			if types := phpPropertyTypes(src, qual); m.arrow && !strings.HasPrefix(qual, "$") && len(types) > 0 {
+				if isMethod {
+					for _, t := range types {
+						if phpClass(t, uses, ns) == defClass {
+							return true
+						}
+					}
+				}
+				continue
+			}
 			if isMethod && phpRelated(def, caller, uses, ns) && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
 				return true
 			}

@@ -196,3 +196,26 @@ func TestRelatedListsCallersAndTests(t *testing.T) {
 		t.Fatalf("tests %+v", tests)
 	}
 }
+
+func TestAttributedWithLetsTheLanguageOverrideCloseness(t *testing.T) {
+	root := t.TempDir()
+	rel := "src/Queue/RateLimited.php"
+	if err := os.MkdirAll(filepath.Join(root, "src", "Queue"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := "<?php\nnamespace App\\Queue;\nuse App\\Cache\\RateLimiter;\nclass RateLimited {\n    protected $limiter;\n    function __construct() { $this->limiter = make(RateLimiter::class); }\n}\n"
+	if err := os.WriteFile(filepath.Join(root, rel), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	caller := parser.Chunk{FilePath: rel, Content: "return $this->limiter->tooManyAttempts($k, 1);", Metadata: map[string]string{"name": "handleJob", "namespace": "App\\Queue"}}
+	cache := parser.Chunk{FilePath: "src/Cache/RateLimiter.php", Metadata: map[string]string{"name": "tooManyAttempts", "receiver": "App\\Cache\\RateLimiter", "namespace": "App\\Cache"}}
+	next := parser.Chunk{FilePath: "src/Queue/RateLimitedWithRedis.php", Metadata: map[string]string{"name": "tooManyAttempts", "receiver": "App\\Queue\\RateLimitedWithRedis", "namespace": "App\\Queue"}}
+	srcs := &sources{root: root, text: map[string]string{}}
+	defs := []parser.Chunk{cache, next}
+	if got := attributedWith(srcs, defs, definition{"tooManyAttempts", cache.FilePath}, []parser.Chunk{caller}); len(got) != 1 {
+		t.Fatalf("the property is a Cache\\RateLimiter, so the call belongs to it though the other definition is nearer: %v", got)
+	}
+	if got := attributedWith(srcs, defs, definition{"tooManyAttempts", next.FilePath}, []parser.Chunk{caller}); len(got) != 1 {
+		t.Fatalf("closeness alone would also accept it here, the resolver step rejects it later: %v", got)
+	}
+}
