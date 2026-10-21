@@ -323,11 +323,11 @@ func TestXrayFocusBodySurvivesTheSkeletonBudget(t *testing.T) {
 
 func TestSignatureOfALaterPartNamesTheFunction(t *testing.T) {
 	later := parser.Chunk{Content: "laimInfo: gen(),\n\twant: 1,", Metadata: map[string]string{"name": "TestPrepare", "part": "3/3"}}
-	if got := signature(later); got != "TestPrepare (part 3/3)" {
+	if got := signature(later, 120); got != "TestPrepare (part 3/3)" {
 		t.Fatalf("%q", got)
 	}
 	first := parser.Chunk{Content: "func TestPrepare(t *testing.T) {\n\tx := 1", Metadata: map[string]string{"name": "TestPrepare", "part": "1/3"}}
-	if got := signature(first); got != "func TestPrepare(t *testing.T) {" {
+	if got := signature(first, 120); got != "func TestPrepare(t *testing.T) {" {
 		t.Fatalf("%q", got)
 	}
 }

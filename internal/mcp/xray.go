@@ -19,15 +19,34 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// smallFile is the length in lines under which a file is shown whole.
+// smallFile is the length in lines under which a file is shown whole, when
+// xray.whole_file_lines is not set.
 var smallFile = 120
 
+// xrayLimits are the limits of the output of onfly_xray, from the xray: section
+// of the configuration.
+type xrayLimits struct {
+	signatureClip, wholeFile, collapseOver, edges, previewCallers, helpers, dirEntries int
+}
+
+func (h *tools) lim() xrayLimits {
+	x := h.cfg.Xray
+	pick := func(v, d int) int {
+		if v > 0 {
+			return v
+		}
+		return d
+	}
+	return xrayLimits{
+		signatureClip: pick(x.SignatureClip, 120), wholeFile: pick(x.WholeFileLines, smallFile),
+		collapseOver: pick(x.CollapseOver, 10), edges: pick(x.MaxEdges, 15), previewCallers: pick(x.PreviewCallers, 3),
+		helpers: pick(x.MaxHelpers, 2), dirEntries: pick(x.MaxDirEntries, 40),
+	}
+}
+
 const (
-	collapseOver  = 10
-	maxXrayEdges  = 15
-	maxXrayNames  = 20
-	maxXrayRefs   = 100
-	maxDirEntries = 40
+	maxXrayNames = 20
+	maxXrayRefs  = 100
 
 	baselineDepTokens = 150
 	bytesPerToken     = 4
@@ -142,8 +161,9 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 			spans = append(spans, skeleton.Span{Start: s, End: e, Name: c.Metadata["name"]})
 		}
 	}
-	over := collapseOver
-	if strings.Count(string(src), "\n")+1 <= smallFile {
+	lim := h.lim()
+	over := lim.collapseOver
+	if strings.Count(string(src), "\n")+1 <= lim.wholeFile {
 		over = math.MaxInt // one handler or calculator: its body is the answer
 	}
 	// The body asked for comes first and apart: in a long file the skeleton is cut
@@ -217,7 +237,7 @@ func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chu
 	var shown []parser.Chunk
 	for _, r := range refs {
 		key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
-		if r.FilePath == rel || seen[key] || len(shown) >= maxXrayEdges || vectorstore.IsProse(r.FilePath) {
+		if r.FilePath == rel || seen[key] || len(shown) >= h.lim().edges || vectorstore.IsProse(r.FilePath) {
 			continue
 		}
 		seen[key] = true
@@ -229,7 +249,7 @@ func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chu
 		ups = h.callersOfCallers(ctx, shown, rel, srcs)
 	}
 	for _, r := range shown {
-		fmt.Fprintf(&calledBy, "- %s [%s]%s\n", signature(r), location(r), upPreview(ups[definition{r.Metadata["name"], r.FilePath}]))
+		fmt.Fprintf(&calledBy, "- %s [%s]%s\n", signature(r, h.lim().signatureClip), location(r), upPreview(ups[definition{r.Metadata["name"], r.FilePath}], h.lim().previewCallers))
 	}
 	return calls.String(), calledBy.String(), len(deps)
 }
@@ -239,14 +259,14 @@ func (h *tools) writeCalls(ctx context.Context, w *strings.Builder, rel string, 
 	n := 0
 	for _, ref := range src.order {
 		cands := defs[ref]
-		if len(cands) == 0 || n >= maxXrayEdges {
+		if len(cands) == 0 || n >= h.lim().edges {
 			continue
 		}
 		d := nearestDefinition(cands, src.by[ref][0])
 		if d.FilePath == rel || vectorstore.IsProse(d.FilePath) {
 			continue
 		}
-		fmt.Fprintf(w, "- %s [%s]\n", signature(d), location(d))
+		fmt.Fprintf(w, "- %s [%s]\n", signature(d, h.lim().signatureClip), location(d))
 		deps[d.FilePath] = true
 		n++
 	}
@@ -302,8 +322,8 @@ func (h *tools) xrayDir(ctx context.Context, rel string, files []string) (*sdkmc
 		}
 	}
 	shown := under
-	if len(shown) > maxDirEntries {
-		shown = shown[:maxDirEntries]
+	if limit := h.lim().dirEntries; len(shown) > limit {
+		shown = shown[:limit]
 	}
 	rows, err := h.store.ChunksByFiles(ctx, shown)
 	if err != nil {
@@ -463,8 +483,6 @@ func closestSymbols(spans []skeleton.Span, name string) ([]string, bool) {
 	return nil, false
 }
 
-const maxHelpers = 2
-
 // focusSections is the body of each function asked for, each under its name,
 // then, in the room that is left, the longest helpers of the same file that
 // those functions call: they are collapsed in the skeleton, and the next call
@@ -481,7 +499,7 @@ func (h *tools) focusSections(src string, spans []skeleton.Span, chunks []parser
 		n, _ := tokens.Count(body)
 		used += n
 	}
-	for _, helper := range sameFileCallees(spans, chunks, names) {
+	for _, helper := range sameFileCallees(spans, chunks, names, h.lim()) {
 		body := focusBody(src, spans, helper, h.maxTokens)
 		n, err := tokens.Count(body)
 		if body == "" || err != nil || used+n > h.maxTokens {
@@ -495,10 +513,10 @@ func (h *tools) focusSections(src string, spans []skeleton.Span, chunks []parser
 
 // sameFileCallees lists the functions of the file that the named ones call and
 // that the skeleton collapses, in the order the first call appears.
-func sameFileCallees(spans []skeleton.Span, chunks []parser.Chunk, names []string) []string {
+func sameFileCallees(spans []skeleton.Span, chunks []parser.Chunk, names []string, lim xrayLimits) []string {
 	long := map[string]bool{}
 	for _, sp := range spans {
-		if sp.End-sp.Start+1 > collapseOver {
+		if sp.End-sp.Start+1 > lim.collapseOver {
 			long[sp.Name] = true
 		}
 	}
@@ -528,7 +546,7 @@ func sameFileCallees(spans []skeleton.Span, chunks []parser.Chunk, names []strin
 	sort.SliceStable(found, func(i, j int) bool { return found[i].at < found[j].at })
 	var out []string
 	for _, f := range found {
-		if len(out) == maxHelpers {
+		if len(out) == lim.helpers {
 			break
 		}
 		out = append(out, f.name)
@@ -536,10 +554,7 @@ func sameFileCallees(spans []skeleton.Span, chunks []parser.Chunk, names []strin
 	return out
 }
 
-const (
-	maxUpCallers = 3 // a caller with more callers than this is an interface, not an entrypoint
-	maxUpNames   = 3
-)
+const maxUpNames = 3
 
 // callersOfCallers finds, in two queries, who calls each of the callers shown, so
 // that the entrypoint two hops up can be named on the caller's line. Test
@@ -575,8 +590,8 @@ func (h *tools) callersOfCallers(ctx context.Context, callers []parser.Chunk, re
 
 // upPreview is " <- Handler::handle (Handler.php)" for a caller with one to
 // three callers of its own, and nothing for any other.
-func upPreview(ups []parser.Chunk) string {
-	if len(ups) == 0 || len(ups) > maxUpCallers {
+func upPreview(ups []parser.Chunk, most int) string {
+	if len(ups) == 0 || len(ups) > most {
 		return ""
 	}
 	var parts []string

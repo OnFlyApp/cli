@@ -156,11 +156,11 @@ func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, 
 		n := 0
 		for _, r := range refs {
 			key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
-			if seen[key] || n >= maxXrayEdges || vectorstore.IsProse(r.FilePath) {
+			if seen[key] || n >= h.lim().edges || vectorstore.IsProse(r.FilePath) {
 				continue
 			}
 			seen[key] = true
-			fmt.Fprintf(&calledBy, "- %s [%s]\n", signature(r), location(r))
+			fmt.Fprintf(&calledBy, "- %s [%s]\n", signature(r, h.lim().signatureClip), location(r))
 			deps[r.FilePath] = true
 			n++
 		}
@@ -171,7 +171,7 @@ func (h *tools) definitionBlock(ctx context.Context, d parser.Chunk, depth int, 
 		code = clipLines(d.Content, maxDefinitionCode) + "\n"
 	}
 	var out strings.Builder
-	fmt.Fprintf(&out, "### %s\n%s\n%s", location(d), signature(d), code)
+	fmt.Fprintf(&out, "### %s\n%s\n%s", location(d), signature(d, h.lim().signatureClip), code)
 	if calls.Len() > 0 {
 		out.WriteString("calls:\n" + calls.String())
 	}

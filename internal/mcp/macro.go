@@ -54,16 +54,16 @@ func (h *tools) finishMacro(ctx context.Context, tool, target string, raw int, h
 	return &sdkmcp.CallToolResult{Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: text}}}
 }
 
-func signature(c parser.Chunk) string {
+func signature(c parser.Chunk, clipAt int) string {
 	// A later part of a long function starts mid-body, so its first line is not a
 	// signature: name the function and the part.
 	if part := c.Metadata["part"]; part != "" && !strings.HasPrefix(part, "1/") && c.Metadata["name"] != "" {
-		return clip(fmt.Sprintf("%s (part %s)", c.Metadata["name"], part), 120)
+		return clip(fmt.Sprintf("%s (part %s)", c.Metadata["name"], part), clipAt)
 	}
 	if sig := c.Metadata["signature"]; sig != "" {
-		return clip(sig, 120)
+		return clip(sig, clipAt)
 	}
-	return clip(skeleton.Signature(c.Content), 120)
+	return clip(skeleton.Signature(c.Content), clipAt)
 }
 
 func location(c parser.Chunk) string {

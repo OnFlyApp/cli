@@ -229,7 +229,7 @@ func (h *tools) implementationsBlock(ctx context.Context, chunks []parser.Chunk)
 			if im.how == "methods" {
 				note = "likely: has all its methods"
 			}
-			fmt.Fprintf(&b, "- %s [%s] (%s)\n", signature(im.chunk), location(im.chunk), note)
+			fmt.Fprintf(&b, "- %s [%s] (%s)\n", signature(im.chunk, h.lim().signatureClip), location(im.chunk), note)
 		}
 	}
 	return b.String()

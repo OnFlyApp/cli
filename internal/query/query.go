@@ -40,6 +40,18 @@ func CandidatePool(limit int) int {
 	return max(ClampLimit(limit), keywordPool)
 }
 
+// candidatePool is CandidatePool with search.candidate_pool.
+func (s *Searcher) candidatePool(limit int) int {
+	return max(ClampLimit(limit), orDefaultInt(s.Pool, keywordPool))
+}
+
+func orDefaultInt(v, d int) int {
+	if v > 0 {
+		return v
+	}
+	return d
+}
+
 func Scope(def, arg string) string {
 	switch arg {
 	case "":
@@ -66,6 +78,9 @@ type Searcher struct {
 	SummaryWordWeight             *float64
 	SectionWeight                 *float64
 	TypeWeights                   map[string]float64
+	FocusSemantic, FocusKeyword   *float64
+	SummaryWeight                 *float64
+	SummarySymbols, Pool          int
 	Root                          string
 	Expander                      *Expander
 }
@@ -244,6 +259,8 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	s.SummaryKeyword = cfg.Indexer.Summaries.Provider != ""
 	s.AltWeight, s.SummaryWordWeight = cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
 	s.SectionWeight = cfg.Search.SectionWeight
+	s.FocusSemantic, s.FocusKeyword, s.SummaryWeight = cfg.Search.FocusSemanticWeight, cfg.Search.FocusKeywordWeight, cfg.Search.FileSummaryWeight
+	s.SummarySymbols, s.Pool = cfg.Search.SummarySymbols, cfg.Search.CandidatePool
 	if len(cfg.Search.TypeWeights) > 0 {
 		s.TypeWeights = make(map[string]float64, len(cfg.Search.TypeWeights))
 		for t, w := range cfg.Search.TypeWeights {

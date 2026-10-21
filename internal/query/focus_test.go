@@ -146,3 +146,18 @@ func TestCoveringFilesFindsThePathThatNamesTheQuestion(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchConfigOverridesTheFocusWeightsAndThePool(t *testing.T) {
+	s := &Searcher{}
+	if p := s.focusParams(); p.Semantic != focusSemantic || p.Keyword != focusLexical {
+		t.Fatalf("the defaults: %+v", p)
+	}
+	sem, kw := 3.0, 0.25
+	s = &Searcher{FocusSemantic: &sem, FocusKeyword: &kw, Pool: 30}
+	if p := s.focusParams(); p.Semantic != 3 || p.Keyword != 0.25 {
+		t.Fatalf("%+v", p)
+	}
+	if s.candidatePool(5) != 30 || s.candidatePool(40) != 40 || (&Searcher{}).candidatePool(5) != keywordPool {
+		t.Fatal("the pool is the larger of the limit and search.candidate_pool")
+	}
+}

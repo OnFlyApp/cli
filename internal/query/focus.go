@@ -33,6 +33,22 @@ func FocusParams(p Params) Params {
 	return p
 }
 
+// focusParams is FocusParams with search.focus_semantic_weight and
+// search.focus_keyword_weight.
+func (s *Searcher) focusParams() Params {
+	p := FocusParams(s.Params())
+	if s.FocusSemantic != nil {
+		p.Semantic = *s.FocusSemantic
+		if p.Alt > 0 {
+			p.Alt = *s.FocusSemantic
+		}
+	}
+	if s.FocusKeyword != nil {
+		p.Keyword = *s.FocusKeyword
+	}
+	return p
+}
+
 // RunFocus is Run with FocusParams, and with tiny declarations that the query
 // does not name moved behind everything else.
 func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, error) {
@@ -67,7 +83,7 @@ func (s *Searcher) focusRank(ctx context.Context, r Request) ([]parser.Chunk, *G
 	if err != nil {
 		return nil, nil, err
 	}
-	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, FocusParams(s.Params())), g.Terms), g.Terms)
+	ranked := demoteTests(demoteBoilerplate(s.Fuse(g, s.focusParams()), g.Terms), g.Terms)
 	// Cohesion rewards a file that holds the question's words anywhere in its
 	// text. That is the evidence a lexical index has; next to a vector list it
 	// favours big files that hold every common word over the file that is about

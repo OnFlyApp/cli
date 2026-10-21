@@ -100,7 +100,7 @@ var errLexicalOnly = errors.New("query: lexical only")
 
 func (s *Searcher) Gather(ctx context.Context, r Request) (*Gathered, error) {
 	var only map[string]bool
-	pool := CandidatePool(r.Limit)
+	pool := s.candidatePool(r.Limit)
 	if r.Path != "" && !doublestar.ValidatePattern(r.Path) {
 		return nil, fmt.Errorf("invalid path pattern %q", r.Path)
 	}
@@ -232,7 +232,10 @@ func (s *Searcher) Fuse(g *Gathered, p Params) []parser.Chunk {
 			return w
 		}
 		if c.Type == parser.FileSummaryType {
-			return summaryWeight
+			if s.SummaryWeight != nil {
+				return *s.SummaryWeight
+			}
+			return defaultSummaryWeight
 		}
 		return 1
 	}

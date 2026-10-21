@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	// summarySymbols is how many symbols of a file stand in for its summary: more
-	// than one takes the places of other files' matches (Hugo 0.57 to 0.29 at 3).
-	summarySymbols = 1
-	// summaryWeight is the weight of a summary next to a symbol in the fusion. A
+	// defaultSummarySymbols is how many symbols of a file stand in for its summary:
+	// more than one takes the places of other files' matches (Hugo 0.57 to 0.29 at 3).
+	defaultSummarySymbols = 1
+	// defaultSummaryWeight is the weight of a summary next to a symbol in the fusion. A
 	// summary says only that the file is about the question; 1 lets the summaries
 	// of wrong files outrank a right symbol, 0.5 loses what they add on the
 	// monorepo.
-	summaryWeight = 0.7
+	defaultSummaryWeight = 0.7
 )
 
 // expandFileSummaries replaces each file summary in the ranking by symbols of
@@ -43,6 +43,7 @@ func (s *Searcher) expandFileSummaries(ctx context.Context, query string, ranked
 			byFile[c.FilePath] = append(byFile[c.FilePath], c)
 		}
 	}
+	most := orDefaultInt(s.SummarySymbols, defaultSummarySymbols)
 	placed := map[string]bool{}
 	out := make([]parser.Chunk, 0, len(ranked))
 	add := func(c parser.Chunk) {
@@ -58,7 +59,7 @@ func (s *Searcher) expandFileSummaries(ctx context.Context, query string, ranked
 		}
 		taken := 0
 		for _, own := range byFile[c.FilePath] {
-			if taken == summarySymbols {
+			if taken == most {
 				break
 			}
 			if isCallable(own) && !placed[ChunkKey(own)] {
@@ -66,7 +67,7 @@ func (s *Searcher) expandFileSummaries(ctx context.Context, query string, ranked
 				taken++
 			}
 		}
-		if taken == summarySymbols {
+		if taken == most {
 			continue
 		}
 		rows, err := s.Store.ChunksByFiles(ctx, []string{c.FilePath})
@@ -82,7 +83,7 @@ func (s *Searcher) expandFileSummaries(ctx context.Context, query string, ranked
 		scores := s.scoreAgainst(ctx, query, c.FilePath, fill)
 		sort.SliceStable(fill, func(i, j int) bool { return scores[ChunkKey(fill[i])] > scores[ChunkKey(fill[j])] })
 		for _, f := range fill {
-			if taken == summarySymbols {
+			if taken == most {
 				break
 			}
 			add(f)

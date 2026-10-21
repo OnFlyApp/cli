@@ -20,6 +20,7 @@ type Config struct {
 	Reranker    Reranker    `yaml:"reranker"`
 	Search      Search      `yaml:"search"`
 	Resolver    Resolver    `yaml:"resolver"`
+	Xray        Xray        `yaml:"xray"`
 	Rules       []string    `yaml:"rules"`
 	RulesEngine RulesEngine `yaml:"rules_engine"`
 	Indexer     Indexer     `yaml:"indexer"`
@@ -65,6 +66,26 @@ type Reranker struct {
 	TimeoutMS  int    `yaml:"timeout_ms"`
 }
 
+// Xray holds the limits of onfly_xray's output. Zero means the default.
+type Xray struct {
+	// SignatureClip is the length in characters at which a signature is cut (120).
+	SignatureClip int `yaml:"signature_clip"`
+	// WholeFileLines: a file this many lines long or shorter is shown whole (120).
+	WholeFileLines int `yaml:"whole_file_lines"`
+	// CollapseOver: a function longer than this many lines is collapsed in a skeleton (10).
+	CollapseOver int `yaml:"collapse_over"`
+	// MaxEdges caps the callers and callees listed (15).
+	MaxEdges int `yaml:"max_edges"`
+	// PreviewCallers: a caller with this many callers or fewer shows them on its
+	// line; one with more is an interface, not an entrypoint (3).
+	PreviewCallers int `yaml:"preview_callers"`
+	// MaxHelpers is how many same-file functions called by the symbol asked for
+	// are expanded in the room left (2).
+	MaxHelpers int `yaml:"max_helpers"`
+	// MaxDirEntries caps the files listed for a directory (40).
+	MaxDirEntries int `yaml:"max_dir_entries"`
+}
+
 // Resolver tunes how a name used in a chunk is attributed to a definition.
 type Resolver struct {
 	// MaxUnambiguousDefinitions: a method that this many classes or fewer define
@@ -86,6 +107,20 @@ type Search struct {
 	TypeWeights       map[string]float64 `yaml:"type_weights"`
 	AltWeight         *float64           `yaml:"alt_weight"`
 	SummaryWordWeight *float64           `yaml:"summary_word_weight"`
+	// FocusSemanticWeight and FocusKeywordWeight are the weights of the vector
+	// list and of the lexical lists in onfly_focus (2 and 0.5): a question there
+	// describes behavior and shares few words with the code.
+	FocusSemanticWeight *float64 `yaml:"focus_semantic_weight"`
+	FocusKeywordWeight  *float64 `yaml:"focus_keyword_weight"`
+	// FileSummaryWeight is the weight of a file's summary next to its symbols in
+	// the fusion (0.7); type_weights can set any type, and wins over this.
+	FileSummaryWeight *float64 `yaml:"file_summary_weight"`
+	// SummarySymbols is how many symbols of a file replace its summary in a
+	// result (1); more takes the places of other files' matches.
+	SummarySymbols int `yaml:"summary_symbols"`
+	// CandidatePool is how many candidates each list gathers before fusion, when
+	// the limit asked for is smaller (20).
+	CandidatePool int `yaml:"candidate_pool"`
 	// Expansion names a small local chat model that onfly_focus asks for the
 	// identifiers a question probably means, when its first answer looks weak.
 	Expansion LLM `yaml:"expansion"`
@@ -517,6 +552,21 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Search.RRFK != 0 {
 		out.Search.RRFK = child.Search.RRFK
 	}
+	if child.Search.FocusSemanticWeight != nil {
+		out.Search.FocusSemanticWeight = child.Search.FocusSemanticWeight
+	}
+	if child.Search.FocusKeywordWeight != nil {
+		out.Search.FocusKeywordWeight = child.Search.FocusKeywordWeight
+	}
+	if child.Search.FileSummaryWeight != nil {
+		out.Search.FileSummaryWeight = child.Search.FileSummaryWeight
+	}
+	if child.Search.SummarySymbols != 0 {
+		out.Search.SummarySymbols = child.Search.SummarySymbols
+	}
+	if child.Search.CandidatePool != 0 {
+		out.Search.CandidatePool = child.Search.CandidatePool
+	}
 	if child.Indexer.Summaries.Provider != "" {
 		out.Indexer.Summaries = child.Indexer.Summaries
 	}
@@ -535,6 +585,7 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Indexer.DebounceMS != 0 {
 		out.Indexer.DebounceMS = child.Indexer.DebounceMS
 	}
+	mergeXray(&out.Xray, child.Xray)
 	if child.Resolver.MaxUnambiguousDefinitions != 0 {
 		out.Resolver.MaxUnambiguousDefinitions = child.Resolver.MaxUnambiguousDefinitions
 	}
@@ -871,4 +922,19 @@ func (c Config) validate() error {
 		}
 	}
 	return nil
+}
+
+func mergeXray(out *Xray, child Xray) {
+	set := func(dst *int, v int) {
+		if v != 0 {
+			*dst = v
+		}
+	}
+	set(&out.SignatureClip, child.SignatureClip)
+	set(&out.WholeFileLines, child.WholeFileLines)
+	set(&out.CollapseOver, child.CollapseOver)
+	set(&out.MaxEdges, child.MaxEdges)
+	set(&out.PreviewCallers, child.PreviewCallers)
+	set(&out.MaxHelpers, child.MaxHelpers)
+	set(&out.MaxDirEntries, child.MaxDirEntries)
 }

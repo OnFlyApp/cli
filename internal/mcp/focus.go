@@ -75,7 +75,7 @@ func (h *tools) runFocus(ctx context.Context, _ *sdkmcp.CallToolRequest, in focu
 		if inTop[d.Metadata["name"]+"|"+d.FilePath] {
 			continue
 		}
-		fmt.Fprintf(&rel, "- %s [%s]\n", signature(d), location(d))
+		fmt.Fprintf(&rel, "- %s [%s]\n", signature(d, h.lim().signatureClip), location(d))
 		n++
 	}
 	if rel.Len() > 0 {

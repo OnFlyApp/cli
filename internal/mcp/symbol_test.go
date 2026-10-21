@@ -319,3 +319,21 @@ func TestXrayExpandsTheHelpersOfTheSameFileThatTheSymbolCalls(t *testing.T) {
 		t.Fatalf("helpers only take the room that is left:\n%s", tight)
 	}
 }
+
+func TestXrayLimitsComeFromTheConfiguration(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
+	h := helperFixture(t, 8192)
+	h.cfg.Xray.MaxHelpers = 1
+	out := xrayText(t, h, "h.go:Main")
+	if !strings.Contains(out, "## helperB (called by") || strings.Contains(out, "## helperA (called by") {
+		t.Fatalf("xray.max_helpers: 1 expands one helper:\n%s", out)
+	}
+	h.cfg.Xray.WholeFileLines = 1000
+	if whole := xrayText(t, h, "h.go"); strings.Contains(whole, "body omitted") {
+		t.Fatalf("xray.whole_file_lines shows the file whole:\n%s", whole)
+	}
+	if got := h.lim(); got.signatureClip != 120 || got.edges != 15 || got.previewCallers != 3 || got.dirEntries != 40 || got.collapseOver != 10 {
+		t.Fatalf("zero means the defaults: %+v", got)
+	}
+}

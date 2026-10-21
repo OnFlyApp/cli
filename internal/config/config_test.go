@@ -466,3 +466,40 @@ func TestIndexerEmbedsWithContextUnlessTurnedOff(t *testing.T) {
 		t.Fatal("embed_context is on by default and off only when set to false")
 	}
 }
+
+func TestLoadReadsTheTuningSections(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, validYAML()+`
+search:
+  focus_semantic_weight: 3
+  focus_keyword_weight: 0.25
+  file_summary_weight: 0.5
+  summary_symbols: 2
+  candidate_pool: 30
+xray:
+  signature_clip: 80
+  whole_file_lines: 200
+  collapse_over: 6
+  max_edges: 10
+  preview_callers: 2
+  max_helpers: 1
+  max_dir_entries: 25
+resolver:
+  max_unambiguous_definitions: 2
+  self_qualifiers: ["$this", "self"]
+`)
+	cfg, err := Load(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *cfg.Search.FocusSemanticWeight != 3 || *cfg.Search.FocusKeywordWeight != 0.25 || *cfg.Search.FileSummaryWeight != 0.5 || cfg.Search.SummarySymbols != 2 || cfg.Search.CandidatePool != 30 {
+		t.Fatalf("%+v", cfg.Search)
+	}
+	want := Xray{SignatureClip: 80, WholeFileLines: 200, CollapseOver: 6, MaxEdges: 10, PreviewCallers: 2, MaxHelpers: 1, MaxDirEntries: 25}
+	if cfg.Xray != want {
+		t.Fatalf("%+v", cfg.Xray)
+	}
+	if cfg.Resolver.MaxUnambiguousDefinitions != 2 || len(cfg.Resolver.SelfQualifiers) != 2 {
+		t.Fatalf("%+v", cfg.Resolver)
+	}
+}
