@@ -110,6 +110,13 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 		if !sameFile(defs) {
 			return h.xraySymbols(ctx, target, note, defs, in.Depth), struct{}{}, nil
 		}
+		// The index describes the file as it was; refresh it, then look the symbol up
+		// again, so the lines it shows are the lines of the file on disk.
+		if err := h.warm(ctx, defs[0].FilePath); err == nil {
+			if fresh, _, rerr := h.resolveSymbol(ctx, target); rerr == nil && len(fresh) > 0 && sameFile(fresh) {
+				defs = fresh
+			}
+		}
 		// One file holds every definition of the name: the skeleton of that file
 		// with all of them expanded.
 		if focus == "" {

@@ -117,4 +117,15 @@ Where Onfly **saved time**: Hugo (-14%), Kubernetes (-17%) and this repository (
 
 `onfly_xray` costs 40 to 60% of the tokens of reading the files it covers (Cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies costs about the same as the file.
 
+**After hiding file preambles and limiting one file's share of `onfly_focus`.** The Onfly arm was run again on this repository, Laravel and Kubernetes (same prompts, same setup, one at a time) with the licence and imports above the first symbol collapsed in `onfly_xray`, the symbol's body first even in a short file, and a second result from one file moved behind other files'. The Grep arm was not run again; the graders graded both answers again, so the Grep columns of the three repositories move by their own noise (this repository 10 → 10, Laravel 8 → 7, Kubernetes 7 → 8).
+
+| Repository | B correct / partial / wrong before → after | Tokens B before → after | Seconds B | Calls B (onfly + native) |
+| --- | --- | --- | --- | --- |
+| This repository | 7/3/0 → 9/1/0 | 66,886 → 69,847 | 53 → 53 | 24+2 → 18+4 |
+| Laravel | 7/1/0 → 8/0/0 | 68,826 → 66,687 | 62 → 75 | 25+0 → 33+0 |
+| Kubernetes | 6/2/0 → 4/4/0 | 88,677 → 87,457 | 71 → 79 | 21+1 → 19+1 |
+| Total | 20/6/0 → 21/5/0 | 224,389 → 223,991 | 186 → 206 | 73 → 75 |
+
+One more correct answer out of 26, no change in tokens, ten percent more time, the same number of calls: inside the run-to-run noise, so no effect is claimed. Kubernetes got worse (the agent read the grep lines of the job controller and the webhook dispatchers and said so) while this repository and Laravel got better; the partials that remain are still answers that say "I did not read…". What the changes did do is measurable offline: recall@5 on the paraphrase suites rose 0.12 to 0.14 on Laravel and Hugo, with exact-name lookup unchanged at 150 of 150 ([configuration](configuration.md#ranking-in-onfly_focus)).
+
 What the numbers support: on questions that describe behavior in words, in repositories of 40 to 4,000 files, the Grep arm was as fast and complete and used less. They do not show that Onfly helps an agent that already searches well; they show where it is weak (the second file of a flow, the hedged answer) and that its retrieval works on its own (the recall table above, 150 of 150 for exact names).

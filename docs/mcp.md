@@ -91,6 +91,7 @@ For a file the result is one markdown text:
 
 The body asked for comes first because a long file's skeleton is cut to the token budget, and a body inside it can fall past the cut. Then:
 
+- **Fresh lines.** A bare symbol name is looked up in the index, so the file it resolves to is synced first and its line numbers are those of the file on disk.
 - **No preamble.** The lines above the first symbol (licence, package or namespace line, imports) are replaced by one marker that keeps the line numbers and the package line, once there are more than six (`xray.preamble_lines`). A symbol's body also comes first when the file is short enough to be shown whole.
 - **Closest name.** `File.php:end` or `focus_symbol: "end"` where the file has no `end` expands what has the closest name (`endCycle`): equal ignoring case, then a prefix, then a substring, at most three, and a note says so. When nothing is close the note lists the functions the file has.
 - **Same-file helpers.** The long functions of the same file that the symbol calls are expanded too, in the order the body calls them, while the token budget has room (`xray.max_helpers`, default 2). They are the next call an assistant would make.

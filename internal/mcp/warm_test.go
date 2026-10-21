@@ -88,3 +88,38 @@ func TestXrayBuildsAndRefreshesTheIndexWithoutAnEmbedder(t *testing.T) {
 		t.Fatalf("stored hash %q does not describe the edited file", stored)
 	}
 }
+
+// A bare symbol name is looked up in the index, which may describe an older file:
+// the file is synced before its line numbers are used.
+func TestXrayOfASymbolSyncsTheFileItResolvesTo(t *testing.T) {
+	h, dir := warmProject(t)
+	ctx := context.Background()
+	file := filepath.Join(dir, "a.go")
+	if err := os.WriteFile(file, []byte("package p\nfunc Target() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.runXray(ctx, nil, xrayIn{Target: "a.go"}); err != nil {
+		t.Fatal(err)
+	}
+	h.bgWG.Wait()
+	// Lines are added above Target and a function below it, after indexing.
+	edited := "package p\n// one\n// two\n// three\nfunc Target() {}\nfunc AfterTheEdit() {}\n"
+	if err := os.WriteFile(file, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, _, err := h.runXray(ctx, nil, xrayIn{Target: "Target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.bgWG.Wait()
+	text := resultText(res)
+	if !strings.Contains(text, "5| func Target() {}") {
+		t.Fatalf("%s", text)
+	}
+	if stored, ok, _ := h.store.FileHash(ctx, "a.go"); !ok || !index.Fresh(stored, []byte(edited)) {
+		t.Fatalf("the symbol's file must be synced before it is shown, but the index still describes the old one (%q)", stored)
+	}
+	if defs, _ := h.store.GetComponents(ctx, "AfterTheEdit"); len(defs) != 1 {
+		t.Fatalf("the function added after indexing is not in the index: %v", defs)
+	}
+}
