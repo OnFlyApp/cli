@@ -211,15 +211,22 @@ func checkRules(cfg config.Config, out io.Writer) error {
 		fmt.Fprintf(out, "rules: %s\n", msg)
 		return fmt.Errorf("%s", msg)
 	}
+	for _, w := range rep.Warnings {
+		fmt.Fprintf(out, "rules: [WARNING] %s\n", w)
+	}
 	if rep.Warning != "" {
 		fmt.Fprintf(out, "rules: [WARNING] %s\n", rep.Warning)
 		return nil
 	}
-	if rep.Tokens == 0 {
-		fmt.Fprintln(out, "rules: ok")
+	if rep.Rules == 0 {
+		fmt.Fprintln(out, "rules: ok (none)")
 		return nil
 	}
-	fmt.Fprintf(out, "rules: ok %d tokens\n", rep.Tokens)
+	line := fmt.Sprintf("rules: ok %d rules, %d tokens", rep.Rules, rep.Tokens)
+	if rep.Fallback != "" {
+		line += " (auto-discovered " + rep.Fallback + ")"
+	}
+	fmt.Fprintln(out, line)
 	return nil
 }
 

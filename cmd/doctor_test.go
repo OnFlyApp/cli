@@ -204,3 +204,39 @@ func TestDoctorRejectsAFileThatIsNotWebAssemblyAndNamesCustomTuning(t *testing.T
 		}
 	}
 }
+
+func TestDoctorReportsRuleCountFallbackAndProblems(t *testing.T) {
+	dir := t.TempDir()
+	writeDoctorProject(t, dir, "http://127.0.0.1:1", ".onfly/vector.db", "plugins/missing.wasm")
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("Use the repository layer."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := mustDoctorConfig(t, dir)
+	var buf strings.Builder
+	if err := checkRules(cfg, &buf); err != nil || !strings.Contains(buf.String(), "rules: ok 1 rules, ") || !strings.Contains(buf.String(), "(auto-discovered AGENTS.md)") {
+		t.Fatalf("%v %q", err, buf.String())
+	}
+
+	bad := t.TempDir()
+	writeDoctorProject(t, bad, "http://127.0.0.1:1", ".onfly/vector.db", "plugins/missing.wasm")
+	rules := filepath.Join(bad, ".onfly", "rules")
+	if err := os.MkdirAll(rules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(rules, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("glob.md", "---\nname: G\nscope: [\"src/[\"]\n---\nok\n")
+	buf.Reset()
+	if err := checkRules(mustDoctorConfig(t, bad), &buf); err != nil || !strings.Contains(buf.String(), "[WARNING] .onfly/rules/glob.md: scope glob \"src/[\" is not valid") {
+		t.Fatalf("an invalid glob is a warning, not a failure: %v %q", err, buf.String())
+	}
+	write("template.md", "---\nname: T\n---\n{{ .Nope }}\n")
+	write("yaml.md", "---\nname: [unclosed\n---\nbody\n")
+	buf.Reset()
+	if err := checkRules(mustDoctorConfig(t, bad), &buf); err == nil || !strings.Contains(buf.String(), "template.md") || !strings.Contains(buf.String(), "yaml.md") {
+		t.Fatalf("a template or frontmatter error fails the check and names the file: %v %q", err, buf.String())
+	}
+}

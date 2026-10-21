@@ -54,6 +54,8 @@ type Engine struct {
 	percent  int
 	fallback []string
 	root     string
+	// fallbackUsed is the auto-discovery file that stands in for rules, if one does.
+	fallbackUsed string
 }
 
 type Rule struct {
@@ -176,6 +178,7 @@ func Load(cfg config.Config) *Engine {
 				continue
 			}
 			add(full, false)
+			e.fallbackUsed = rel
 			break
 		}
 	}
@@ -243,13 +246,20 @@ type Report struct {
 	Budget  int
 	Syntax  []string
 	Warning string
+	// Rules is how many rules are loaded; Fallback names the auto-discovery file
+	// they come from, when no rule file exists.
+	Rules    int
+	Fallback string
+	// Warnings are things that are legal but probably not meant: a scope or
+	// ignore glob that is not valid, a rule larger than the whole budget.
+	Warnings []string
 }
 
 func (e *Engine) Report(maxTokens int) Report {
 	if e == nil {
 		return Report{}
 	}
-	rep := Report{Budget: e.budget(maxTokens)}
+	rep := Report{Budget: e.budget(maxTokens), Rules: len(e.rules), Fallback: e.fallbackUsed}
 	var parts []string
 	for _, rule := range e.rules {
 		if rule.Err != nil {
@@ -257,6 +267,13 @@ func (e *Engine) Report(maxTokens int) Report {
 			continue
 		}
 		parts = append(parts, rule.text())
+		where := displayPath(e.root, rule.Path)
+		for _, bad := range rule.invalidGlobs() {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s: %s", where, bad))
+		}
+		if n := count(rule.text()); rep.Budget > 0 && n > rep.Budget {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s: %d tokens alone exceed the budget of %d, so it is always truncated", where, n, rep.Budget))
+		}
 	}
 	rep.Tokens = count(joinParts(parts))
 	if len(rep.Syntax) > 0 || rep.Tokens <= rep.Budget {
@@ -347,6 +364,26 @@ func (r Rule) matches(q Query) bool {
 		}
 	}
 	return false
+}
+
+// invalidGlobs names the scope and ignore entries that look like globs and do
+// not parse. Such an entry never matches, so the rule would silently not apply.
+func (r Rule) invalidGlobs() []string {
+	var out []string
+	check := func(field string, entries []string) {
+		for _, entry := range entries {
+			entry = strings.TrimSpace(entry)
+			if _, lang := langExt[strings.ToLower(entry)]; lang || !isGlob(entry) {
+				continue
+			}
+			if !doublestar.ValidatePattern(filepath.ToSlash(entry)) {
+				out = append(out, fmt.Sprintf("%s glob %q is not valid", field, entry))
+			}
+		}
+	}
+	check("scope", r.Scope)
+	check("ignore", r.Ignore)
+	return out
 }
 
 func (r Rule) isGlobal() bool {

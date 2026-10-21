@@ -221,3 +221,36 @@ func TestInjectNewSendsEachRuleOnce(t *testing.T) {
 		t.Fatalf("second %q %d", second, n)
 	}
 }
+
+func TestReportCountsRulesNamesTheFallbackAndWarnsOfBadGlobs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("keep it small"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep := Load(config.Config{ProjectRoot: dir}).Report(8192)
+	if rep.Rules != 1 || rep.Fallback != "CLAUDE.md" || len(rep.Warnings) != 0 {
+		t.Fatalf("one rule from the auto-discovered file: %+v", rep)
+	}
+	off := false
+	rep = Load(config.Config{ProjectRoot: dir, RulesEngine: config.RulesEngine{AutoDiscovery: config.AutoDiscovery{Enabled: &off}}}).Report(8192)
+	if rep.Rules != 0 || rep.Fallback != "" {
+		t.Fatalf("auto_discovery.enabled: false loads nothing: %+v", rep)
+	}
+
+	dir = t.TempDir()
+	writeRule(t, dir, "bad.md", "---\nname: Bad\nscope: [\"src/[\", \"go\", \"**/*.php\"]\nignore: [\"tests/{a\"]\n---\nbody\n")
+	writeRule(t, dir, "fat.md", "---\nname: Fat\n---\n"+strings.Repeat("a rule that goes on and on and on. ", 400)+"\n")
+	rep = Load(config.Config{ProjectRoot: dir}).Report(1000)
+	joined := strings.Join(rep.Warnings, "\n")
+	for _, want := range []string{`scope glob "src/[" is not valid`, `ignore glob "tests/{a" is not valid`, "alone exceed the budget of 150"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, `"go"`) || strings.Contains(joined, "**/*.php") {
+		t.Fatalf("a language name and a valid glob are fine:\n%s", joined)
+	}
+	if rep.Rules != 2 || rep.Fallback != "" {
+		t.Fatalf("%+v", rep)
+	}
+}

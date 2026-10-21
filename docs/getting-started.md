@@ -135,7 +135,7 @@ config: ok
 database: ok
 embedder: ok
 plugins: ok text
-rules: ok 55 tokens
+rules: ok 1 rules, 55 tokens
 ```
 
 Every line should say `ok`. A line that does not tells you what to fix.
