@@ -1,0 +1,61 @@
+cases:
+  - query: where is SetUsageFunc defined and what does it do
+    expect: [{file: command.go, symbol: SetUsageFunc}]
+  - query: where is writeCommands defined and what does it do
+    expect: [{file: bash_completions.go, symbol: writeCommands}]
+  - query: where is getCompletions defined and what does it do
+    expect: [{file: completions.go, symbol: getCompletions}]
+  - query: where is PrintErrln defined and what does it do
+    expect: [{file: command.go, symbol: PrintErrln}]
+  - query: where is GenBashCompletionFileV2 defined and what does it do
+    expect: [{file: bash_completionsV2.go, symbol: GenBashCompletionFileV2}]
+  - query: where is OnlyValidArgs defined and what does it do
+    expect: [{file: args.go, symbol: OnlyValidArgs}]
+  - query: where is AddTemplateFuncs defined and what does it do
+    expect: [{file: cobra.go, symbol: AddTemplateFuncs}]
+  - query: where is ErrPrefix defined and what does it do
+    expect: [{file: command.go, symbol: ErrPrefix}]
+  - query: where is genZshCompletion defined and what does it do
+    expect: [{file: zsh_completions.go, symbol: genZshCompletion}]
+  - query: where is shortHasNoOptDefVal defined and what does it do
+    expect: [{file: command.go, symbol: shortHasNoOptDefVal}]
+  - query: where is MarkFlagsMutuallyExclusive defined and what does it do
+    expect: [{file: flag_groups.go, symbol: MarkFlagsMutuallyExclusive}]
+  - query: where is InitDefaultHelpFlag defined and what does it do
+    expect: [{file: command.go, symbol: InitDefaultHelpFlag}]
+  - query: where is MarkZshCompPositionalArgumentWords defined and what does it do
+    expect: [{file: zsh_completions.go, symbol: MarkZshCompPositionalArgumentWords}]
+  - query: where is ParseFlags defined and what does it do
+    expect: [{file: command.go, symbol: ParseFlags}]
+  - query: where is validateExclusiveFlagGroups defined and what does it do
+    expect: [{file: flag_groups.go, symbol: validateExclusiveFlagGroups}]
+  - query: where is MinimumNArgs defined and what does it do
+    expect: [{file: args.go, symbol: MinimumNArgs}]
+  - query: where is GetActiveHelpConfig defined and what does it do
+    expect: [{file: active_help.go, symbol: GetActiveHelpConfig}]
+  - query: where is OnInitialize defined and what does it do
+    expect: [{file: cobra.go, symbol: OnInitialize}]
+  - query: where is FixedCompletions defined and what does it do
+    expect: [{file: completions.go, symbol: FixedCompletions}]
+  - query: where is GenPowerShellCompletionWithDesc defined and what does it do
+    expect: [{file: powershell_completions.go, symbol: GenPowerShellCompletionWithDesc}]
+  - query: where is HasHelpSubCommands defined and what does it do
+    expect: [{file: command.go, symbol: HasHelpSubCommands}]
+  - query: where is HasLocalFlags defined and what does it do
+    expect: [{file: command.go, symbol: HasLocalFlags}]
+  - query: where is RemoveCommand defined and what does it do
+    expect: [{file: command.go, symbol: RemoveCommand}]
+  - query: where is genFlagResult defined and what does it do
+    expect: [{file: doc/yaml_docs.go, symbol: genFlagResult}]
+  - query: where is PersistentFlags defined and what does it do
+    expect: [{file: command.go, symbol: PersistentFlags}]
+  - query: where is nonCompletableFlag defined and what does it do
+    expect: [{file: bash_completions.go, symbol: nonCompletableFlag}]
+  - query: where is getVersionTemplateFunc defined and what does it do
+    expect: [{file: command.go, symbol: getVersionTemplateFunc}]
+  - query: where is HasAvailableLocalFlags defined and what does it do
+    expect: [{file: command.go, symbol: HasAvailableLocalFlags}]
+  - query: where is genPowerShellComp defined and what does it do
+    expect: [{file: powershell_completions.go, symbol: genPowerShellComp}]
+  - query: where is genBashComp defined and what does it do
+    expect: [{file: bash_completionsV2.go, symbol: genBashComp}]

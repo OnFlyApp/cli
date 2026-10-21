@@ -54,7 +54,7 @@ func TestFileSummaryIsReplacedByTheLargestSymbolOfItsFile(t *testing.T) {
 			other = r.Chunk
 		}
 	}
-	got := s.expandFileSummaries(context.Background(), []parser.Chunk{other, sum})
+	got := s.expandFileSummaries(context.Background(), "calculate round", []parser.Chunk{other, sum})
 	var names []string
 	for _, c := range got {
 		if c.Type == parser.FileSummaryType {
@@ -82,11 +82,26 @@ func TestFileSummaryPrefersSymbolsTheRankingAlreadyHas(t *testing.T) {
 			sum = r.Chunk
 		}
 	}
-	got := s.expandFileSummaries(context.Background(), []parser.Chunk{sum, tiny, round})
+	got := s.expandFileSummaries(context.Background(), "calculate round", []parser.Chunk{sum, tiny, round})
 	if len(got) != 2 || got[0].Metadata["name"] != "tiny" || got[1].Metadata["name"] != "round" {
 		t.Fatalf("symbols that matched on their own come first and are not listed twice: %+v", got)
 	}
-	if plain := []parser.Chunk{tiny}; len(s.expandFileSummaries(context.Background(), plain)) != 1 {
+	if plain := []parser.Chunk{tiny}; len(s.expandFileSummaries(context.Background(), "calculate round", plain)) != 1 {
 		t.Fatal("a ranking without summaries is returned as it is")
+	}
+}
+
+func TestFileSummaryIsReplacedByTheSymbolThatAnswersTheQuery(t *testing.T) {
+	s := summaryStore(t)
+	rows, _ := s.Store.ChunksByFiles(context.Background(), []string{"pay/calc.go"})
+	var sum parser.Chunk
+	for _, r := range rows {
+		if r.Chunk.Type == parser.FileSummaryType {
+			sum = r.Chunk
+		}
+	}
+	got := s.expandFileSummaries(context.Background(), "how is the amount rounded", []parser.Chunk{sum})
+	if len(got) != 1 || got[0].Metadata["name"] != "round" {
+		t.Fatalf("the smaller method named for the question beats the largest one: %+v", got)
 	}
 }

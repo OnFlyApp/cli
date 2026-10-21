@@ -1,0 +1,61 @@
+cases:
+  - query: where is deleteMessage defined and what does it do
+    expect: [{file: src/Illuminate/Queue/BeanstalkdQueue.php, symbol: deleteMessage}]
+  - query: where is getUnionBuilders defined and what does it do
+    expect: [{file: src/Illuminate/Database/Eloquent/Builder.php, symbol: getUnionBuilders}]
+  - query: where is addAlterCommands defined and what does it do
+    expect: [{file: src/Illuminate/Database/Schema/Blueprint.php, symbol: addAlterCommands}]
+  - query: where is preventsScopedBindings defined and what does it do
+    expect: [{file: src/Illuminate/Routing/Route.php, symbol: preventsScopedBindings}]
+  - query: where is assertSentInOrder defined and what does it do
+    expect: [{file: src/Illuminate/Http/Client/Factory.php, symbol: assertSentInOrder}]
+  - query: where is withoutDefaultCommands defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/DevCommands.php, symbol: withoutDefaultCommands}]
+  - query: where is getResolvedJob defined and what does it do
+    expect: [{file: src/Illuminate/Queue/Jobs/Job.php, symbol: getResolvedJob}]
+  - query: where is getGlobalScopes defined and what does it do
+    expect: [{file: src/Illuminate/Database/Eloquent/Concerns/HasGlobalScopes.php, symbol: getGlobalScopes}]
+  - query: where is useCollectionClass defined and what does it do
+    expect: [{file: src/Illuminate/Contracts/Database/ModelIdentifier.php, symbol: useCollectionClass}]
+  - query: where is isVendorRoute defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/Console/RouteListCommand.php, symbol: isVendorRoute}]
+  - query: where is replaceDefaults defined and what does it do
+    expect: [{file: src/Illuminate/Routing/RouteParameterBinder.php, symbol: replaceDefaults}]
+  - query: where is onWriteConnection defined and what does it do
+    expect: [{file: src/Illuminate/Database/Eloquent/HasBuilder.php, symbol: onWriteConnection}]
+  - query: where is whenHasAttribute defined and what does it do
+    expect: [{file: src/Illuminate/Container/Container.php, symbol: whenHasAttribute}]
+  - query: where is isReadableFormat defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/Console/EnvironmentDecryptCommand.php, symbol: isReadableFormat}]
+  - query: where is storeUncompiledBlocks defined and what does it do
+    expect: [{file: src/Illuminate/View/Compilers/BladeCompiler.php, symbol: storeUncompiledBlocks}]
+  - query: where is newPendingProcess defined and what does it do
+    expect: [{file: src/Illuminate/Process/Factory.php, symbol: newPendingProcess}]
+  - query: where is registerUncompromisedVerifier defined and what does it do
+    expect: [{file: src/Illuminate/Validation/ValidationServiceProvider.php, symbol: registerUncompromisedVerifier}]
+  - query: where is parseDatabasePath defined and what does it do
+    expect: [{file: src/Illuminate/Database/Connectors/SQLiteConnector.php, symbol: parseDatabasePath}]
+  - query: where is installReverb defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/Console/BroadcastingInstallCommand.php, symbol: installReverb}]
+  - query: where is registerConfigPublishCommand defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/Providers/ArtisanServiceProvider.php, symbol: registerConfigPublishCommand}]
+  - query: where is buildRecorderHandler defined and what does it do
+    expect: [{file: src/Illuminate/Http/Client/PendingRequest.php, symbol: buildRecorderHandler}]
+  - query: where is assignExpressionToParameters defined and what does it do
+    expect: [{file: src/Illuminate/Routing/CreatesRegularExpressionRouteConstraints.php, symbol: assignExpressionToParameters}]
+  - query: where is getEngineFromPath defined and what does it do
+    expect: [{file: src/Illuminate/View/Factory.php, symbol: getEngineFromPath}]
+  - query: where is compileSectionMissing defined and what does it do
+    expect: [{file: src/Illuminate/View/Compilers/Concerns/CompilesConditionals.php, symbol: compileSectionMissing}]
+  - query: where is createToken defined and what does it do
+    expect: [{file: src/Illuminate/Auth/Passwords/PasswordBroker.php, symbol: createToken}]
+  - query: where is isRelation defined and what does it do
+    expect: [{file: src/Illuminate/Database/Eloquent/Concerns/HasAttributes.php, symbol: isRelation}]
+  - query: where is editorHref defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/Exceptions/Renderer/Frame.php, symbol: editorHref}]
+  - query: where is getSeconds defined and what does it do
+    expect: [{file: src/Illuminate/Cache/Repository.php, symbol: getSeconds}]
+  - query: where is createAssetPathsUsing defined and what does it do
+    expect: [{file: src/Illuminate/Foundation/Vite.php, symbol: createAssetPathsUsing}]
+  - query: where is getCommandsByName defined and what does it do
+    expect: [{file: src/Illuminate/Database/Schema/Grammars/Grammar.php, symbol: getCommandsByName}]

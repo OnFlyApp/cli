@@ -11,3 +11,8 @@ for suite in eval eval.symbols; do
     (cd "$dir" && onfly eval --file-level --k 5 --cases ".onfly/$suite.yaml" $mode | grep -o 'recall@5: [0-9.]*')
   done
 done
+if [ -f "$here/evals/$name/eval.identifiers.yaml" ]; then
+  cp "$here/evals/$name/eval.identifiers.yaml" "$dir/.onfly/eval.identifiers.yaml"
+  printf '%-14s %-20s ' eval.identifiers focus
+  (cd "$dir" && onfly eval --k 5 --cases .onfly/eval.identifiers.yaml --focus | grep -o 'recall@5: [0-9.]*')
+fi

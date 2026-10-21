@@ -1,0 +1,61 @@
+cases:
+  - query: where is ResolveRootDir defined and what does it do
+    expect: [{file: hugofs/hglob/glob.go, symbol: ResolveRootDir}]
+  - query: where is prepareShortcodesForPage defined and what does it do
+    expect: [{file: hugolib/shortcode.go, symbol: prepareShortcodesForPage}]
+  - query: where is WithImage defined and what does it do
+    expect: [{file: resources/images/image.go, symbol: WithImage}]
+  - query: where is executeDeferredTemplates defined and what does it do
+    expect: [{file: hugolib/hugo_sites_build.go, symbol: executeDeferredTemplates}]
+  - query: where is lexFieldOrVariable defined and what does it do
+    expect: [{file: tpl/internal/go_templates/texttemplate/parse/lex.go, symbol: lexFieldOrVariable}]
+  - query: where is evalFieldNode defined and what does it do
+    expect: [{file: tpl/internal/go_templates/texttemplate/exec.go, symbol: evalFieldNode}]
+  - query: where is setTargetPath defined and what does it do
+    expect: [{file: resources/resource.go, symbol: setTargetPath}]
+  - query: where is SetPageValues defined and what does it do
+    expect: [{file: navigation/menu.go, symbol: SetPageValues}]
+  - query: where is ToVectorStore defined and what does it do
+    expect: [{file: hugolib/sitesmatrix/dimensions.go, symbol: ToVectorStore}]
+  - query: where is writeJSON defined and what does it do
+    expect: [{file: modules/npm/package_builder.go, symbol: writeJSON}]
+  - query: where is NewFileError defined and what does it do
+    expect: [{file: common/herrors/file_error.go, symbol: NewFileError}]
+  - query: where is ToStringSlicePreserveString defined and what does it do
+    expect: [{file: common/types/convert.go, symbol: ToStringSlicePreserveString}]
+  - query: where is IsSameFilePath defined and what does it do
+    expect: [{file: common/paths/path.go, symbol: IsSameFilePath}]
+  - query: where is firstToLower defined and what does it do
+    expect: [{file: codegen/methods.go, symbol: firstToLower}]
+  - query: where is FromConfigString defined and what does it do
+    expect: [{file: config/configLoader.go, symbol: FromConfigString}]
+  - query: where is ByLanguage defined and what does it do
+    expect: [{file: resources/page/pages_sort.go, symbol: ByLanguage}]
+  - query: where is SetDefaultMergeStrategy defined and what does it do
+    expect: [{file: config/defaultConfigProvider.go, symbol: SetDefaultMergeStrategy}]
+  - query: where is NewResourceWrapperFromResourceConfig defined and what does it do
+    expect: [{file: resources/resource_spec.go, symbol: NewResourceWrapperFromResourceConfig}]
+  - query: where is identifierAsString defined and what does it do
+    expect: [{file: common/paths/pathparser.go, symbol: identifierAsString}]
+  - query: where is TemplateMetricsHints defined and what does it do
+    expect: [{file: config/allconfig/configlanguage.go, symbol: TemplateMetricsHints}]
+  - query: where is AppendArg defined and what does it do
+    expect: [{file: markup/asciidocext/internal/converter.go, symbol: AppendArg}]
+  - query: where is applyTemplateTransformers defined and what does it do
+    expect: [{file: tpl/tplimpl/templatetransform.go, symbol: applyTemplateTransformers}]
+  - query: where is createConfigFromJekyll defined and what does it do
+    expect: [{file: commands/import.go, symbol: createConfigFromJekyll}]
+  - query: where is UnmarshalYaml defined and what does it do
+    expect: [{file: parser/metadecoders/decoder.go, symbol: UnmarshalYaml}]
+  - query: where is assemblePagesStepFinal defined and what does it do
+    expect: [{file: hugolib/content_map_page_assembler.go, symbol: assemblePagesStepFinal}]
+  - query: where is isSameAsDescendantMenu defined and what does it do
+    expect: [{file: navigation/pagemenus.go, symbol: isSameAsDescendantMenu}]
+  - query: where is DefaultPageConfig defined and what does it do
+    expect: [{file: resources/page/pagemeta/page_frontmatter.go, symbol: DefaultPageConfig}]
+  - query: where is ToSliceStringMap defined and what does it do
+    expect: [{file: common/hmaps/maps.go, symbol: ToSliceStringMap}]
+  - query: where is GetLocation defined and what does it do
+    expect: [{file: langs/language.go, symbol: GetLocation}]
+  - query: where is asciiAlpha defined and what does it do
+    expect: [{file: tpl/internal/go_templates/htmltemplate/transition.go, symbol: asciiAlpha}]

@@ -1,0 +1,61 @@
+cases:
+  - query: where is joinCounts defined and what does it do
+    expect: [{file: cmd/stats.go, symbol: joinCounts}]
+  - query: where is addPrompts defined and what does it do
+    expect: [{file: internal/mcp/outline.go, symbol: addPrompts}]
+  - query: where is slashPath defined and what does it do
+    expect: [{file: internal/vectorstore/util.go, symbol: slashPath}]
+  - query: where is SearchCalls defined and what does it do
+    expect: [{file: internal/audit/transcript.go, symbol: SearchCalls}]
+  - query: where is shortNames defined and what does it do
+    expect: [{file: internal/mcp/impls.go, symbol: shortNames}]
+  - query: where is rulesText defined and what does it do
+    expect: [{file: internal/mcp/rules_tool.go, symbol: rulesText}]
+  - query: where is baseNamed defined and what does it do
+    expect: [{file: internal/query/focus.go, symbol: baseNamed}]
+  - query: where is pathScoped defined and what does it do
+    expect: [{file: internal/rules/rules.go, symbol: pathScoped}]
+  - query: where is goImports defined and what does it do
+    expect: [{file: internal/resolve/resolve.go, symbol: goImports}]
+  - query: where is ReloadIgnore defined and what does it do
+    expect: [{file: internal/index/index.go, symbol: ReloadIgnore}]
+  - query: where is textChunk defined and what does it do
+    expect: [{file: internal/parser/text.go, symbol: textChunk}]
+  - query: where is alreadyCurrent defined and what does it do
+    expect: [{file: internal/ext/install.go, symbol: alreadyCurrent}]
+  - query: where is writeWorkflow defined and what does it do
+    expect: [{file: cmd/init.go, symbol: writeWorkflow}]
+  - query: where is boostCohesion defined and what does it do
+    expect: [{file: internal/query/focus.go, symbol: boostCohesion}]
+  - query: where is ensureParsers defined and what does it do
+    expect: [{file: internal/config/modifier.go, symbol: ensureParsers}]
+  - query: where is trackUsage defined and what does it do
+    expect: [{file: internal/mcp/server.go, symbol: trackUsage}]
+  - query: where is memoryDSN defined and what does it do
+    expect: [{file: internal/vectorstore/sqlite.go, symbol: memoryDSN}]
+  - query: where is newOllama defined and what does it do
+    expect: [{file: internal/embedder/ollama.go, symbol: newOllama}]
+  - query: where is openSummaryCache defined and what does it do
+    expect: [{file: internal/index/sumcache.go, symbol: openSummaryCache}]
+  - query: where is isLocalPath defined and what does it do
+    expect: [{file: internal/ext/install.go, symbol: isLocalPath}]
+  - query: where is IsTimeout defined and what does it do
+    expect: [{file: internal/embedder/embedder.go, symbol: IsTimeout}]
+  - query: where is UpsertWasmParser defined and what does it do
+    expect: [{file: internal/config/modifier.go, symbol: UpsertWasmParser}]
+  - query: where is WriteExplain defined and what does it do
+    expect: [{file: internal/eval/explain.go, symbol: WriteExplain}]
+  - query: where is reportOpt defined and what does it do
+    expect: [{file: internal/index/progress.go, symbol: reportOpt}]
+  - query: where is addSummaries defined and what does it do
+    expect: [{file: internal/index/summary.go, symbol: addSummaries}]
+  - query: where is CandidatePool defined and what does it do
+    expect: [{file: internal/query/query.go, symbol: CandidatePool}]
+  - query: where is contextHints defined and what does it do
+    expect: [{file: cmd/stats.go, symbol: contextHints}]
+  - query: where is addToolWith defined and what does it do
+    expect: [{file: internal/mcp/result.go, symbol: addToolWith}]
+  - query: where is finishGraph defined and what does it do
+    expect: [{file: internal/mcp/graph.go, symbol: finishGraph}]
+  - query: where is leadingComment defined and what does it do
+    expect: [{file: internal/query/fields.go, symbol: leadingComment}]

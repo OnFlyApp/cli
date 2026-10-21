@@ -1,0 +1,61 @@
+cases:
+  - query: where is provisionClaimOperationExternal defined and what does it do
+    expect: [{file: pkg/controller/volume/persistentvolume/pv_controller.go, symbol: provisionClaimOperationExternal}]
+  - query: where is newAdmissionMetrics defined and what does it do
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/admission/metrics/metrics.go, symbol: newAdmissionMetrics}]
+  - query: where is updatedDesiredNodeCounts defined and what does it do
+    expect: [{file: pkg/controller/daemon/update.go, symbol: updatedDesiredNodeCounts}]
+  - query: where is isPodManagedContainer defined and what does it do
+    expect: [{file: pkg/kubelet/stats/cadvisor_stats_provider.go, symbol: isPodManagedContainer}]
+  - query: where is hasSuccessCriteriaMetCondition defined and what does it do
+    expect: [{file: pkg/controller/job/success_policy.go, symbol: hasSuccessCriteriaMetCondition}]
+  - query: where is newInstrumentedAuthenticatorWithClock defined and what does it do
+    expect: [{file: staging/src/k8s.io/apiserver/plugin/pkg/authenticator/token/oidc/metrics.go, symbol: newInstrumentedAuthenticatorWithClock}]
+  - query: where is removeUserVisiblePaths defined and what does it do
+    expect: [{file: pkg/volume/util/atomic_writer.go, symbol: removeUserVisiblePaths}]
+  - query: where is ValidateResourceClaimStatusUpdate defined and what does it do
+    expect: [{file: pkg/apis/resource/validation/validation.go, symbol: ValidateResourceClaimStatusUpdate}]
+  - query: where is GetSELinux defined and what does it do
+    expect: [{file: pkg/volume/util/hostutil/hostutil_linux.go, symbol: GetSELinux}]
+  - query: where is newRootCACertificatePublisherController defined and what does it do
+    expect: [{file: cmd/kube-controller-manager/app/certificates.go, symbol: newRootCACertificatePublisherController}]
+  - query: where is migrateV1ToV2 defined and what does it do
+    expect: [{file: pkg/kubelet/allocation/state/checkpoint_v1.go, symbol: migrateV1ToV2}]
+  - query: where is makeCDIDevices defined and what does it do
+    expect: [{file: pkg/kubelet/kuberuntime/kuberuntime_container.go, symbol: makeCDIDevices}]
+  - query: where is unprepareResources defined and what does it do
+    expect: [{file: pkg/kubelet/cm/dra/manager.go, symbol: unprepareResources}]
+  - query: where is TempManifestDir defined and what does it do
+    expect: [{file: cmd/kubeadm/app/phases/upgrade/staticpods.go, symbol: TempManifestDir}]
+  - query: where is GetAvailableUpgrades defined and what does it do
+    expect: [{file: cmd/kubeadm/app/phases/upgrade/compute.go, symbol: GetAvailableUpgrades}]
+  - query: where is newKubeAPIServerSignerClusterTrustBundledPublisherDescriptor defined and what does it do
+    expect: [{file: cmd/kube-controller-manager/app/certificates.go, symbol: newKubeAPIServerSignerClusterTrustBundledPublisherDescriptor}]
+  - query: where is allowPodStart defined and what does it do
+    expect: [{file: pkg/kubelet/pod_workers.go, symbol: allowPodStart}]
+  - query: where is SetPriorityLevelConfiguration defined and what does it do
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/util/flowcontrol/metrics/metrics.go, symbol: SetPriorityLevelConfiguration}]
+  - query: where is HandlePodCleanups defined and what does it do
+    expect: [{file: pkg/kubelet/kubelet_pods.go, symbol: HandlePodCleanups}]
+  - query: where is GetConflicts defined and what does it do
+    expect: [{file: pkg/controller/volume/selinuxwarning/cache/volumecache.go, symbol: GetConflicts}]
+  - query: where is getPVCExtractPV defined and what does it do
+    expect: [{file: pkg/kubelet/volumemanager/populator/desired_state_of_world_populator.go, symbol: getPVCExtractPV}]
+  - query: where is withBaseValueCtx defined and what does it do
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/server/options/encryptionconfig/config.go, symbol: withBaseValueCtx}]
+  - query: where is Convert_kubeadm_InitConfiguration_To_v1_InitConfiguration defined and what does it do
+    expect: [{file: cmd/kubeadm/app/apis/kubeadm/v1/conversion.go, symbol: Convert_kubeadm_InitConfiguration_To_v1_InitConfiguration}]
+  - query: where is dropDisabledClusterTrustBundleProjection defined and what does it do
+    expect: [{file: pkg/api/pod/util.go, symbol: dropDisabledClusterTrustBundleProjection}]
+  - query: where is NewCheckpointer defined and what does it do
+    expect: [{file: pkg/kubelet/cm/dra/state/checkpointer.go, symbol: NewCheckpointer}]
+  - query: where is GetBackoffExpiration defined and what does it do
+    expect: [{file: pkg/scheduler/framework/types.go, symbol: GetBackoffExpiration}]
+  - query: where is NewKubeControllerManagerOptions defined and what does it do
+    expect: [{file: cmd/kube-controller-manager/app/options/options.go, symbol: NewKubeControllerManagerOptions}]
+  - query: where is AuditIDFrom defined and what does it do
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/audit/context.go, symbol: AuditIDFrom}]
+  - query: where is IsExemptAdmissionConfigurationResource defined and what does it do
+    expect: [{file: staging/src/k8s.io/apiserver/pkg/admission/plugin/webhook/predicates/rules/rules.go, symbol: IsExemptAdmissionConfigurationResource}]
+  - query: where is trackProvidedFlag defined and what does it do
+    expect: [{file: pkg/kubeapiserver/options/authentication.go, symbol: trackProvidedFlag}]
