@@ -82,7 +82,7 @@ Under the hood:
 
 ## Benchmarks
 
-Six code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `pkg/`, and a private PHP billing monorepo), `qwen3-embedding:0.6b` through Ollama. Every number below is one run; with 8 questions a difference of one or two answers is noise. Method, suites and caveats: [Evaluation](docs/evaluation.md#benchmarks).
+Six code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `pkg/`, and a private PHP monorepo), `qwen3-embedding:0.6b` through Ollama. Every number below is one run; with 8 questions a difference of one or two answers is noise. Method, suites and caveats: [Evaluation](docs/evaluation.md#benchmarks).
 
 **Retrieval**, `onfly_focus`, file-level recall@5 on questions that name no function:
 

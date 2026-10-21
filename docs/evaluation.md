@@ -69,7 +69,7 @@ Large case lists can be generated: ask a local model for one question per sample
 
 ## Benchmarks
 
-Six code bases: Cobra (Go, 40 files), this repository (Go, 200 files), Hugo (Go, 2,000 files), Laravel framework (PHP, 3,200 files), Kubernetes `pkg/` and `cmd/` (Go, 4,100 files, 44,000 chunks) and a private PHP billing monorepo (5,600 files). Embeddings are `qwen3-embedding:0.6b` through Ollama. The suites for the five open-source ones are in [`bench/evals`](../bench/README.md); the monorepo's is not published.
+Six code bases: Cobra (Go, 40 files), this repository (Go, 200 files), Hugo (Go, 2,000 files), Laravel framework (PHP, 3,200 files), Kubernetes `pkg/` and `cmd/` (Go, 4,100 files, 44,000 chunks) and a private PHP monorepo (5,600 files). Embeddings are `qwen3-embedding:0.6b` through Ollama. The suites for the five open-source ones are in [`bench/evals`](../bench/README.md); the monorepo's is not published.
 
 ### Retrieval
 

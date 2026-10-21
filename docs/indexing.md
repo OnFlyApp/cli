@@ -25,7 +25,7 @@ A file is left out, and removed from an existing index, when its base name match
 
 ## Directives
 
-A statement that is only `declare(strict_types=1);` is not a chunk: one per PHP file was 5,455 of the 38,521 chunks of a billing monorepo, they are returned by `onfly_focus` as a symbol named `statements`, and their short text embeds close to any question that names the file. The words come from `ignore_directives` of the parser entry (default `[declare]` for PHP). A statement that holds a `declare` and other code is kept.
+A statement that is only `declare(strict_types=1);` is not a chunk: one per PHP file was 5,455 of the 38,521 chunks of a monorepo, they are returned by `onfly_focus` as a symbol named `statements`, and their short text embeds close to any question that names the file. The words come from `ignore_directives` of the parser entry (default `[declare]` for PHP). A statement that holds a `declare` and other code is kept.
 
 ## File summaries
 
