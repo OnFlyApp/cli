@@ -380,10 +380,10 @@ func TestXrayCalledByTiesTheHandlerToTheCodeThatDispatchesItsCommand(t *testing.
 			t.Fatal(err)
 		}
 	}
-	write("src/Domain/ClawBack.php", "<?php\nnamespace App\\Domain;\nclass ClawBack {}\n")
-	write("src/App/Handler.php", "<?php\nnamespace App\\App;\nuse App\\Domain\\ClawBack;\nclass Handler {\n    public function __invoke(ClawBack $c): void {}\n}\n")
-	write("src/Api/Controller.php", "<?php\nnamespace App\\Api;\nuse App\\Domain\\ClawBack;\nclass Controller {\n    public function post() { $this->bus->dispatch(new ClawBack()); }\n}\n")
-	write("src/Api/Docs.php", "<?php\nnamespace App\\Api;\nuse App\\Domain\\ClawBack;\nclass Docs {\n    public function describe(ClawBack $c) { return 1; }\n}\n")
+	write("src/Domain/CancelOrder.php", "<?php\nnamespace App\\Domain;\nclass CancelOrder {}\n")
+	write("src/App/Handler.php", "<?php\nnamespace App\\App;\nuse App\\Domain\\CancelOrder;\nclass Handler {\n    public function __invoke(CancelOrder $c): void {}\n}\n")
+	write("src/Api/Controller.php", "<?php\nnamespace App\\Api;\nuse App\\Domain\\CancelOrder;\nclass Controller {\n    public function post() { $this->bus->dispatch(new CancelOrder()); }\n}\n")
+	write("src/Api/Docs.php", "<?php\nnamespace App\\Api;\nuse App\\Domain\\CancelOrder;\nclass Docs {\n    public function describe(CancelOrder $c) { return 1; }\n}\n")
 	vec := []float32{1, 0, 0, 1}
 	meta := func(name, ns, receiver, line string, extra map[string]string) map[string]string {
 		m := map[string]string{"name": name, "namespace": ns, "start_line": line, "end_line": line}
@@ -399,10 +399,10 @@ func TestXrayCalledByTiesTheHandlerToTheCodeThatDispatchesItsCommand(t *testing.
 		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: file, Type: typ, Content: content, Metadata: m, Outbound: out}, Vector: vec}
 	}
 	for _, c := range []vectorstore.EmbeddedChunk{
-		chunk("src/Domain/ClawBack.php", "class", "class ClawBack {}", meta("ClawBack", "App\\Domain", "", "3", map[string]string{"fqn": "App\\Domain\\ClawBack"})),
-		chunk("src/App/Handler.php", "method", "public function __invoke(ClawBack $c): void {}", meta("__invoke", "App\\App", "App\\App\\Handler", "5", map[string]string{"handles": "App\\Domain\\ClawBack", "param_types": "App\\Domain\\ClawBack"}), "ClawBack"),
-		chunk("src/Api/Controller.php", "method", "public function post() { $this->bus->dispatch(new ClawBack()); }", meta("post", "App\\Api", "App\\Api\\Controller", "5", nil), "dispatch", "ClawBack"),
-		chunk("src/Api/Docs.php", "method", "public function describe(ClawBack $c) { return 1; }", meta("describe", "App\\Api", "App\\Api\\Docs", "5", nil), "ClawBack"),
+		chunk("src/Domain/CancelOrder.php", "class", "class CancelOrder {}", meta("CancelOrder", "App\\Domain", "", "3", map[string]string{"fqn": "App\\Domain\\CancelOrder"})),
+		chunk("src/App/Handler.php", "method", "public function __invoke(CancelOrder $c): void {}", meta("__invoke", "App\\App", "App\\App\\Handler", "5", map[string]string{"handles": "App\\Domain\\CancelOrder", "param_types": "App\\Domain\\CancelOrder"}), "CancelOrder"),
+		chunk("src/Api/Controller.php", "method", "public function post() { $this->bus->dispatch(new CancelOrder()); }", meta("post", "App\\Api", "App\\Api\\Controller", "5", nil), "dispatch", "CancelOrder"),
+		chunk("src/Api/Docs.php", "method", "public function describe(CancelOrder $c) { return 1; }", meta("describe", "App\\Api", "App\\Api\\Docs", "5", nil), "CancelOrder"),
 	} {
 		if err := saveHashed(store, root, []vectorstore.EmbeddedChunk{c}); err != nil {
 			t.Fatal(err)

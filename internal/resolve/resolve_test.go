@@ -163,12 +163,12 @@ func TestPHPPropertyTypeDecidesBeforeTheNamespace(t *testing.T) {
 
 func TestPHPCallOnAVariableNamedForTheClass(t *testing.T) {
 	src := "<?php\nnamespace App\\Application;\nclass Handler {}\n"
-	call := "$cashbackCycle->clawBackCashback($id);"
+	call := "$order->cancelOrder($id);"
 	caller := ch("src/Application/Handler.php", call, map[string]string{"name": "__invoke", "namespace": "App\\Application"})
-	def := ch("src/Domain/CashbackCycle.php", "", map[string]string{"name": "clawBackCashback", "receiver": "App\\Domain\\CashbackCycle", "namespace": "App\\Domain"})
-	other := ch("src/Domain/Other.php", "", map[string]string{"name": "clawBackCashback", "receiver": "App\\Domain\\Other", "namespace": "App\\Domain"})
+	def := ch("src/Domain/Order.php", "", map[string]string{"name": "cancelOrder", "receiver": "App\\Domain\\Order", "namespace": "App\\Domain"})
+	other := ch("src/Domain/Other.php", "", map[string]string{"name": "cancelOrder", "receiver": "App\\Domain\\Other", "namespace": "App\\Domain"})
 	if !Accepts(src, caller, def) {
-		t.Fatal("$cashbackCycle is a CashbackCycle, imported or not")
+		t.Fatal("$order is a Order, imported or not")
 	}
 	if Accepts(src, caller, other) {
 		t.Fatal("and not an Other")
@@ -208,25 +208,25 @@ func TestPHPNameThatOneClassDefinesIsThatClassesEvenOnAnUntypedValue(t *testing.
 }
 
 func TestConstructsTiesTheCodeThatMakesACommandToIt(t *testing.T) {
-	cmd := ch("src/Domain/ClawBack.php", "", map[string]string{"name": "ClawBack", "fqn": "App\\Domain\\ClawBack", "namespace": "App\\Domain"})
-	src := "<?php\nnamespace App\\Api;\nuse App\\Domain\\ClawBack;\nclass Controller {}\n"
+	cmd := ch("src/Domain/CancelOrder.php", "", map[string]string{"name": "CancelOrder", "fqn": "App\\Domain\\CancelOrder", "namespace": "App\\Domain"})
+	src := "<?php\nnamespace App\\Api;\nuse App\\Domain\\CancelOrder;\nclass Controller {}\n"
 	ns := map[string]string{"name": "post", "namespace": "App\\Api"}
 	r := Rules{}
 	for call, want := range map[string]bool{
-		"$bus->dispatch(new ClawBack($id));":             true,
-		"$bus->dispatch(ClawBack::fromRequest($r));":     true,
-		"$bus->dispatch(new \\App\\Domain\\ClawBack());": true,
-		"function f(ClawBack $c) {}":                     false, // names the type, makes none
-		"$x = ClawBack::class;":                          false,
-		"$bus->dispatch(new Other());":                   false,
+		"$bus->dispatch(new CancelOrder($id));":             true,
+		"$bus->dispatch(CancelOrder::fromRequest($r));":     true,
+		"$bus->dispatch(new \\App\\Domain\\CancelOrder());": true,
+		"function f(CancelOrder $c) {}":                     false, // names the type, makes none
+		"$x = CancelOrder::class;":                          false,
+		"$bus->dispatch(new Other());":                      false,
 	} {
 		caller := ch("src/Api/Controller.php", call, ns)
 		if got := r.Constructs(src, caller, cmd); got != want {
 			t.Errorf("%q: got %v, want %v", call, got, want)
 		}
 	}
-	elsewhere := ch("src/Api/Controller.php", "new ClawBack()", ns)
+	elsewhere := ch("src/Api/Controller.php", "new CancelOrder()", ns)
 	if r.Constructs("<?php\nnamespace App\\Api;\nclass Controller {}\n", elsewhere, cmd) {
-		t.Error("a ClawBack of another namespace, not imported, is not this one")
+		t.Error("a CancelOrder of another namespace, not imported, is not this one")
 	}
 }

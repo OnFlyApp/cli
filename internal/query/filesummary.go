@@ -15,8 +15,8 @@ const (
 	defaultSummarySymbols = 1
 	// defaultSummaryWeight is the weight of a summary next to a symbol in the fusion. A
 	// summary says only that the file is about the question; 1 lets the summaries
-	// of wrong files outrank a right symbol, 0.5 loses what they add on the
-	// monorepo.
+	// of wrong files outrank a right symbol, 0.5 loses what they add on a
+	// large PHP project.
 	defaultSummaryWeight = 0.7
 )
 

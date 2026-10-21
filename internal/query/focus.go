@@ -302,8 +302,8 @@ func (s *Searcher) pathCandidates(ctx context.Context, terms, all []string, code
 }
 
 // coveringFiles returns the files whose path words (camelCase split, so
-// StatementCycle/Command/EndCycleHandler.php holds statement, cycle, command,
-// end and handler) cover most of the query's words, best first. Words that
+// InvoicePeriod/Command/ClosePeriodHandler.php holds invoice, period, command,
+// close and handler) cover most of the query's words, best first. Words that
 // are common in the index still count: together they name the file.
 func coveringFiles(files, terms []string, codeOnly bool) []string {
 	var words []string
@@ -360,8 +360,8 @@ func baseNamed(file string, terms []string) bool {
 
 // pathWeight is the highest weight among the terms that name a directory or
 // file of the path, and 0 when none does or the only ones are too common. When
-// two or more terms each match a word of the path (StatementCycle/EndCycleHandler
-// holds statement, cycle, end and handler), the share of the query's weight
+// two or more terms each match a word of the path (InvoicePeriod/ClosePeriodHandler
+// holds invoice, period, close and handler), the share of the query's weight
 // they cover counts too, so a path that names the whole question beats one
 // that names part of it.
 func pathWeight(file string, terms []string, weights map[string]float64) float64 {

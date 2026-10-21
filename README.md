@@ -65,7 +65,7 @@ What it does for the model's next step:
 - **The body asked for comes first**, numbered as in the file, ahead of the skeleton, which a long file's token budget would cut. A name that is not in the file expands the **closest names** (`end` for `endCycle`) and says so.
 - **Same-file helpers** that the symbol calls are expanded too, in the room the token budget leaves: the next call the model would make.
 - **`called_by` follows the language.** A call is attributed through the caller's imports and namespace, the declared type of a parameter or property (`$this->limiter->tooManyAttempts()` is `Cache\RateLimiter`, not the neighbour in the same namespace), a variable named for its class, and a method name only one class defines. A caller with one to three callers of its own shows them on its line (**two hops**), so the entrypoint is visible without a second call.
-- **Command and event handlers.** Parsers mark a method that handles a type (`__invoke(ClawBack $command)`, `handle(SomeEvent $e)`); the code that builds that type is listed as a caller of the handler, since a bus, not a call, joins them.
+- **Command and event handlers.** Parsers mark a method that handles a type (`__invoke(CancelOrder $command)`, `handle(SomeEvent $e)`); the code that builds that type is listed as a caller of the handler, since a bus, not a call, joins them.
 
 `onfly_focus(query, limit?)` returns `## symbols` (full code of the top matches), `## related` (one-line signatures of what they use) and the rules. The vector list weighs four times the lexical ones, because a question describes behavior and shares few words with the code; every file also has a short **file summary** chunk (its path, namespace, types and the names it defines) that carries the file's vocabulary into the vectors, and a summary that ranks is replaced by the method of that file which answers the question best. Query words count by rarity, documentation files stay out of the candidates unless the query asks for docs, test files and one-line imports rank last, and an identifier in the question is also searched by its parts (`handleJobException`: handle, job, exception). The tool description asks the calling model to add likely code verbs to its query (for retry: `retry release attempts backoff`) and to switch to `onfly_xray` on a directory instead of repeating a miss. Parameters and edge cases: [MCP server](docs/mcp.md).
 
@@ -82,25 +82,25 @@ Under the hood:
 
 ## Benchmarks
 
-Six code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `pkg/`, and a private PHP monorepo), `qwen3-embedding:0.6b` through Ollama. Every number below is one run; with 8 questions a difference of one or two answers is noise. Method, suites and caveats: [Evaluation](docs/evaluation.md#benchmarks).
+Five open-source code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `pkg/`), `qwen3-embedding:0.6b` through Ollama. Every number below is one run; with 8 questions a difference of one or two answers is noise. Method, suites and caveats: [Evaluation](docs/evaluation.md#benchmarks).
 
 **Retrieval**, `onfly_focus`, file-level recall@5 on questions that name no function:
 
-| | Cobra | Hugo | Onfly | Laravel | Kubernetes | PHP monorepo |
-| --- | --- | --- | --- | --- | --- | --- |
-| Lexical index (no embedder) | 0.75 | 0.43 | 0.30 | 0.12 | 0.12 | 0.14 |
-| Hybrid index | **1.00** | **0.57** | **0.60** | **0.50** | **0.50** | **0.57** |
+| | Cobra | Hugo | Onfly | Laravel | Kubernetes |
+| --- | --- | --- | --- | --- | --- |
+| Lexical index (no embedder) | 0.75 | 0.43 | 0.30 | 0.12 | 0.12 |
+| Hybrid index | **1.00** | **0.57** | **0.60** | **0.50** | **0.50** |
 
 Naming a function is not the hard case: 30 sampled "where is `X` defined" questions per repository (Cobra, Hugo, Onfly, Laravel, Kubernetes) find it in the top five **150 of 150 times** (recall@5 1.00, MRR 0.96 to 0.98).
 
 **Agents**, `Grep`/`Read` (A) against `onfly_xray`/`onfly_focus` (B), answers graded against the source:
 
-| | Cobra | Hugo | Onfly | Laravel | PHP monorepo | Kubernetes | Total |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| A correct | 7/8 | 6/8 | 8/10 | 4/8 | 7/8 | 5/8 | 37/50 |
-| B correct | 7/8 | 6/8 | 8/10 | **8/8** | 4/8 | 5/8 | 38/50 |
+| | Cobra | Hugo | Onfly | Laravel | Kubernetes | Total |
+| --- | --- | --- | --- | --- | --- | --- |
+| A correct | 7/8 | 6/8 | 8/10 | 4/8 | 5/8 | 30/42 |
+| B correct | 7/8 | 6/8 | 8/10 | **8/8** | 5/8 | 34/42 |
 
-Laravel is the clear win: the agent with `Grep` left four answers incomplete because it never opened the body that decides them. Elsewhere the two tie within noise, and the monorepo goes to `Grep` by three answers (the Onfly arm scored 5, 6, 5 and 4 of 8 in four runs, against 7 for `Grep`): its agent stops before the handler, the env binding or the already-closed branch that holds the detail, even after `onfly_xray` started showing the command-bus chain. No wrong answer was recorded in the runs that were graded for it. We do not claim a token saving.
+Laravel is the clear win: the agent with `Grep` left four answers incomplete because it never opened the body that decides them. Elsewhere the two tie within noise. No wrong answer was recorded in the runs that were graded for it. We do not claim a token saving.
 
 ## Configuration
 

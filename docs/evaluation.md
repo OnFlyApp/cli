@@ -69,7 +69,7 @@ Large case lists can be generated: ask a local model for one question per sample
 
 ## Benchmarks
 
-Six code bases: Cobra (Go, 40 files), this repository (Go, 200 files), Hugo (Go, 2,000 files), Laravel framework (PHP, 3,200 files), Kubernetes `pkg/` and `cmd/` (Go, 4,100 files, 44,000 chunks) and a private PHP monorepo (5,600 files). Embeddings are `qwen3-embedding:0.6b` through Ollama. The suites for the five open-source ones are in [`bench/evals`](../bench/README.md); the monorepo's is not published.
+Five code bases: Cobra (Go, 40 files), this repository (Go, 200 files), Hugo (Go, 2,000 files), Laravel framework (PHP, 3,200 files), Kubernetes `pkg/` and `cmd/` (Go, 4,100 files, 44,000 chunks). Embeddings are `qwen3-embedding:0.6b` through Ollama. The suites are in [`bench/evals`](../bench/README.md).
 
 ### Retrieval
 
@@ -82,7 +82,6 @@ File-level recall@5 of `onfly_focus` (`onfly eval --file-level --k 5 --focus`) o
 | This repository | 0.30 | 0.40 | 0.60 |
 | Laravel | 0.12 | not built | 0.50 |
 | Kubernetes | 0.12 | not built | 0.50 |
-| PHP monorepo | 0.14 | not built | 0.57 |
 
 "Before" was measured on the three smaller repositories only; the other three had no embeddings then. It is a lexical-weighted fusion with bare-code vectors and no instruction prefix on the Qwen3 queries; the work was embedding each chunk with its path, kind and symbol, the instruction prefix, weighing the vectors four times the lexical lists, dropping the whole-file boost next to vectors, and the file summaries. On the second suite of each repository (shorter paraphrases, `eval.symbols.yaml`) recall@5 is 0.94 on Cobra, 0.72 on Hugo, 0.90 on this repository, 0.36 on Kubernetes and 0.20 on Laravel; those questions mostly do not name an identifier either, which is why Laravel is low.
 
@@ -98,11 +97,10 @@ Two agents got the same questions, one with `Grep` and `Read` (A) and one with `
 | Hugo | 8 | 6 | 6 | 2 / 0 | 25 + 3 |
 | This repository | 10 | 8 | 8 | rest not split | 11 + 4 |
 | Laravel | 8 | 4 | 8 | 0 / 0 | 28 + 1 |
-| PHP monorepo | 8 | 7 | 4 | 4 / 0 | 22 + 0 |
 | Kubernetes | 8 | 5 | 5 | 3 / 0 | 22 + 3 |
-| Total | 50 | 37 | 38 | | |
+| Total | 42 | 30 | 34 | | |
 
-No wrong answer was recorded on Hugo, Laravel, the monorepo or Kubernetes (the Cobra and this-repository runs were graded only for the number correct). Laravel is the one clear difference: grep left four answers incomplete because it did not open the body that decides the answer, and the skeleton plus `File.php:method` got the agent there. On the monorepo and Kubernetes the Onfly arm lost points by stopping short, not by wrong results. The monorepo was run four times and the Onfly arm scored 5, 6, 5 and 4 of 8 against 7 for `Grep`, so its row is noise around five. The runs ended before fixes that the tools now carry (`File.php:end` expands `endCycle`; the handler's `called_by` shows the event handler that dispatches its command, and `CashbackCycle::clawBackCashback` shows the handler two hops up), and the last run, made with them, still scored lowest: the agent did not follow the chain it was shown, did not name the trigger handler, stated that an ended cycle throws where the handler returns silently, and did not find the environment binding. Cost: B agents used 64k to 78k tokens per repository; the A arm was not measured on the same scale, so there is no token claim here.
+No wrong answer was recorded on Hugo, Laravel or Kubernetes (the Cobra and this-repository runs were graded only for the number correct). Laravel is the one clear difference: grep left four answers incomplete because it did not open the body that decides the answer, and the skeleton plus `File.php:method` got the agent there. On Kubernetes the Onfly arm lost points by stopping short, not by wrong results: it did not expand the helper that held the detail. Cost: B agents used 67k to 78k tokens per repository; the A arm was not measured on the same scale, so there is no token claim here.
 
 `onfly_xray` costs 40 to 60% of the tokens of reading the files it covers (Cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies, such as an interface, costs about the same as the file.
 

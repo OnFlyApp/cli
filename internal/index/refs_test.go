@@ -114,9 +114,9 @@ func TestLinkRefsIncrementalOnlyTouchesChangedFiles(t *testing.T) {
 }
 
 func TestMentionedFindsInjectedAndThrownClasses(t *testing.T) {
-	names := map[string]struct{}{"ClawbackCalculator": {}, "Clock": {}, "FrozenException": {}, "int": {}}
-	got := mentioned("/** @throws \\App\\FrozenException */\npublic function __construct(\n private readonly ClawbackCalculator $calc, ?Clock $c, int $n)", "x", names)
-	if fmt.Sprint(got) != "[ClawbackCalculator Clock FrozenException]" {
+	names := map[string]struct{}{"RefundCalculator": {}, "Clock": {}, "FrozenException": {}, "int": {}}
+	got := mentioned("/** @throws \\App\\FrozenException */\npublic function __construct(\n private readonly RefundCalculator $calc, ?Clock $c, int $n)", "x", names)
+	if fmt.Sprint(got) != "[Clock FrozenException RefundCalculator]" {
 		t.Fatalf("%v", got)
 	}
 }

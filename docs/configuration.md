@@ -251,7 +251,7 @@ The token budget itself is `server.max_tokens`. When the symbol asked for is not
 
 ### Resolver
 
-`resolver.max_unambiguous_definitions` (default 1) is how many definitions a method name may have in the whole project for a call on a value of unknown type (`$cashbackCycle->clawBackCashback()` where nothing says what `$cashbackCycle` is) to be attributed to it: a name only one class defines cannot be anything else. A name every class has (`__construct`, `__toString`) is never unambiguous. A negative value turns the rule off, and then such a call counts only from the method's own namespace or a file that imports its class. Before this rule applies, a variable named for the class (`$cashbackCycle` for `CashbackCycle`) or typed by a parameter or property resolves to that class. See [the call graph](mcp.md#onfly_xray).
+`resolver.max_unambiguous_definitions` (default 1) is how many definitions a method name may have in the whole project for a call on a value of unknown type (`$order->cancelOrder()` where nothing says what `$order` is) to be attributed to it: a name only one class defines cannot be anything else. A name every class has (`__construct`, `__toString`) is never unambiguous. A negative value turns the rule off, and then such a call counts only from the method's own namespace or a file that imports its class. Before this rule applies, a variable named for the class (`$order` for `RewardPeriod`) or typed by a parameter or property resolves to that class. See [the call graph](mcp.md#onfly_xray).
 
 
 ### Query and document prompts

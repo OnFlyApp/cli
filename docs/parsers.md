@@ -37,7 +37,7 @@ Every key is optional except `name` on a chunk that is a symbol. The host reads 
 
 | Key | Set by | Meaning |
 | --- | --- | --- |
-| `name` | all | The symbol's own name (`Execute`, `ClawBackHandler`). A repeated name in one file is allowed. |
+| `name` | all | The symbol's own name (`Execute`, `CancelOrderHandler`). A repeated name in one file is allowed. |
 | `receiver` | methods, members | The type that owns the chunk: `Service` for Go, the qualified class for PHP. Call resolution uses it to tell same-named methods apart. |
 | `namespace` | PHP | The namespace the chunk is in. A call resolves to a class of this namespace or of an import. |
 | `fqn` | PHP | The qualified name: `App\Domain\Cycle` for a class, `App\Domain\Cycle::end` for a method. |

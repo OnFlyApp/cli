@@ -448,7 +448,7 @@ func (r Rules) phpAccepts(src string, caller, def parser.Chunk, name string, sib
 			if !isMethod {
 				continue
 			}
-			// $cashbackCycle->clawBackCashback(): a variable named for the class.
+			// $order->cancelOrder(): a variable named for the class.
 			if isVar && sameClassName(qual[1:], defClass) {
 				return true
 			}
@@ -468,8 +468,8 @@ func (r Rules) phpAccepts(src string, caller, def parser.Chunk, name string, sib
 	return false
 }
 
-// sameClassName says that a variable is named for a class: $cashbackCycle for
-// App\Cashback\CashbackCycle.
+// sameClassName says that a variable is named for a class: $order for
+// App\Orders\Order.
 func sameClassName(variable, class string) bool {
 	if i := strings.LastIndexAny(class, `\.`); i >= 0 {
 		class = class[i+1:]

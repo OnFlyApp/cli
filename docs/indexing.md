@@ -25,7 +25,7 @@ A file is left out, and removed from an existing index, when its base name match
 
 ## Directives
 
-A statement that is only `declare(strict_types=1);` is not a chunk: one per PHP file was 5,455 of the 38,521 chunks of a monorepo, they are returned by `onfly_focus` as a symbol named `statements`, and their short text embeds close to any question that names the file. The words come from `ignore_directives` of the parser entry (default `[declare]` for PHP). A statement that holds a `declare` and other code is kept.
+A statement that is only `declare(strict_types=1);` is not a chunk: one per PHP file was 14% of the chunks of a large PHP project, they are returned by `onfly_focus` as a symbol named `statements`, and their short text embeds close to any question that names the file. The words come from `ignore_directives` of the parser entry (default `[declare]` for PHP). A statement that holds a `declare` and other code is kept.
 
 ## File summaries
 
@@ -40,7 +40,7 @@ Defines: daemon, runNextJob, process, handleJobException, markJobAsFailedIfWillE
 
 It is embedded alone, with the usual `path:` and `kind:` lines. A question about what a file is for shares words with that list, not with any one method body, so the summary finds the file when the symbols do not. `onfly_focus` never returns it as such: it replaces it by the file's best-matching method ([ranking](configuration.md#ranking-in-onfly_focus)). Documents and files with nothing named in them get none; a lexical index (`onfly index --lexical`) gets none, since a summary is for the vectors.
 
-Summaries are written when a file is indexed. `onfly index` also adds them to files indexed before they existed, without touching the other chunks, their vectors or the file's hash: one embedding per file (a 5,000-file project takes a few minutes). On the benchmark suites they took the monorepo's recall@5 from 0.43 to 0.57 and added 0.05 to Hugo's and the Onfly repository's symbol suites, with no loss elsewhere.
+Summaries are written when a file is indexed. `onfly index` also adds them to files indexed before they existed, without touching the other chunks, their vectors or the file's hash: one embedding per file (a 5,000-file project takes a few minutes). On the benchmark suites they added 0.05 to Hugo's and the Onfly repository's symbol suites, with no loss elsewhere.
 
 ## Speed
 
