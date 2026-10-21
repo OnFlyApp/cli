@@ -44,9 +44,6 @@ func New(w io.Writer, o Options) *slog.Logger {
 	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: level}))
 }
 
-// Discard returns a logger that writes nothing.
-func Discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-
 // SafeWriter returns w unless it is standard output, which is never a log
 // destination, or nil.
 func SafeWriter(w io.Writer) io.Writer {

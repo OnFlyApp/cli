@@ -267,10 +267,6 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	return s, nil
 }
 
-func Fuse(lists ...[]parser.Chunk) []parser.Chunk {
-	return FuseWeighted(nil, lists...)
-}
-
 func FuseWeighted(weights []float64, lists ...[]parser.Chunk) []parser.Chunk {
 	return chunksOf(fuseScored(rrfK, weights, lists...))
 }

@@ -315,8 +315,7 @@ func importsAnyDir(imports map[string]string, dir string) bool {
 }
 
 var (
-	phpUse    = regexp.MustCompile(`(?m)^\s*use\s+([\\\w]+)(?:\s+as\s+(\w+))?\s*;`)
-	phpMember = regexp.MustCompile(`(\$?[\\\w]+)\s*(?:::|->|\?->)\s*`)
+	phpUse = regexp.MustCompile(`(?m)^\s*use\s+([\\\w]+)(?:\s+as\s+(\w+))?\s*;`)
 )
 
 // phpUses maps the short name of each imported class to its qualified name.

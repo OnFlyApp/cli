@@ -113,12 +113,6 @@ func (t ToolStat) Saved() int {
 	return (t.RawBytes - t.CompressedBytes) / 4
 }
 
-// ByTool totals the events since a time (the zero time for all of them) per tool.
-func (l *Log) ByTool(ctx context.Context, since time.Time) ([]ToolStat, error) {
-	return l.stats(ctx, since, `SELECT tool_name, '', COUNT(*), COALESCE(SUM(raw_bytes),0), COALESCE(SUM(compressed_bytes),0)
-		FROM telemetry_events WHERE timestamp >= ? GROUP BY tool_name ORDER BY SUM(raw_bytes) DESC`)
-}
-
 // ByTarget totals the events since a time per tool and target.
 func (l *Log) ByTarget(ctx context.Context, since time.Time) ([]ToolStat, error) {
 	return l.stats(ctx, since, `SELECT tool_name, target, COUNT(*), COALESCE(SUM(raw_bytes),0), COALESCE(SUM(compressed_bytes),0)

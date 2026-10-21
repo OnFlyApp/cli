@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -136,18 +135,3 @@ func (t Transcript) OnflyCalls() int {
 
 // SearchCalls counts Grep and Glob calls, the ones onfly_focus replaces.
 func (t Transcript) SearchCalls() int { return t.Tools["Grep"] + t.Tools["Glob"] }
-
-// TopFullReads lists the most-read files.
-func (t Transcript) TopFullReads() []string {
-	var names []string
-	for n := range t.FullReads {
-		names = append(names, n)
-	}
-	sort.Slice(names, func(i, j int) bool {
-		if t.FullReads[names[i]] != t.FullReads[names[j]] {
-			return t.FullReads[names[i]] > t.FullReads[names[j]]
-		}
-		return names[i] < names[j]
-	})
-	return names
-}

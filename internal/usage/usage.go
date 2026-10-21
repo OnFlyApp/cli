@@ -109,5 +109,3 @@ func Load(path string) ([]Event, error) {
 	}
 	return out, sc.Err()
 }
-
-func Key(file, symbol string) string { return file + "\x00" + symbol }
