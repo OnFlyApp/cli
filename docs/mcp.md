@@ -67,25 +67,34 @@ By default the server registers exactly two tools, `onfly_xray` and `onfly_focus
 
 ### `onfly_xray`
 
-Inspects a file, a directory or a symbol with far fewer tokens than reading it. `target` is a project-relative file, a directory, or a symbol. A symbol may be qualified to pick among definitions: `telemetry.Open` or `Summary.Saved` (directory, file name, receiver type or namespace, then name), `Container::make`, or `internal/telemetry/telemetry.go:Open`. One match, or several in one file, resolves to that file with the symbol expanded in the skeleton (its whole body, line-numbered) and its own `<definitions>` block, in one call; `focus_symbol` is only needed to expand something in a file you named by path. `target="eviction_manager.go:IsUnderMemoryPressure"` names the file by the end of its path. If the file is real but has no such symbol, the answer is its skeleton with a `<note>` listing the functions and methods it has. A name with definitions in several files (`Open`) returns up to five `<definition at="file:line">` blocks, code before tests, each with its signature, `calls` and `called_by` and, when there are three or fewer, its code (40 lines at most), and says how many more there are; a qualifier that matches nothing returns all of them with a `<note>`. `focus_symbol` keeps one method fully expanded. `depth` (1 to 4, default 1) is how many caller levels `called_by` follows.
+Inspects a file, a directory or a symbol with far fewer tokens than reading it. `target` is a project-relative file, a directory, or a symbol. A symbol may be qualified to pick among definitions: `telemetry.Open` or `Summary.Saved` (directory, file name, receiver type or namespace, then name), `Container::make`, or `internal/telemetry/telemetry.go:Open`. One match, or several in one file, resolves to that file with the symbol's whole body first (line-numbered, as in the file) and its own `## definitions` block, in one call; `focus_symbol` is only needed to expand something in a file you named by path. `target="eviction_manager.go:IsUnderMemoryPressure"` names the file by the end of its path. If the file is real but has no such symbol, the answer is its skeleton with a `<note>` listing the functions and methods it has. A name with definitions in several files (`Open`) returns up to five `<definition at="file:line">` blocks, code before tests, each with its signature, `calls` and `called_by` and, when there are three or fewer, its code (40 lines at most), and says how many more there are; a qualifier that matches nothing returns all of them with a `<note>`. `focus_symbol` keeps one method fully expanded. `depth` (1 to 4, default 1) is how many caller levels `called_by` follows.
 
 `onfly_xray` does not rebuild code. The skeletonizer copies lines of the file on disk and replaces only the middle of long bodies, using the line ranges stored with each function and method chunk. Everything up to the line that opens the body is kept as written: the docblock, PHP 8 `#[...]` attributes, Go doc comments, a signature spread over several lines, a brace on its own line. The scanner reads the signature as code, so a `{` inside `(...)`, `[...]`, a string, a comment, `interface{}` or `struct{...}` does not end it. A body of 10 lines or fewer, the `focus_symbol`, and a span whose body brace cannot be found are left whole. The closing line is kept. Struct tags and type definitions are never touched.
 
 Each line of the skeleton starts with its line number in the file, so a position read from the skeleton is a position in the file; a marker carries the number of the first line it hides, says which lines those are, and names the `focus_symbol` that expands the function. When anything is collapsed, the first line of the skeleton is a tip saying so. The numbers add a few tokens per line; they are what stops an assistant from counting lines in the collapsed text.
 
-For a file the result is one text block:
+For a file the result is one markdown text:
 
-```xml
-<onfly_context target="app/Services/PaymentService.php" tokens_saved="3420">
-<skeleton>the file, every line numbered as in the file, with every function or method body longer than 10 lines replaced by
-12| // ... [body omitted: original lines 12-58, ~47 lines, ~410 tokens; focus_symbol="Name" expands it] ...</skeleton>
-<blast_radius>
-<calls>- signature [file:line]  (what the file uses, defined in other files)</calls>
-<called_by>- signature [file:line]  (who calls the file's symbols, up to depth)</called_by>
-</blast_radius>
-<architectural_rules>project rules that match the path or chunk types</architectural_rules>
-</onfly_context>
 ```
+# onfly target="app/Services/PaymentService.php" tokens_saved=3420
+## charge                      <- only with a symbol: its body first, numbered as in the file
+## helperName (called by the above, same file)
+## skeleton                    <- the file, bodies over 10 lines replaced by
+ 12|     // ... [body omitted: lines 12-58, ~410 tokens; focus_symbol="name"] ...
+## calls                       <- what the file uses, defined in other files
+- signature [file:line]
+## called_by                   <- who calls the file's symbols, up to depth
+- signature [file:line] <- Grand::caller (Grand.php)
+## definitions                 <- with a bare symbol name: each definition and its callers
+## rules                       <- project rules that match the path (once per session)
+```
+
+The body asked for comes first because a long file's skeleton is cut to the token budget, and a body inside it can fall past the cut. Then:
+
+- **Closest name.** `File.php:end` or `focus_symbol: "end"` where the file has no `end` expands what has the closest name (`endCycle`): equal ignoring case, then a prefix, then a substring, at most three, and a note says so. When nothing is close the note lists the functions the file has.
+- **Same-file helpers.** The long functions of the same file that the symbol calls are expanded too, in the order the body calls them, while the token budget has room (`xray.max_helpers`, default 2). They are the next call an assistant would make.
+- **Entrypoints two hops up.** A caller in `called_by` that has one to three callers of its own shows them on its line (`<- ClawBackCashbackHandler::__invoke (ClawBackCashbackHandler.php)`); test files do not count. It costs two more batched queries.
+- **Handlers.** When the parser marks a method as handling a type (`__invoke(ClawBack $command)`, `handle(SomeEvent $e)`, Go `Handle(ctx, cmd)`), the code that builds that type is listed as a caller of the handler, and the handler as a user of the type: a bus, not a call, joins them. See [parsers](parsers.md#metadata-keys).
 
 `calls` and `called_by` list one-line signatures. The index stores a call as a bare name, so each candidate is checked against the calling chunk's own text and its file's imports: `strings.Split` is not the project's `Split`, a bare call stays in its package, an imported package function must come from that import's directory, a call through a value must be a method, and a PHP `Class::method` must resolve (through `use` and the namespace) to that class. The check covers Go and PHP; other languages match by name. Calls through a value cannot be typed, so methods that many types implement (Go `String`, `Error`, `Read`, `Write`, `Close`, `Len`, `Less`, `Swap`, the JSON and text marshalers, `Scan`, `Value`; PHP `__construct`, `__toString`, `__invoke`, `toArray`, `jsonSerialize`, `handle` and the like) are attributed only to a definition in the caller's own file. Other value calls still match any method of that name. For an interface, a trait or an abstract class the answer also carries `<implementations of="Name">`: the types that declare `implements`, `extends` or (Rust) `impl Trait for` it, taken from what the parsers record, and, for a Go interface, the types that have a method of every name in it, marked `likely: has all its methods` because there is no type information. Embedded interfaces are not followed, and an interface of one method with more than ten matches lists none. The list stops at fifteen.
 
@@ -97,12 +106,16 @@ Each rule is sent once per MCP session, however many files match it, so the seco
 
 ### `onfly_focus`
 
-Searches by meaning and by name and returns a bundle. Ranking weights the lexical lists (keyword, per-word, symbol and path) 0.65 and the semantic ones 0.35, unlike `search`, moves declarations of four lines or fewer (small structs, types, constants) behind everything else unless the query names them, and lifts the symbols of a file or directory the query names: a term equal to a path segment (`skeleton` in `internal/skeleton/skeleton.go`) moves that file's chunks up, by as much as the word is rare, and adds up to six of its named symbols that no list returned, for at most three such files. Four more rules apply to `onfly_focus` only:
+Searches by meaning and by name and returns a bundle. Ranking weighs the vector list four times the lexical lists (keyword, per-word, symbol and path; `search.focus_semantic_weight` 2, `focus_keyword_weight` 0.5), unlike `search`; moves declarations of four lines or fewer (small structs, types, constants) behind everything else unless the query names them; and lifts the symbols of a file or directory the query names: a term equal to a path segment (`skeleton` in `internal/skeleton/skeleton.go`) moves that file's chunks up, by as much as the word is rare, and adds up to six of its named symbols that no list returned, for at most three such files. More rules apply to `onfly_focus` only:
 
-- Rare words count more. Each query word is weighted by `ln(1 + (N - df + 0.5) / (df + 0.5))` over the chunks that hold it, scaled to 0 to 1. The weight scales the per-word keyword list, the name, path and comment match, and the path boost. A word below 0.4 (about 5% of the chunks) names no module: `content` in a site generator no longer pulls in `create/content.go`. Counts stop at 5% of the chunks, so a very common word costs nothing to weigh.
+- Rare words count more. Each query word is weighted by `ln(1 + (N - df + 0.5) / (df + 0.5))` over the chunks that hold it, scaled to 0 to 1. The weight scales the per-word keyword list, the name, path and comment match, and the path boost. A word below 0.4 (about 5% of the chunks) names no module: `content` in a site generator no longer pulls in `create/content.go`. An identifier in the question (`handleJobException`, `max_chunk`) is also searched by its parts, after the whole words.
 - Code comes first. Markdown, text and reStructuredText files are left out of the candidate queries unless the query contains `docs`, `documentation`, `readme`, `guide`, `tutorial`, `changelog` or `markdown`. Test files, one-line `use` and `namespace` chunks, and small declarations rank last.
-- Whole files are checked. The files of the top 40 ranked chunks (at most 20) are read, and a chunk scores `1/rank + 1.5 × the share of the query's weight its whole file mentions`. A file whose functions together cover "table of contents headings" beats a chunk that matches one word. A word found nowhere in the index is left out of that share.
-- A missing embedder is not an error. When the embedder is not running, the semantic list is skipped for a minute and the answer is keyword, name and path only. The bundle is: `<symbols>` with the full code of the top `limit` matches (default 5, at most 20), `<related>` with one-line signatures of what they use, and the matching rules once per session.
+- File summaries. Every file also has a short chunk with its path, namespace, types and the names it defines ([indexing](indexing.md#file-summaries)). It carries the file's vocabulary into the vector list, so a question about what a file is for finds the file when no one method says it. A summary that ranks is replaced, in the result, by the method of that file that scores best against the question.
+- Whole files are checked only for a lexical-only index. There, the files of the top 40 ranked chunks (at most 20) are read and a chunk scores `1/rank + 1.5 × the share of the query's weight its whole file mentions`. Next to vectors it favoured big files that hold every common word, so it is left out.
+- A missing embedder is not an error. When the embedder is not running, the semantic list is skipped for a minute and the answer is keyword, name and path only.
+- The bundle is markdown: `## symbols` with the full code of the top `limit` matches (default 5, at most 20) under `### name @ file:line`, `## related` with one-line signatures of what they use, and the matching rules once per session.
+
+The tool description tells the calling model to put the concept and the verbs and identifiers the code probably uses in one query (for retry: `retry release attempts backoff`), and, when the symbol it expects is missing, to call `onfly_xray` on a directory or read `called_by` instead of repeating the query. That is the cheapest query expansion there is: the model does it while it writes the call. `search.expansion` ([configuration](configuration.md)) can add one more step with a small local model.
 
 ### Telemetry
 

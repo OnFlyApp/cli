@@ -23,6 +23,8 @@ embedder:
   model: embeddinggemma-2
   dimensions: 768                # required, at least 1
   max_input_tokens: 6000         # default 6000; split chunks above this, and (Ollama) the context window requested
+  # timeout_seconds: 120         # one request to the embedder; a batch that times out is split in halves and asked again
+  # batch_size: 32               # chunks per request; default 32, 128 for onfly index --ci
   # api_key: ${OPENAI_API_KEY}   # openai falls back to OPENAI_API_KEY (hosted endpoint only); voyage to VOYAGE_API_KEY
   # send_dimensions: true        # openai: ask the server to shorten vectors; default true for api.openai.com only
   # query_prefix: "task: code retrieval | query: "   # prepended to every search query
@@ -50,6 +52,24 @@ search:                          # optional; how the result lists are fused (val
   type_weights: {}               # score multiplier per chunk type, e.g. {trait_use: 0.3, property: 0.6}; unlisted types keep 1
   summary_word_weight: 0.125     # keyword list over summaries; 0 turns it off
   alt_weight: 1                  # list from the second embedder (embedder.alt)
+  # onfly_focus only, see "Ranking in onfly_focus":
+  # focus_semantic_weight: 2     # the vector list
+  # focus_keyword_weight: 0.5    # the lexical lists
+  # file_summary_weight: 0.7     # a file's summary chunk next to its symbols
+  # summary_symbols: 1           # symbols that stand in for a file summary in a result
+  # candidate_pool: 20           # candidates per list before fusion, when limit is smaller
+
+# xray:                          # onfly_xray output limits (values shown are the defaults); see "onfly_xray limits"
+#   signature_clip: 120
+#   whole_file_lines: 120
+#   collapse_over: 10
+#   max_edges: 15
+#   preview_callers: 3
+#   max_helpers: 2
+#   max_dir_entries: 40
+
+# resolver:                      # how a name in a chunk is attributed to a definition
+#   max_unambiguous_definitions: 1
 
 rules:
   - .onfly/rules/project.md
@@ -73,7 +93,7 @@ indexer:
   parse_timeout_ms: 5000         # per parser call; default 5 s plus 150 ms per KiB of source for WASM parsers
   index_generated: false         # true keeps generated files (Code generated ... DO NOT EDIT, zz_generated*, *.pb.go)
   skip_types: [use]              # drop chunks of these types after parsing (see "onfly stats" for the types); reindex to apply
-  embed_context: false           # prefix each embedded chunk with its path and symbol; reindex after changing
+  # embed_context: true         # default: each embedded chunk carries "path: / kind: / symbol:"; false embeds the bare code
   # summaries: {provider: ollama, model: qwen2.5-coder:7b}   # one-sentence description per chunk, see below
   concurrency: 1                 # files indexed in parallel, 0 to 32; default sequential
   parsers:
@@ -85,6 +105,8 @@ indexer:
     - extensions: [".go"]
       type: wasm
       path: .onfly/plugins/go-parser.wasm
+    - extensions: [".twig"]
+      wasm_path: ./plugins/twig.wasm   # your own parser: same as type: wasm and path:
     - extensions: [".md", ".blade.php"]
       type: stdio                # needs ONFLY_ALLOW_STDIO=1 in the environment
       command: php .onfly/plugins/custom_chunker.php
@@ -130,6 +152,30 @@ indexer:
       exclude: ["**/*_test.go", "**/testdata/**"]
 ```
 
+### Language rules
+
+What the core needs to know about a language that its parser does not say sits on the parser entry of the extension, with built-in defaults for `.go` and `.php`. A key you set replaces the default for those extensions; one you leave out keeps it. `onfly doctor` lists the entries that change a default.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `wasm_path` | none | A parser file, relative to the project root. Same as `type: wasm` plus `path:`; `path:` wins when both are set. It lets you try a grammar or a fork without a release. |
+| `ignore_directives` | `.php`: `[declare]` | A statement that is only a call of one of these words (`declare(strict_types=1);`) is not indexed. A single word each; `[]` indexes them. |
+| `self_qualifiers` | `.php`: `["$this", "self", "static", "parent"]` | The member-access prefixes that mean "this class". A call through one is attributed to a method of the caller's own class chain. |
+| `generated` | `.go`: `["zz_generated*", "*.pb.go", "*.pb.gw.go"]`; `.php`: `["_ide_helper*.php", ".phpstorm.meta.php"]` | Base-name globs (case-insensitive) of machine-written files. They are left out of the index and removed from an existing one, unless `indexer.index_generated` is true. |
+| `generated_headers` | `["code generated*do not edit", "@generated"]` for every language | Markers in the first kilobyte of a file. `*` separates fragments that must all be present. |
+
+```yaml
+indexer:
+  parsers:
+    - extensions: [".php", ".phtml"]
+      type: wasm
+      path: .onfly/plugins/php-parser.wasm
+      ignore_directives: [declare]
+      generated: ["_ide_helper*.php", "*.generated.php"]
+```
+
+`extensions`, `include`, `exclude` and the rules are checked when the config loads: an `ignore_directives` entry that is not a single word, an invalid glob or an empty `self_qualifiers` entry fails with the parser named. A rules key on an entry needs that entry's parser to be valid; there are no rules-only entries. The `skip_types` option covers what other tools call `index_properties`: `skip_types: [property]` leaves properties out.
+
 ### Exclude names
 
 `indexer.exclude` matches a path segment. `vendor` skips `vendor/lib/a.go` and `src/vendor/a.go`. `.onfly` and `.git` are always skipped.
@@ -171,7 +217,42 @@ The defaults were fitted with [`onfly eval tune`](evaluation.md#tuning) on half 
 
 If the embedder is unreachable, `search` logs a warning and answers from keyword results alone instead of failing. A cancelled request still fails. Query vectors are cached in memory (256 entries), so a repeated query does not call the embedder again.
 
-`indexer.embed_context: true` embeds `path: <file>` and `symbol: <Receiver.Name>` ahead of each chunk, so a query naming a file or function can match its vector. Stored content is unchanged. Chunks already in the index keep their old vectors until their file changes, so reindex from scratch (delete `.onfly/vector.db`) to apply it everywhere, and compare with `onfly eval --baseline`.
+By default each chunk is embedded with `path: <file>`, `kind: <type>` and `symbol: <Receiver.Name>` ahead of its code, so a query naming a file or function can match its vector. Stored content is unchanged. `indexer.embed_context: false` embeds the bare code. Chunks already in the index keep their old vectors until their file changes, so reindex from scratch (delete `.onfly/vector.db`) to apply a change everywhere, and compare with `onfly eval --baseline`.
+
+### Ranking in onfly_focus
+
+`onfly_focus` fuses the same lists with its own weights, because a question there describes behavior and shares few words with the code: the vector list weighs four times the lexical ones, and the whole-file keyword boost that helps a lexical-only index is left out when vectors took part (it favoured big files that hold every common word). On the benchmark suites that took Hugo's file-level recall@5 from 0.29 to 0.57 and the Onfly repository's from 0.40 to 0.60.
+
+| Key | Default | |
+| --- | --- | --- |
+| `focus_semantic_weight` | 2 | weight of the vector list |
+| `focus_keyword_weight` | 0.5 | weight of the keyword, per-word and name lists |
+| `file_summary_weight` | 0.7 | weight of a [file summary](indexing.md#file-summaries) next to a symbol; `type_weights: {file_summary: ...}` wins over it |
+| `summary_symbols` | 1 | how many symbols of a file replace its summary in a result. More takes the places of other files' matches: 3 halved Hugo's recall. |
+| `candidate_pool` | 20 | candidates each list gathers before fusion when `limit` is smaller |
+
+A result that is a file summary is replaced, at its place, by the method of that file that scores best against the question (the cosine of its vector with the query's, plus the share of the question's words in its name and text), or by a method the ranking already holds. A weight of 0 is accepted; a negative one fails when the config loads. Measure a change with `onfly eval --focus` ([evaluation](evaluation.md)) before keeping it: in the sweeps behind these defaults, semantic 1 to 2 with lexical 0.5 to 1 never beat 2 and 0.5, and a file-cluster boost of 0.2 or more lowered Hugo and Laravel.
+
+### onfly_xray limits
+
+`xray` sets the size of what `onfly_xray` prints. A zero or missing value takes the default.
+
+| Key | Default | |
+| --- | --- | --- |
+| `signature_clip` | 120 | characters at which a signature line is cut |
+| `whole_file_lines` | 120 | a file this many lines long or shorter is shown whole, bodies included |
+| `collapse_over` | 10 | a function longer than this is collapsed to its signature in a skeleton, with the lines and tokens it hides |
+| `max_edges` | 15 | callers and callees listed |
+| `preview_callers` | 3 | a caller that has this many callers or fewer shows them on its line, `<- Handler::handle (Handler.php)`; one with more is an interface, not an entrypoint, and shows none |
+| `max_helpers` | 2 | same-file functions the asked symbol calls that are expanded after it, in the room the token budget leaves |
+| `max_dir_entries` | 40 | files listed for a directory |
+
+The token budget itself is `server.max_tokens`. When the symbol asked for is not in the file (`File.php:end`), `onfly_xray` expands the closest names (equal ignoring case, then prefix, then substring; at most three) and says so.
+
+### Resolver
+
+`resolver.max_unambiguous_definitions` (default 1) is how many definitions a method name may have in the whole project for a call on a value of unknown type (`$cashbackCycle->clawBackCashback()` where nothing says what `$cashbackCycle` is) to be attributed to it: a name only one class defines cannot be anything else. A name every class has (`__construct`, `__toString`) is never unambiguous. A negative value turns the rule off, and then such a call counts only from the method's own namespace or a file that imports its class. Before this rule applies, a variable named for the class (`$cashbackCycle` for `CashbackCycle`) or typed by a parameter or property resolves to that class. See [the call graph](mcp.md#onfly_xray).
+
 
 ### Query and document prompts
 
@@ -183,7 +264,7 @@ embedder:
   document_prefix: "title: none | text: "
 ```
 
-`query_prefix` goes in front of every search query (and expansion text), `document_prefix` in front of every chunk at index time, so changing the document prefix needs a fresh index (the summary cache keeps that cheap). Models without task prompts (Qwen3-Embedding takes an `Instruct: ... Query: ` prefix on the query side only) should be measured before setting any.
+`query_prefix` goes in front of every search query (and expansion text), `document_prefix` in front of every chunk at index time, so changing the document prefix needs a fresh index (the summary cache keeps that cheap). Qwen3-Embedding takes an `Instruct: ... Query: ` prefix on the query side only, so when the model name contains `qwen3-embedding` and `query_prefix` is empty Onfly sends `Instruct: Given a question about how a code base works, retrieve the source code that implements it` itself; without it retrieval of a question dropped (Hugo's vectors found 0 of 7). Other models without task prompts should be measured before setting any.
 
 ### Second embedder
 

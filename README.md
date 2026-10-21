@@ -1,17 +1,17 @@
 # Onfly: a context compressor for AI coding agents
 
-> Experimental, test repository. Retrieval scores on Go and PHP repositories of 40 to 5,000 files are in [Evaluation](docs/evaluation.md#large-repositories-and-other-languages). Savings in agent runs are modest and depend on how often the assistant calls Onfly instead of `Grep` and `Read`; cost savings are not measured.
+> Experimental. Retrieval and agent benchmarks on six code bases, with the numbers and their limits, are in [Evaluation](docs/evaluation.md#benchmarks) and summarized [below](#benchmarks). Savings in agent runs depend on how often the assistant calls Onfly instead of `Grep` and `Read`; cost savings are not measured.
 
-Onfly is a CGO-free Go CLI and MCP server. It parses your code into chunks with WebAssembly parsers and gives Claude Code, Cursor or any MCP client two tools, each answering in one round-trip: `onfly_xray` returns a file's skeleton, who calls it, what it calls and your project rules, and `onfly_focus` returns the best-matching code and what it uses. A call comes back smaller than the files it replaces; `onfly stats` shows the estimate.
+Onfly is a single Go binary with no CGO. It parses your code into chunks with WebAssembly parsers ([wazero](https://wazero.io)), keeps them in SQLite (or Postgres), and gives Claude Code, Cursor or any MCP client two tools, each answering in one round-trip: `onfly_xray` returns a file's skeleton, who calls it, what it calls and your project rules, and `onfly_focus` returns the best-matching code and what it uses. Search is local-first and hybrid: names, text and paths, plus vectors from [Ollama](https://ollama.com) (`qwen3-embedding`) for questions that describe behavior in words the code does not use. A call comes back smaller than the files it replaces; `onfly stats` shows the estimate.
 
 ## Why not just `Read` and `Grep`?
 
 | | Native agent flow | With Onfly |
 | --- | --- | --- |
 | Understand a file | `Read` the whole file, every method body | `onfly_xray`: signatures, attributes and docblocks kept, long bodies collapsed to `// ... [body omitted: original lines 12-58, ~47 lines, ~410 tokens; focus_symbol="Name" expands it] ...`, every line numbered as in the file |
-| Who calls this? | Several `Grep`s, then `Read` each hit | `called_by` and `calls` in the same answer, resolved through imports so `strings.Split` is not your `Split` |
+| Who calls this? | Several `Grep`s, then `Read` each hit | `called_by` and `calls` in the same answer, resolved through imports, parameter and property types, so `strings.Split` is not your `Split`; the entrypoint two hops up is on the same line |
 | Find a flow | `Grep` for guessed words, read the false hits | `onfly_focus`: ranked by name and meaning, full code of the best few plus signatures of what they use |
-| Project conventions | Whatever the model remembered from `CLAUDE.md` | The rules that match the returned paths ride along in `<architectural_rules>`, once per session |
+| Project conventions | Whatever the model remembered from `CLAUDE.md` | The rules that match the returned paths ride along, once per session |
 | Cost visibility | None | `onfly stats` totals the estimated tokens saved |
 
 ## Quickstart
@@ -35,50 +35,115 @@ Restart Claude Code and ask about your code.
 
 ## What the tools return
 
-`onfly_xray(target, focus_symbol?, depth?)` where `target` is a file, a directory or a symbol. A symbol can be qualified (`telemetry.Open`, `Summary.Saved`, `Container::make`, `internal/telemetry/telemetry.go:Open`); a bare name that several files define (`Open`) returns every definition with its own callers, so no second call is needed. A trimmed real answer for `internal/mcp/xray.go` in this repository:
+`onfly_xray(target, focus_symbol?, depth?)` where `target` is a file, a directory or a symbol. A symbol can be qualified (`telemetry.Open`, `Summary.Saved`, `Container::make`, `internal/telemetry/telemetry.go:Open`); a bare name that several files define (`Open`) returns every definition with its own callers, so no second call is needed. A trimmed real answer, for a name that is only close (`expandFileSumm`) in this repository:
 
-```xml
-<onfly_context target="internal/mcp/xray.go" tokens_saved="1865">
-<skeleton>
-// [Tip: a "body omitted" line is a collapsed function; the numbers on the left are line numbers of the original file. To read one body call onfly_xray with focus_symbol="<name>" (or read those lines).]
-36| func (h *tools) xray(ctx context.Context, req *sdkmcp.CallToolRequest, in xrayIn) (*sdkmcp.CallToolResult, struct{}, error) {
-37| 	start := time.Now()
-38| 	res, out, err := h.runXray(ctx, req, in)
-39| 	h.record("onfly_xray", in, start, resultText(res), 0)
-40| 	return res, out, err
-41| }
-42|
-43| func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayIn) (*sdkmcp.CallToolResult, struct{}, error) {
-44| 	// ... [body omitted: original lines 44-74, ~31 lines, ~299 tokens; focus_symbol="runXray" expands it] ...
-75| }
-</skeleton>
-<blast_radius>
-<calls>
-- func Collapse(src string, spans []Span, focus string, minLines int) string { [internal/skeleton/skeleton.go:16]
-- func (h *tools) rulesOnce(q rules.Query) (string, int) { [internal/mcp/macro.go:19]
-</calls>
-<called_by>
-- func NewServer(cfg config.Config, store vectorstore.Store, ...) (*sdkmcp.Server, func(), error) { [internal/mcp/server.go:143]
-</called_by>
-</blast_radius>
-<architectural_rules>
-# Project
+```text
+# onfly target="internal/query/filesummary.go" tokens_saved=104
+> no symbol "expandFileSumm" in this file; expanded the closest by name: expandFileSummaries
+## expandFileSummaries
+23| // expandFileSummaries replaces each file summary in the ranking, at its place,
+...
+29| func (s *Searcher) expandFileSummaries(ctx context.Context, query string, ranked []parser.Chunk) []parser.Chunk {
+...
+## scoreAgainst (called by the above, same file)
+...
+## skeleton
+// [Tip: a "body omitted" line is a collapsed function; the numbers on the left are line numbers of the original file. ...]
+ 29| func (s *Searcher) expandFileSummaries(...) []parser.Chunk {
+ 30|     // ... [body omitted: lines 30-95, ~540 tokens; focus_symbol="expandFileSummaries"] ...
+...
+## calls
+- func ChunkKey(c parser.Chunk) string { [internal/query/query.go:345]
+## called_by
+- func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, error) { [internal/query/focus.go:38] <- tools::runFocus (focus.go)
+## rules
 - Build with `CGO_ENABLED=0`. Do not add a dependency that needs cgo.
-</architectural_rules>
-</onfly_context>
 ```
 
-`onfly_focus(query, limit?)` returns `<symbols>` (full code of the top matches), `<related>` (one-line signatures of what they use) and the rules. Ranking weights the name, path and word lists 0.65 and the embedder 0.35. Query words count by rarity (a word in 5% of the chunks adds little), documentation files stay out of the candidates unless the query asks for docs, test files and one-line imports rank last, and files that cover more of the question as a whole rank higher. Parameters and edge cases: [MCP server](docs/mcp.md).
+What it does for the model's next step:
+
+- **The body asked for comes first**, numbered as in the file, ahead of the skeleton, which a long file's token budget would cut. A name that is not in the file expands the **closest names** (`end` for `endCycle`) and says so.
+- **Same-file helpers** that the symbol calls are expanded too, in the room the token budget leaves: the next call the model would make.
+- **`called_by` follows the language.** A call is attributed through the caller's imports and namespace, the declared type of a parameter or property (`$this->limiter->tooManyAttempts()` is `Cache\RateLimiter`, not the neighbour in the same namespace), a variable named for its class, and a method name only one class defines. A caller with one to three callers of its own shows them on its line (**two hops**), so the entrypoint is visible without a second call.
+- **Command and event handlers.** Parsers mark a method that handles a type (`__invoke(ClawBack $command)`, `handle(SomeEvent $e)`); the code that builds that type is listed as a caller of the handler, since a bus, not a call, joins them.
+
+`onfly_focus(query, limit?)` returns `## symbols` (full code of the top matches), `## related` (one-line signatures of what they use) and the rules. The vector list weighs four times the lexical ones, because a question describes behavior and shares few words with the code; every file also has a short **file summary** chunk (its path, namespace, types and the names it defines) that carries the file's vocabulary into the vectors, and a summary that ranks is replaced by the method of that file which answers the question best. Query words count by rarity, documentation files stay out of the candidates unless the query asks for docs, test files and one-line imports rank last, and an identifier in the question is also searched by its parts (`handleJobException`: handle, job, exception). The tool description asks the calling model to add likely code verbs to its query (for retry: `retry release attempts backoff`) and to switch to `onfly_xray` on a directory instead of repeating a miss. Parameters and edge cases: [MCP server](docs/mcp.md).
 
 Under the hood:
 
-- Parsers are WebAssembly plugins ([wazero](https://wazero.io), no CGO, no host access). The official Go parser uses `go/parser`; the PHP, TypeScript, JavaScript, Python and Rust parsers use a pure-Go Tree-sitter port. They install with `onfly ext install go|php|typescript|javascript|python|rust`. Any program that prints chunks can be a parser.
+- Parsers are WebAssembly plugins (wazero, no CGO, no host access). The official Go parser uses `go/parser`; the PHP, TypeScript, JavaScript, Python and Rust parsers use a pure-Go Tree-sitter port. They install with `onfly ext install go|php|typescript|javascript|python|rust`. Any program that prints chunks can be a parser, and `wasm_path:` points a project at your own `.wasm` without a release; the [contract](docs/parsers.md) covers metadata such as `param_types` and `handles`.
 - The skeletonizer copies lines of the file and never re-renders code. Docblocks, PHP 8 `#[...]` attributes, Go struct tags and multi-line signatures survive byte for byte; only the middle of long bodies is replaced, and the scanner ignores braces inside parameters, strings and `interface{}`.
-- Calls are resolved from the caller's imports and namespaces (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository, and a PHP `$this->name()` resolves only to the caller's own class, a class it imports, or its namespace. Blast-radius queries are batched, a fixed number per call.
-- Generated code is left out. Files that say "Code generated ... DO NOT EDIT", `zz_generated*` and `*.pb.go` are not indexed (17% of the chunks in Kubernetes); `indexer.index_generated: true` keeps them.
+- Calls are resolved from the caller's imports and namespaces (Go and PHP), so a standard-library call is not attributed to a same-named function in your repository. Blast-radius queries are batched, a fixed number per call.
+- Generated code and noise are left out by per-language rules you can change: files that say "Code generated ... DO NOT EDIT", `zz_generated*`, `*.pb.go`, `_ide_helper*.php`, and `declare(strict_types=1);` statements (17% of the chunks in Kubernetes are generated; `indexer.index_generated: true` keeps them).
+- Embedding is resilient: a batch an Ollama server times out on is split in halves instead of retried whole, and a file indexed before file summaries existed gets its summary without any other vector being recomputed.
 - Locations point at the declaration line, below any docblock.
 - Matching rules from `.onfly/rules/` (or `CLAUDE.md` and friends) are appended to the tool result once per MCP session, held in memory, so the assistant does not have to ask for them.
 - Telemetry uses a modest baseline: for `onfly_xray` the file plus 150 tokens for each file it calls or is called from, for `onfly_focus` the whole files of the three best matches. Tokens are bytes divided by four.
+
+## Benchmarks
+
+Six code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `pkg/`, and a private PHP billing monorepo), `qwen3-embedding:0.6b` through Ollama. Every number below is one run; with 8 questions a difference of one or two answers is noise. Method, suites and caveats: [Evaluation](docs/evaluation.md#benchmarks).
+
+**Retrieval**, `onfly_focus`, file-level recall@5 on questions that name no function:
+
+| | Cobra | Hugo | Onfly | Laravel | Kubernetes | PHP monorepo |
+| --- | --- | --- | --- | --- | --- | --- |
+| Lexical index (no embedder) | 0.75 | 0.43 | 0.30 | 0.12 | 0.12 | 0.14 |
+| Hybrid index | **1.00** | **0.57** | **0.60** | **0.50** | **0.50** | **0.57** |
+
+Naming a function is not the hard case: 30 sampled "where is `X` defined" questions per repository (Cobra, Hugo, Onfly, Laravel, Kubernetes) find it in the top five **150 of 150 times** (recall@5 1.00, MRR 0.96 to 0.98).
+
+**Agents**, `Grep`/`Read` (A) against `onfly_xray`/`onfly_focus` (B), answers graded against the source:
+
+| | Cobra | Hugo | Onfly | Laravel | PHP monorepo | Kubernetes | Total |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| A correct | 7/8 | 6/8 | 8/10 | 4/8 | 7/8 | 5/8 | 37/50 |
+| B correct | 7/8 | 6/8 | 8/10 | **8/8** | 5/8 | 5/8 | 39/50 |
+
+Laravel is the clear win: the agent with `Grep` left four answers incomplete because it never opened the body that decides them. Elsewhere the two tie within noise, and the monorepo goes to `Grep` by two answers: the Onfly arm stopped before the helper that held the detail. No wrong answer was recorded in the runs that were graded for it. We do not claim a token saving.
+
+## Configuration
+
+Everything below is optional, and everything has a default. `onfly init` writes a commented `.onfly/config.yaml`; `onfly doctor` validates it and names the sections that change a default.
+
+```yaml
+embedder:
+  provider: ollama
+  endpoint: http://localhost:11434
+  model: qwen3-embedding:0.6b     # the Qwen3 query instruction is added for you
+  dimensions: 1024
+  timeout_seconds: 120            # a batch that times out is split in halves
+  batch_size: 32
+
+indexer:
+  include: ["**/*"]
+  exclude: [vendor, node_modules]
+  parsers:
+    - extensions: [.php]
+      type: wasm
+      path: .onfly/plugins/php-parser.wasm
+      ignore_directives: [declare]                       # declare(strict_types=1) is not a chunk
+      generated: ["_ide_helper*.php"]                    # machine-written files are left out
+    - extensions: [.twig]
+      wasm_path: ./plugins/twig.wasm                     # your own parser, no release needed
+      exclude: ["**/vendor/**"]
+
+search:                           # onfly_focus
+  focus_semantic_weight: 2
+  focus_keyword_weight: 0.5
+  file_summary_weight: 0.7
+  candidate_pool: 20
+
+xray:                             # how much onfly_xray prints
+  whole_file_lines: 120           # a file this short is shown whole
+  preview_callers: 3              # callers shown two hops up
+  max_helpers: 2                  # same-file helpers expanded with a symbol
+
+resolver:
+  max_unambiguous_definitions: 1  # a method only one class defines is attributed to an untyped call
+```
+
+Every key, its default and what it changes: [Configuration](docs/configuration.md).
 
 ## Optional: summaries from a local model
 
@@ -130,7 +195,7 @@ Every command is in [Commands](docs/commands.md). If small declarations crowd th
                                   assistant ◄── MCP ◄── onfly serve
 ```
 
-Chunks are searchable by name, text and path as soon as they are parsed; the embedder adds search by meaning when it is running, and a missing or failing embedder never stops indexing. Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or reranker (Voyage, Cohere, Jina). Beyond the two tools, `onfly lint`, `onfly audit` and `onfly env` use the same index; see [Commands](docs/commands.md) and the [v3 roadmap](docs/ROADMAP-V3.md).
+Chunks are searchable by name, text and path as soon as they are parsed; the embedder adds search by meaning when it is running, and a missing or failing embedder never stops indexing. Nothing is uploaded unless you choose a hosted embedder (OpenAI, Voyage) or reranker (Voyage, Cohere, Jina). Beyond the two tools, `onfly lint`, `onfly audit` and `onfly env` use the same index; see [Commands](docs/commands.md).
 
 ## Guides
 

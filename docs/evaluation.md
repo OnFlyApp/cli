@@ -67,27 +67,43 @@ Each recorded question becomes a case whose expected hit is the chunk the assist
 
 Large case lists can be generated: ask a local model for one question per sampled symbol, drop questions that contain the symbol name, and keep the symbol as the expectation. Such cases flatter retrieval, because the question was written from the code, so keep your hand-written cases as a separate file and look at both.
 
-## Large repositories and other languages
+## Benchmarks
 
-Retrieval only, without an agent: for each question, `onfly_focus` with `limit: 5` against a simulated keyword search (rank files by the question's words, read the top three whole). A hit is the expected file in the top five. Token counts are bytes divided by four. The indexes were built without an embedder unless noted. Questions for the last three rows were written as paraphrases that do not repeat the code's names, which favors search by meaning.
+Six code bases: Cobra (Go, 40 files), this repository (Go, 200 files), Hugo (Go, 2,000 files), Laravel framework (PHP, 3,200 files), Kubernetes `pkg/` and `cmd/` (Go, 4,100 files, 44,000 chunks) and a private PHP billing monorepo (5,600 files). Embeddings are `qwen3-embedding:0.6b` through Ollama. The suites for the five open-source ones are in [`bench/evals`](../bench/README.md); the monorepo's is not published.
 
-| Repository | Files / chunks | Index time | `onfly_focus` | Keyword search | Tokens, focus vs keyword | Median latency |
-| --- | --- | --- | --- | --- | --- | --- |
-| cobra (Go) | 40 / 653 | 1.7 s | 15/16 | 16/16 | 20k vs 498k | 40 ms |
-| this repository (Go) | 190 / 1.4k | 1 s | 12/20 | 5/20 | 21k vs 162k | 50 ms |
-| Hugo (Go and docs) | 2,029 / 12k | 13 s | 12/18 (4/18 before rarity weighting, code-only candidates and file coverage) | 8/18 | 20k vs 129k | 146 ms |
-| Laravel (PHP), no embedder | 3,208 / 56k | 5 min | 4/15 | 5/15 (8/15 without tests) | 18k vs 978k | 165 ms |
-| Laravel, with embeddings | same | 85 min | 6/15 | same | 13k vs 978k | 273 ms |
-| Kubernetes (Go), no embedder | 4,685 / 44k | 44 s (746 s before the split fix) | 2/11 | 0/11 | 15k vs 5.9M | 540 ms |
+### Retrieval
 
-`onfly_xray` used 40 to 60% of the tokens of reading the files it covers (cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies, such as an interface, costs about the same as the file. On the five largest Laravel files it answers in 100 to 220 ms, on Kubernetes' `validation.go` (373 chunks) in 0.4 s.
+File-level recall@5 of `onfly_focus` (`onfly eval --file-level --k 5 --focus`) on questions that describe behavior and name no function. Lexical is an index without an embedder. Hybrid is the default index: vectors plus the lexical lists plus file summaries.
 
-Two agents got the same questions, one with `Grep` and `Read` and one with the Onfly tools.
+| Repository | Lexical only | Hybrid before the retrieval work | Hybrid now |
+| --- | --- | --- | --- |
+| Cobra | 0.75 | 0.75 | 1.00 |
+| Hugo | 0.43 | 0.29 | 0.57 |
+| This repository | 0.30 | 0.40 | 0.60 |
+| Laravel | 0.12 | not built | 0.50 |
+| Kubernetes | 0.12 | not built | 0.50 |
+| PHP monorepo | 0.14 | not built | 0.57 |
 
-- This repository, 10 questions, and Laravel, 8 questions (routing middleware, container resolution, `Model::save`, callers of one method, Blade, queue, filesystem, validation): every answer was correct in both arms, at about 50k tokens each and 33 to 48 seconds. On Laravel two of Onfly's answers were less complete, and its PHP line numbers were off by the length of the docblock before the declaration-line fix.
-- Kubernetes, 8 questions on the scheduler, admission chain, ReplicaSet and eviction code, with a lexical index, run twice: every answer was correct in both arms and the Onfly arm used more tokens, 73.0k against 52.8k in the first run and 68.8k against 55.6k in the second. In the first run it reported wrong line numbers, because a skeleton with its bodies cut out has no line numbers of its own. Every skeleton line now carries its number in the file, and the second run's numbers were exact.
+"Before" was measured on the three smaller repositories only; the other three had no embeddings then. It is a lexical-weighted fusion with bare-code vectors and no instruction prefix on the Qwen3 queries; the work was embedding each chunk with its path, kind and symbol, the instruction prefix, weighing the vectors four times the lexical lists, dropping the whole-file boost next to vectors, and the file summaries. On the second suite of each repository (shorter paraphrases, `eval.symbols.yaml`) recall@5 is 0.94 on Cobra, 0.72 on Hugo, 0.90 on this repository, 0.36 on Kubernetes and 0.20 on Laravel; those questions mostly do not name an identifier either, which is why Laravel is low.
 
-On a well-named codebase a capable agent answers direct questions with grep at the same or lower cost. Onfly's advantage shows in reading large files, where the skeleton takes about half the tokens, and in questions about who calls what.
+Exact names are not the problem: `eval.identifiers.yaml` asks "where is X defined and what does it do" for 30 sampled functions per repository, and symbol-level recall@5 is 150 of 150 (1.00, MRR 0.96 to 0.98). A lexical-only paraphrase question stays hard, because the words are not in the code; that gap is what the vectors close. A question whose code says `release`, `backoff` and `exception` for "tried again later" can still miss, and no ranking weight tried here fixed it.
 
-What the larger repositories exposed, all fixed: the split overlap tokenized the whole chunk once per rune it dropped (59% of the CPU on Kubernetes); the resolvers recompiled a regular expression per candidate (5 s for `Model.php`); "who references this name" scanned every chunk; document frequencies of common words were counted in full; 17% of the Kubernetes chunks were generated files; a PHP `$this->getName()` resolved to unrelated classes; and Markdown sections appeared as callers. Still open: the PHP parser's 80 KB limit and per-file cost ([Parsers](parsers.md#known-limits-of-the-published-parsers)).
+### Agents
 
+Two agents got the same questions, one with `Grep` and `Read` (A) and one with `onfly_xray` and `onfly_focus` (B); a third read the real source and graded every answer correct, partial or wrong. One run per arm and repository; with 8 questions a difference of one or two is noise.
+
+| Repository | Questions | A correct | B correct | B partial / wrong | B calls (onfly + native) |
+| --- | --- | --- | --- | --- | --- |
+| Cobra | 8 | 7 | 7 | rest not split | 8 + 3 |
+| Hugo | 8 | 6 | 6 | 2 / 0 | 25 + 3 |
+| This repository | 10 | 8 | 8 | rest not split | 11 + 4 |
+| Laravel | 8 | 4 | 8 | 0 / 0 | 28 + 1 |
+| PHP monorepo | 8 | 7 | 5 | 3 / 0 | 19 + 1 |
+| Kubernetes | 8 | 5 | 5 | 3 / 0 | 22 + 3 |
+| Total | 50 | 37 | 39 | | |
+
+No wrong answer was recorded on Hugo, Laravel, the monorepo or Kubernetes (the Cobra and this-repository runs were graded only for the number correct). Laravel is the one clear difference: grep left four answers incomplete because it did not open the body that decides the answer, and the skeleton plus `File.php:method` got the agent there. On the monorepo and Kubernetes the Onfly arm lost points by stopping short, not by wrong results: it did not expand the helper that held the detail, or asked for `Cycle.php:end` and gave up, which `onfly_xray` now answers by expanding `endCycle`. Cost: B agents used 64k to 78k tokens per repository; the A arm was not measured on the same scale, so there is no token claim here.
+
+`onfly_xray` costs 40 to 60% of the tokens of reading the files it covers (Cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies, such as an interface, costs about the same as the file.
+
+On a well-named codebase a capable agent answers direct questions with grep at the same cost or lower. The Onfly tools earn their place on large files (the skeleton takes about half the tokens), on who-calls-what questions, and on questions whose words are not in the code.

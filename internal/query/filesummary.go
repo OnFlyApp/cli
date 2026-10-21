@@ -20,12 +20,11 @@ const (
 	defaultSummaryWeight = 0.7
 )
 
-// expandFileSummaries replaces each file summary in the ranking by symbols of
-// that file, at the summary's place: a method or function the ranking already
-// holds, best first, else the largest one the file has. Code to read, not the
-// class that holds it. A summary says that the file
-// is what the question is about; the code to read is in its symbols, and a
-// symbol that matched on its own is not listed twice.
+// expandFileSummaries replaces each file summary in the ranking, at its place,
+// by the method or function of that file that answers the query best: one the
+// ranking already holds, else the one that scores best (see scoreAgainst). A
+// summary says that the file is what the question is about; the code to read is
+// in its symbols, and a symbol that matched on its own is not listed twice.
 func (s *Searcher) expandFileSummaries(ctx context.Context, query string, ranked []parser.Chunk) []parser.Chunk {
 	has := false
 	for _, c := range ranked {

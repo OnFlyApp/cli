@@ -21,13 +21,32 @@ A lexical run parses with one worker per core (at most 8) unless `indexer.concur
 
 ## Generated files
 
-A file is left out, and removed from an existing index, when its name starts with `zz_generated` or ends with `.pb.go` or `.pb.gw.go`, or when its first kilobyte says `Code generated` and `DO NOT EDIT`, or `@generated`. In Kubernetes (`pkg`, `cmd`, `apiserver`) that was 9,500 of 54,000 chunks. `indexer.index_generated: true` indexes them.
+A file is left out, and removed from an existing index, when its base name matches one of the `generated` globs of its language, or when its first kilobyte holds one of the `generated_headers` markers. The built-in rules are `zz_generated*`, `*.pb.go` and `*.pb.gw.go` for Go, `_ide_helper*.php` and `.phpstorm.meta.php` for PHP, and, for every language, `Code generated ... DO NOT EDIT` and `@generated`. In Kubernetes (`pkg`, `cmd`, `apiserver`) that was 9,500 of 54,000 chunks. Both lists are set per parser ([language rules](configuration.md#language-rules)); `indexer.index_generated: true` indexes the files anyway.
+
+## Directives
+
+A statement that is only `declare(strict_types=1);` is not a chunk: one per PHP file was 5,455 of the 38,521 chunks of a billing monorepo, they are returned by `onfly_focus` as a symbol named `statements`, and their short text embeds close to any question that names the file. The words come from `ignore_directives` of the parser entry (default `[declare]` for PHP). A statement that holds a `declare` and other code is kept.
+
+## File summaries
+
+Besides its symbols, each file gets one chunk of type `file_summary`: its path, namespace, the types it declares and the names of its functions and methods (the first 40), for example
+
+```
+File src/Illuminate/Queue/Worker.php
+Namespace: Illuminate\Queue
+Types: Worker
+Defines: daemon, runNextJob, process, handleJobException, markJobAsFailedIfWillExceedMaxAttempts, calculateBackoff ...
+```
+
+It is embedded alone, with the usual `path:` and `kind:` lines. A question about what a file is for shares words with that list, not with any one method body, so the summary finds the file when the symbols do not. `onfly_focus` never returns it as such: it replaces it by the file's best-matching method ([ranking](configuration.md#ranking-in-onfly_focus)). Documents and files with nothing named in them get none; a lexical index (`onfly index --lexical`) gets none, since a summary is for the vectors.
+
+Summaries are written when a file is indexed. `onfly index` also adds them to files indexed before they existed, without touching the other chunks, their vectors or the file's hash: one embedding per file (a 5,000-file project takes a few minutes). On the benchmark suites they took the monorepo's recall@5 from 0.43 to 0.57 and added 0.05 to Hugo's and the Onfly repository's symbol suites, with no loss elsewhere.
 
 ## Speed
 
 On a laptop, lexical: Go 2,000 files and 12,000 chunks in 13 s; Go 4,700 files and 44,000 chunks in 44 s; PHP 3,200 files and 56,000 chunks in 5 minutes (the PHP parser is the cost, about 0.6 s of CPU per file). The index of the PHP project is 112 MB, of the Go one 208 MB. Embedding is far slower: 12,000 chunks took 20 minutes with `qwen3-embedding:0.6b`. The compiled form of a WASM parser is cached in the user cache directory (`onfly/wasm`), which saves about a second per process.
 
-The default embed batch is 32. `onfly index --ci` uses 128. A WASM or stdio parse that runs longer than `indexer.parse_timeout_ms` is cancelled. With no value set, a WASM parse may take 5 seconds plus 150 ms per KiB of source, so a 75 KB PHP file gets 16 seconds; a set value is used as given. With `indexer.concurrency` above 1, that many files are parsed, embedded and committed in parallel; each file is still committed in its own transaction. Each WASM runtime is limited to 256 MiB.
+The default embed batch is 32 (`embedder.batch_size`). `onfly index --ci` uses 128. A request is given `embedder.timeout_seconds` (120); a batch that times out is split in halves and asked again, down to one chunk, instead of being sent whole six times, which is what happens when a one-slot server meets 128 long chunks. A WASM or stdio parse that runs longer than `indexer.parse_timeout_ms` is cancelled. With no value set, a WASM parse may take 5 seconds plus 150 ms per KiB of source, so a 75 KB PHP file gets 16 seconds; a set value is used as given. With `indexer.concurrency` above 1, that many files are parsed, embedded and committed in parallel; each file is still committed in its own transaction. Each WASM runtime is limited to 256 MiB.
 
 ## Reindex
 
