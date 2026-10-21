@@ -874,7 +874,7 @@ func TestIsGenerated(t *testing.T) {
 		{"pkg/b.go", "package b\n\n// A generator is described here; edit freely.\n", false},
 		{"pkg/c.go", "package c\n// Code generated is a phrase\n", false},
 	} {
-		if got := isGenerated(tc.rel, []byte(tc.body)); got != tc.want {
+		if got := isGenerated(tc.rel, []byte(tc.body), (config.Config{}).RulesFor(tc.rel)); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.rel, got, tc.want)
 		}
 	}
@@ -888,7 +888,7 @@ func TestDropDirectivesRemovesOnlyAStandaloneDeclare(t *testing.T) {
 		{Type: "statement", Content: "return static function () {};"},
 		{Type: "function", Content: "declare(strict_types=1);"},
 	}
-	got := dropDirectives(in)
+	got := dropDirectives(in, []string{"declare"})
 	if len(got) != 3 || got[0].Content != in[2].Content || got[2].Type != "function" {
 		t.Fatalf("%+v", got)
 	}

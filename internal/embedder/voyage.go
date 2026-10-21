@@ -46,7 +46,7 @@ func newVoyage(cfg config.Embedder) (Embedder, error) {
 		model:      cfg.Model,
 		key:        key,
 		dimensions: cfg.Dimensions,
-		client:     newHTTP(),
+		client:     newHTTPFor(cfg.TimeoutSeconds),
 	}, nil
 }
 

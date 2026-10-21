@@ -34,11 +34,25 @@ func New(cfg config.Embedder) (Embedder, error) {
 // query; documents take none. Without it retrieval of a question drops.
 const qwen3Instruct = "Instruct: Given a question about how a code base works, retrieve the source code that implements it\nQuery: "
 
+// A profile is what a model needs that its name tells: the first whose match is
+// part of the lower-cased model name gives the prefix of a query when
+// embedder.query_prefix is not set.
+type profile struct{ match, queryPrefix string }
+
+var profiles = []profile{
+	{match: "qwen3-embedding", queryPrefix: qwen3Instruct},
+}
+
 func queryPrefix(cfg config.Embedder) string {
-	if cfg.QueryPrefix == "" && strings.Contains(strings.ToLower(cfg.Model), "qwen3-embedding") {
-		return qwen3Instruct
+	if cfg.QueryPrefix != "" {
+		return cfg.QueryPrefix
 	}
-	return cfg.QueryPrefix
+	for _, p := range profiles {
+		if strings.Contains(strings.ToLower(cfg.Model), p.match) {
+			return p.queryPrefix
+		}
+	}
+	return ""
 }
 
 func newProvider(cfg config.Embedder) (Embedder, error) {
@@ -54,8 +68,18 @@ func newProvider(cfg config.Embedder) (Embedder, error) {
 	}
 }
 
-func newHTTP() *http.Client {
-	return &http.Client{Timeout: 120 * time.Second}
+// DefaultTimeout is how long a request to the embedder may take when
+// embedder.timeout_seconds is not set.
+const DefaultTimeout = 120 * time.Second
+
+func newHTTP() *http.Client { return newHTTPFor(0) }
+
+func newHTTPFor(seconds int) *http.Client {
+	timeout := DefaultTimeout
+	if seconds > 0 {
+		timeout = time.Duration(seconds) * time.Second
+	}
+	return &http.Client{Timeout: timeout}
 }
 
 type statusError struct {

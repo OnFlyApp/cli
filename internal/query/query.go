@@ -36,11 +36,8 @@ func ClampLimit(n int) int {
 	return n
 }
 
-func CandidatePool(limit int) int {
-	return max(ClampLimit(limit), keywordPool)
-}
-
-// candidatePool is CandidatePool with search.candidate_pool.
+// candidatePool is how many candidates each list gathers: the limit asked for,
+// or search.candidate_pool when that is more.
 func (s *Searcher) candidatePool(limit int) int {
 	return max(ClampLimit(limit), orDefaultInt(s.Pool, keywordPool))
 }

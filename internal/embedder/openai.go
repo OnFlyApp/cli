@@ -46,7 +46,7 @@ func newOpenAI(cfg config.Embedder) (Embedder, error) {
 		key:        key,
 		dimensions: cfg.Dimensions,
 		ask:        send,
-		client:     newHTTP(),
+		client:     newHTTPFor(cfg.TimeoutSeconds),
 	}, nil
 }
 

@@ -104,13 +104,14 @@ type sources struct {
 	root  string
 	text  map[string]string
 	rules resolve.Rules
+	// self gives the member-access prefixes that mean "this class" in a file.
+	self func(file string) []string
 }
 
 func (h *tools) newSources() *sources {
-	return &sources{root: h.root, text: map[string]string{}, rules: resolve.Rules{
-		MaxUnambiguous: h.cfg.Resolver.MaxUnambiguousDefinitions,
-		SelfQualifiers: h.cfg.Resolver.SelfQualifiers,
-	}}
+	return &sources{root: h.root, text: map[string]string{},
+		rules: resolve.Rules{MaxUnambiguous: h.cfg.Resolver.MaxUnambiguousDefinitions},
+		self:  func(file string) []string { return h.cfg.RulesFor(file).SelfQualifiers }}
 }
 
 func (s *sources) get(rel string) string {
@@ -134,5 +135,9 @@ func (s *sources) accepts(caller, def parser.Chunk, siblings int) bool {
 	if s == nil {
 		return true
 	}
-	return s.rules.Accepts(s.get(caller.FilePath), caller, def, siblings)
+	rules := s.rules
+	if s.self != nil {
+		rules.SelfQualifiers = s.self(caller.FilePath)
+	}
+	return rules.Accepts(s.get(caller.FilePath), caller, def, siblings)
 }

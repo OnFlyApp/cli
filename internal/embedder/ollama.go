@@ -32,7 +32,7 @@ func newOllama(cfg config.Embedder) (Embedder, error) {
 		model:      cfg.Model,
 		dimensions: cfg.Dimensions,
 		numCtx:     numCtxFor(cfg.MaxInputTokens),
-		client:     newHTTP(),
+		client:     newHTTPFor(cfg.TimeoutSeconds),
 	}, nil
 }
 

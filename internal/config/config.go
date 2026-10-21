@@ -3,10 +3,13 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -45,16 +48,21 @@ type Database struct {
 }
 
 type Embedder struct {
-	Provider       string    `yaml:"provider"`
-	Endpoint       string    `yaml:"endpoint"`
-	Model          string    `yaml:"model"`
-	Dimensions     int       `yaml:"dimensions"`
-	APIKey         string    `yaml:"api_key"`
-	MaxInputTokens int       `yaml:"max_input_tokens"`
-	QueryPrefix    string    `yaml:"query_prefix"`
-	DocumentPrefix string    `yaml:"document_prefix"`
-	SendDimensions *bool     `yaml:"send_dimensions"`
-	Alt            *Embedder `yaml:"alt"`
+	Provider       string `yaml:"provider"`
+	Endpoint       string `yaml:"endpoint"`
+	Model          string `yaml:"model"`
+	Dimensions     int    `yaml:"dimensions"`
+	APIKey         string `yaml:"api_key"`
+	MaxInputTokens int    `yaml:"max_input_tokens"`
+	QueryPrefix    string `yaml:"query_prefix"`
+	DocumentPrefix string `yaml:"document_prefix"`
+	SendDimensions *bool  `yaml:"send_dimensions"`
+	// TimeoutSeconds is how long one request to the embedder may take (120). A
+	// batch the server times out on is split in halves.
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// BatchSize is how many chunks go in one request (32; 128 for onfly index --ci).
+	BatchSize int       `yaml:"batch_size"`
+	Alt       *Embedder `yaml:"alt"`
 }
 
 type Reranker struct {
@@ -92,9 +100,6 @@ type Resolver struct {
 	// in the whole project is attributed to a call on a value of unknown type, since
 	// it cannot be anything else. 0 is the default, 1; negative turns it off.
 	MaxUnambiguousDefinitions int `yaml:"max_unambiguous_definitions"`
-	// SelfQualifiers are the member-access prefixes that mean "this class"; the
-	// default is the PHP set: $this, self, static, parent.
-	SelfQualifiers []string `yaml:"self_qualifiers"`
 }
 
 type Search struct {
@@ -188,6 +193,70 @@ type ParserConfig struct {
 	Command    string   `yaml:"command"`
 	Include    []string `yaml:"include"`
 	Exclude    []string `yaml:"exclude"`
+	// The rules below say what the core needs to know about the language that its
+	// parser does not: each replaces the built-in rule of the extensions when set.
+	IgnoreDirectives []string `yaml:"ignore_directives"`
+	SelfQualifiers   []string `yaml:"self_qualifiers"`
+	Generated        []string `yaml:"generated"`
+	GeneratedHeaders []string `yaml:"generated_headers"`
+	// WasmPath is path with the type implied: wasm_path: ./plugins/custom.wasm.
+	WasmPath string `yaml:"wasm_path"`
+}
+
+// ParserRules are the language rules of a file, from the built-in defaults of its
+// extension and the indexer.parsers entry that names the extension.
+type ParserRules struct {
+	// IgnoreDirectives: a statement that is only a call of one of these words
+	// (declare(strict_types=1);) is not indexed.
+	IgnoreDirectives []string
+	// SelfQualifiers are the member-access prefixes that mean "this class".
+	SelfQualifiers []string
+	// Generated are base-name globs of machine-written files; they are left out
+	// of the index unless indexer.index_generated is set.
+	Generated []string
+	// GeneratedHeaders are markers in the first kilobyte of a machine-written
+	// file; "code generated*do not edit" needs both fragments, in any order.
+	GeneratedHeaders []string
+}
+
+var anyHeaders = []string{"code generated*do not edit", "@generated"}
+
+var builtinRules = map[string]ParserRules{
+	".go": {Generated: []string{"zz_generated*", "*.pb.go", "*.pb.gw.go"}},
+	".php": {
+		IgnoreDirectives: []string{"declare"},
+		SelfQualifiers:   []string{"$this", "self", "static", "parent"},
+		Generated:        []string{"_ide_helper*.php", ".phpstorm.meta.php"},
+	},
+}
+
+// RulesFor returns the language rules of a file by its extension.
+func (c Config) RulesFor(file string) ParserRules {
+	ext := NormalizeExt(filepath.Ext(file))
+	rules := builtinRules[ext]
+	if len(rules.GeneratedHeaders) == 0 {
+		rules.GeneratedHeaders = anyHeaders
+	}
+	for _, p := range c.Indexer.Parsers {
+		for _, e := range p.Extensions {
+			if NormalizeExt(e) != ext {
+				continue
+			}
+			if len(p.IgnoreDirectives) > 0 {
+				rules.IgnoreDirectives = p.IgnoreDirectives
+			}
+			if len(p.SelfQualifiers) > 0 {
+				rules.SelfQualifiers = p.SelfQualifiers
+			}
+			if len(p.Generated) > 0 {
+				rules.Generated = p.Generated
+			}
+			if len(p.GeneratedHeaders) > 0 {
+				rules.GeneratedHeaders = p.GeneratedHeaders
+			}
+		}
+	}
+	return rules
 }
 
 type Server struct {
@@ -283,6 +352,17 @@ func readFile(path string) (Config, error) {
 		return Config{}, fmt.Errorf("config: %s: %w", path, err)
 	}
 	cfg.ProjectRoot = ProjectRoot(path)
+	for i := range cfg.Indexer.Parsers {
+		p := &cfg.Indexer.Parsers[i]
+		if p.WasmPath != "" {
+			if p.Path == "" {
+				p.Path = p.WasmPath
+			}
+			if p.Type == "" {
+				p.Type = "wasm"
+			}
+		}
+	}
 	if err := expand(&cfg); err != nil {
 		return Config{}, err
 	}
@@ -589,9 +669,6 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Resolver.MaxUnambiguousDefinitions != 0 {
 		out.Resolver.MaxUnambiguousDefinitions = child.Resolver.MaxUnambiguousDefinitions
 	}
-	if len(child.Resolver.SelfQualifiers) > 0 {
-		out.Resolver.SelfQualifiers = child.Resolver.SelfQualifiers
-	}
 	return out
 }
 
@@ -791,6 +868,9 @@ func resolvePath(root, p string) string {
 }
 
 func (c Config) validate() error {
+	if err := c.validateTuning(); err != nil {
+		return err
+	}
 	switch c.Reranker.Provider {
 	case "", "voyage", "cohere", "jina":
 	default:
@@ -907,6 +987,9 @@ func (c Config) validate() error {
 			}
 			seenExt[ext] = true
 		}
+		if err := p.validateRules(); err != nil {
+			return err
+		}
 		switch p.Type {
 		case "wasm":
 			if p.Path == "" {
@@ -937,4 +1020,61 @@ func mergeXray(out *Xray, child Xray) {
 	set(&out.PreviewCallers, child.PreviewCallers)
 	set(&out.MaxHelpers, child.MaxHelpers)
 	set(&out.MaxDirEntries, child.MaxDirEntries)
+}
+
+var directiveWord = regexp.MustCompile(`^\w+$`)
+
+// validateRules checks the language rules of a parser entry.
+func (p ParserConfig) validateRules() error {
+	for _, w := range p.IgnoreDirectives {
+		if !directiveWord.MatchString(w) {
+			return fmt.Errorf("parser %v: ignore_directives %q must be a single word such as declare", p.Extensions, w)
+		}
+	}
+	for _, q := range p.SelfQualifiers {
+		if strings.TrimSpace(q) == "" {
+			return fmt.Errorf("parser %v: self_qualifiers has an empty entry", p.Extensions)
+		}
+	}
+	for _, g := range p.Generated {
+		if _, err := path.Match(g, "x"); err != nil {
+			return fmt.Errorf("parser %v: generated pattern %q: %w", p.Extensions, g, err)
+		}
+	}
+	for _, h := range p.GeneratedHeaders {
+		if strings.Trim(h, "* ") == "" {
+			return fmt.Errorf("parser %v: generated_headers has an empty marker", p.Extensions)
+		}
+	}
+	for _, pat := range append(append([]string(nil), p.Include...), p.Exclude...) {
+		if !doublestar.ValidatePattern(pat) {
+			return fmt.Errorf("parser %v: invalid include/exclude pattern %q", p.Extensions, pat)
+		}
+	}
+	return nil
+}
+
+// validateTuning rejects negative limits and weights in the tuning sections.
+func (c Config) validateTuning() error {
+	for name, v := range map[string]int{
+		"xray.signature_clip": c.Xray.SignatureClip, "xray.whole_file_lines": c.Xray.WholeFileLines,
+		"xray.collapse_over": c.Xray.CollapseOver, "xray.max_edges": c.Xray.MaxEdges,
+		"xray.preview_callers": c.Xray.PreviewCallers, "xray.max_helpers": c.Xray.MaxHelpers,
+		"xray.max_dir_entries": c.Xray.MaxDirEntries, "search.summary_symbols": c.Search.SummarySymbols,
+		"search.candidate_pool": c.Search.CandidatePool, "embedder.timeout_seconds": c.Embedder.TimeoutSeconds,
+		"embedder.batch_size": c.Embedder.BatchSize,
+	} {
+		if v < 0 {
+			return fmt.Errorf("%s must be >= 0", name)
+		}
+	}
+	for name, w := range map[string]*float64{
+		"search.focus_semantic_weight": c.Search.FocusSemanticWeight, "search.focus_keyword_weight": c.Search.FocusKeywordWeight,
+		"search.file_summary_weight": c.Search.FileSummaryWeight,
+	} {
+		if w != nil && *w < 0 {
+			return fmt.Errorf("%s must be >= 0", name)
+		}
+	}
+	return nil
 }

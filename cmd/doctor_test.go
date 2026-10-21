@@ -49,7 +49,7 @@ func TestDoctorReportsEachCheck(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(wasm), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	payload := []byte("wasm-bytes")
+	payload := []byte("\x00asm-bytes")
 	if err := os.WriteFile(wasm, payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -173,5 +173,34 @@ func TestCheckReranker(t *testing.T) {
 	cfg.Reranker.APIKey = "k"
 	if err := checkReranker(cfg, &buf); err != nil || buf.String() != "reranker: ok\n" {
 		t.Fatalf("%v %q", err, buf.String())
+	}
+}
+
+func TestDoctorRejectsAFileThatIsNotWebAssemblyAndNamesCustomTuning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"embeddings":[[1,0,0,1]]}`))
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	writeDoctorProject(t, dir, srv.URL, ".onfly/vector.db", "plugins/parser.wasm")
+	cfg := mustDoctorConfig(t, dir)
+	wasm := cfg.Indexer.Parsers[0].Path
+	if err := os.MkdirAll(filepath.Dir(wasm), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wasm, []byte("<?php not a module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Xray.MaxHelpers = 1
+	cfg.Indexer.Parsers[0].IgnoreDirectives = []string{"declare"}
+	var buf strings.Builder
+	if err := Doctor(context.Background(), cfg, &buf); err == nil {
+		t.Fatal("a parser file that is not WebAssembly must fail the check")
+	}
+	out := buf.String()
+	for _, want := range []string{"is not a WebAssembly module", "tuning: ok (custom: xray; parser rules"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in\n%s", want, out)
+		}
 	}
 }

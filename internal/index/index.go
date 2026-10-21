@@ -521,7 +521,7 @@ func (s *Session) readSource(ctx context.Context, rel string) ([]byte, *FileResu
 		s.report("failed", rel)
 		return nil, &FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
-	if !s.cfg.Indexer.IndexGenerated && isGenerated(rel, body) {
+	if !s.cfg.Indexer.IndexGenerated && isGenerated(rel, body, s.cfg.RulesFor(rel)) {
 		return s.omitEarly(ctx, rel)
 	}
 	return body, nil, nil
@@ -530,13 +530,24 @@ func (s *Session) readSource(ctx context.Context, rel string) ([]byte, *FileResu
 // isGenerated recognises machine-written files: they repeat the shape of the
 // code they come from, are not written by anyone, and in a large repository
 // they are a fifth of the chunks (Kubernetes: zz_generated, protobuf stubs).
-func isGenerated(rel string, body []byte) bool {
+func isGenerated(rel string, body []byte, rules config.ParserRules) bool {
 	base := strings.ToLower(path.Base(rel))
-	if strings.HasPrefix(base, "zz_generated") || strings.HasSuffix(base, ".pb.go") || strings.HasSuffix(base, ".pb.gw.go") {
-		return true
+	for _, glob := range rules.Generated {
+		if ok, _ := path.Match(strings.ToLower(glob), base); ok {
+			return true
+		}
 	}
 	head := strings.ToLower(string(body[:min(len(body), 1024)]))
-	return strings.Contains(head, "code generated") && strings.Contains(head, "do not edit") || strings.Contains(head, "@generated")
+	for _, marker := range rules.GeneratedHeaders {
+		all := true
+		for _, fragment := range strings.Split(strings.ToLower(marker), "*") {
+			all = all && strings.Contains(head, fragment)
+		}
+		if all {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResult, error) {
@@ -549,11 +560,18 @@ func (s *Session) omitEarly(ctx context.Context, rel string) ([]byte, *FileResul
 // better than the classes they name; resolve reads imports from the source.
 var importTypes = []string{"use", "namespace", "import"}
 
-// directive matches a file-level declare(strict_types=1); on its own, which
-// says nothing about the code and would be returned as a symbol.
-var directive = regexp.MustCompile(`^\s*declare\s*\([^)]*\)\s*;?\s*$`)
-
-func dropDirectives(chunks []parser.Chunk) []parser.Chunk {
+// dropDirectives removes the statements that are only a call of one of the
+// words (declare(strict_types=1);): a file-level directive says nothing about
+// the code and would be returned as a symbol.
+func dropDirectives(chunks []parser.Chunk, words []string) []parser.Chunk {
+	if len(words) == 0 {
+		return chunks
+	}
+	quoted := make([]string, len(words))
+	for i, w := range words {
+		quoted[i] = regexp.QuoteMeta(w)
+	}
+	directive := regexp.MustCompile(`^\s*(?:` + strings.Join(quoted, "|") + `)\s*\([^)]*\)\s*;?\s*$`)
 	out := chunks[:0:0]
 	for _, c := range chunks {
 		if !(strings.EqualFold(c.Type, "statement") && directive.MatchString(c.Content)) {
@@ -599,7 +617,7 @@ func (s *Session) indexFile(ctx context.Context, rel, oldHash string) (FileResul
 		s.report("failed", rel)
 		return FileResult{Err: fmt.Errorf("%s: %w", rel, err)}, nil
 	}
-	chunks = dropDirectives(dropTypes(chunks, append(slices.Clone(s.cfg.Indexer.SkipTypes), importTypes...)))
+	chunks = dropDirectives(dropTypes(chunks, append(slices.Clone(s.cfg.Indexer.SkipTypes), importTypes...)), s.cfg.RulesFor(rel).IgnoreDirectives)
 	overlap := s.cfg.Embedder.MaxInputTokens * 12 / 100
 	chunks = split.Split(chunks, s.cfg.Embedder.MaxInputTokens, overlap, s.count)
 	for i := range chunks {
@@ -714,7 +732,7 @@ func (s *Session) embedWithReuse(ctx context.Context, chunks []parser.Chunk, pre
 	for j, i := range todo {
 		fresh[j] = chunks[i]
 	}
-	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt), s.cfg.Indexer.WithContext())
+	got, err := embedChunks(ctx, s.emb, fresh, batchSize(s.opt, s.cfg.Embedder.BatchSize), s.cfg.Indexer.WithContext())
 	if err != nil {
 		return nil, 0, err
 	}
@@ -776,7 +794,10 @@ func (s *Session) prune(ctx context.Context, protected map[string]struct{}, stat
 	return nil
 }
 
-func batchSize(opt Options) int {
+func batchSize(opt Options, configured int) int {
+	if configured > 0 {
+		return configured
+	}
 	if opt.CI {
 		return 128
 	}

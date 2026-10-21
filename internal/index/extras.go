@@ -46,7 +46,7 @@ func (s *Session) addExtraVectors(ctx context.Context, rel string, chunks []vect
 			todo = append(todo, i)
 			texts = append(texts, text)
 		}
-		batch := batchSize(s.opt)
+		batch := batchSize(s.opt, s.cfg.Embedder.BatchSize)
 		for start := 0; start < len(texts); start += batch {
 			end := min(start+batch, len(texts))
 			vecs, err := embs[slot].EmbedBatch(ctx, texts[start:end])

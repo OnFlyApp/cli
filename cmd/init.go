@@ -46,6 +46,11 @@ indexer:
     #   path: .onfly/plugins/go-parser.wasm
     #   include: ["cmd/**", "internal/**"]
     #   exclude: ["**/*_test.go"]
+    # Language rules sit on the parser entry of the extension (built in for .go and .php):
+    #   wasm_path: ./plugins/custom.wasm   # same as type: wasm + path; your own grammar, no rebuild
+    #   ignore_directives: [declare]       # statements that are only declare(...) are not indexed
+    #   self_qualifiers: ["$this", "self", "static", "parent"]   # member access that means "this class"
+    #   generated: ["zz_generated*", "*.pb.go"]                  # base-name globs of generated files
   # concurrency: 4                 # files indexed in parallel
   # embed_context: false           # embed the bare code; by default each chunk carries "path: / kind: / symbol:"; reindex after changing
   # summaries:                     # one-sentence description per chunk, embedded with the code (slower index)
@@ -56,6 +61,23 @@ indexer:
 
 rules:
   - .onfly/rules/project.md
+
+# Tuning, all optional (the defaults are in the comments):
+# search:
+#   focus_semantic_weight: 2         # onfly_focus: vector list
+#   focus_keyword_weight: 0.5        # onfly_focus: lexical lists
+#   file_summary_weight: 0.7         # a file's summary next to its symbols
+#   candidate_pool: 20               # candidates per list before fusion
+# xray:
+#   signature_clip: 120              # characters of a signature
+#   whole_file_lines: 120            # a file this short is shown whole
+#   collapse_over: 10                # a function longer than this is collapsed
+#   max_edges: 15                    # callers and callees listed
+#   preview_callers: 3               # a caller with this many callers or fewer shows them
+#   max_helpers: 2                   # same-file helpers expanded with a symbol
+# resolver:
+#   max_unambiguous_definitions: 1   # a method only this many classes define is attributed to a call on an untyped value
+# (embedder: timeout_seconds 120, batch_size 32, query_prefix; onfly doctor shows what is customized)
 
 # workspace: backend               # label stored on each chunk, for monorepos with several configs
 

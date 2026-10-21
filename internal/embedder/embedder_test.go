@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/axitdev/onfly/internal/config"
 )
@@ -461,5 +462,20 @@ func (deadline) Temporary() bool { return true }
 func TestATimeoutIsNotRetriedWholeButIsReported(t *testing.T) {
 	if retryable(deadline{}) || !IsTimeout(deadline{}) || IsTimeout(errors.New("boom")) {
 		t.Fatal("a timed-out batch goes back to the caller to be split")
+	}
+}
+
+func TestTimeoutAndPrefixComeFromTheProfileOrTheConfiguration(t *testing.T) {
+	if got := newHTTPFor(0).Timeout; got != DefaultTimeout {
+		t.Fatalf("%v", got)
+	}
+	if got := newHTTPFor(7).Timeout; got != 7*time.Second {
+		t.Fatalf("embedder.timeout_seconds: %v", got)
+	}
+	if queryPrefix(config.Embedder{Model: "Qwen3-Embedding:0.6b"}) != qwen3Instruct || queryPrefix(config.Embedder{Model: "nomic-embed-text"}) != "" {
+		t.Fatal("the profile of the model gives the prefix")
+	}
+	if queryPrefix(config.Embedder{Model: "qwen3-embedding", QueryPrefix: "q: "}) != "q: " {
+		t.Fatal("embedder.query_prefix wins")
 	}
 }

@@ -486,7 +486,6 @@ xray:
   max_dir_entries: 25
 resolver:
   max_unambiguous_definitions: 2
-  self_qualifiers: ["$this", "self"]
 `)
 	cfg, err := Load(dir, "")
 	if err != nil {
@@ -499,7 +498,59 @@ resolver:
 	if cfg.Xray != want {
 		t.Fatalf("%+v", cfg.Xray)
 	}
-	if cfg.Resolver.MaxUnambiguousDefinitions != 2 || len(cfg.Resolver.SelfQualifiers) != 2 {
+	if cfg.Resolver.MaxUnambiguousDefinitions != 2 {
 		t.Fatalf("%+v", cfg.Resolver)
+	}
+}
+
+func TestParserRulesDefaultsAndOverrides(t *testing.T) {
+	var none Config
+	php := none.RulesFor("src/Domain/Cycle.php")
+	if len(php.IgnoreDirectives) != 1 || php.IgnoreDirectives[0] != "declare" || len(php.SelfQualifiers) != 4 || len(php.GeneratedHeaders) == 0 {
+		t.Fatalf("built-in PHP rules: %+v", php)
+	}
+	if goRules := none.RulesFor("pkg/api/zz_generated.deepcopy.go"); len(goRules.Generated) != 3 || len(goRules.IgnoreDirectives) != 0 {
+		t.Fatalf("built-in Go rules: %+v", goRules)
+	}
+	if other := none.RulesFor("main.rs"); len(other.IgnoreDirectives)+len(other.Generated) != 0 || len(other.GeneratedHeaders) == 0 {
+		t.Fatalf("a language with no rules still gets the generated-file markers: %+v", other)
+	}
+	dir := t.TempDir()
+	writeConfig(t, dir, strings.Replace(validYAML(), "indexer:\n  include: [\"src/**/*\"]\n  exclude: [\"vendor\"]\n", "", 1)+`
+indexer:
+  include: ["src/**/*"]
+  parsers:
+    - extensions: [".php"]
+      wasm_path: ./plugins/custom.wasm
+      ignore_directives: [declare, namespace]
+      self_qualifiers: ["$this", "self"]
+      generated: ["*_ide_helper*.php"]
+`)
+	cfg, err := Load(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := cfg.Indexer.Parsers[0]
+	if p.Type != "wasm" || !strings.HasSuffix(p.Path, filepath.Join("plugins", "custom.wasm")) || !filepath.IsAbs(p.Path) {
+		t.Fatalf("wasm_path means a wasm parser at that path under the project: %+v", p)
+	}
+	got := cfg.RulesFor("a/B.PHP")
+	if len(got.IgnoreDirectives) != 2 || len(got.SelfQualifiers) != 2 || got.Generated[0] != "*_ide_helper*.php" {
+		t.Fatalf("the entry replaces the built-in rules: %+v", got)
+	}
+}
+
+func TestLoadRejectsBadRulesAndNegativeLimits(t *testing.T) {
+	for name, extra := range map[string]string{
+		"directive": "indexer:\n  parsers:\n    - {extensions: [\".php\"], type: text, ignore_directives: [\"declare(\"]}\n",
+		"glob":      "indexer:\n  parsers:\n    - {extensions: [\".php\"], type: text, generated: [\"[\"]}\n",
+		"xray":      "xray:\n  max_helpers: -1\n",
+		"weight":    "search:\n  focus_semantic_weight: -2\n",
+	} {
+		dir := t.TempDir()
+		writeConfig(t, dir, strings.Replace(validYAML(), "indexer:\n  include: [\"src/**/*\"]\n  exclude: [\"vendor\"]\n", "", 1)+extra)
+		if _, err := Load(dir, ""); err == nil {
+			t.Errorf("%s: must be rejected", name)
+		}
 	}
 }

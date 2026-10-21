@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -49,6 +50,7 @@ func Doctor(ctx context.Context, cfg config.Config, out io.Writer) error {
 	if err := checkRules(cfg, out); err != nil {
 		failed = true
 	}
+	checkTuning(cfg, out)
 	if failed {
 		return fmt.Errorf("doctor: failed")
 	}
@@ -144,6 +146,10 @@ func checkPlugins(cfg config.Config, out io.Writer) error {
 				problems = append(problems, err.Error())
 				continue
 			}
+			if !bytes.HasPrefix(body, []byte("\x00asm")) {
+				problems = append(problems, fmt.Sprintf("%s is not a WebAssembly module", p.Path))
+				continue
+			}
 			sum := sha256.Sum256(body)
 			parts = append(parts, fmt.Sprintf("%s=%x", filepath.Base(p.Path), sum))
 		case "stdio":
@@ -215,4 +221,33 @@ func checkRules(cfg config.Config, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "rules: ok %d tokens\n", rep.Tokens)
 	return nil
+}
+
+// checkTuning names the sections of the configuration that change a default. An
+// invalid value never gets here: loading the config rejects it.
+func checkTuning(cfg config.Config, out io.Writer) {
+	var custom []string
+	if cfg.Xray != (config.Xray{}) {
+		custom = append(custom, "xray")
+	}
+	if cfg.Resolver.MaxUnambiguousDefinitions != 0 {
+		custom = append(custom, "resolver")
+	}
+	s := cfg.Search
+	if s.FocusSemanticWeight != nil || s.FocusKeywordWeight != nil || s.FileSummaryWeight != nil || s.SummarySymbols != 0 || s.CandidatePool != 0 {
+		custom = append(custom, "search")
+	}
+	if cfg.Embedder.TimeoutSeconds != 0 || cfg.Embedder.BatchSize != 0 || cfg.Embedder.QueryPrefix != "" {
+		custom = append(custom, "embedder")
+	}
+	for _, p := range cfg.Indexer.Parsers {
+		if len(p.IgnoreDirectives)+len(p.SelfQualifiers)+len(p.Generated)+len(p.GeneratedHeaders) > 0 {
+			custom = append(custom, "parser rules "+strings.Join(p.Extensions, ","))
+		}
+	}
+	if len(custom) == 0 {
+		fmt.Fprintln(out, "tuning: ok (defaults)")
+		return
+	}
+	fmt.Fprintf(out, "tuning: ok (custom: %s)\n", strings.Join(custom, "; "))
 }
