@@ -98,11 +98,11 @@ Two agents got the same questions, one with `Grep` and `Read` (A) and one with `
 | Hugo | 8 | 6 | 6 | 2 / 0 | 25 + 3 |
 | This repository | 10 | 8 | 8 | rest not split | 11 + 4 |
 | Laravel | 8 | 4 | 8 | 0 / 0 | 28 + 1 |
-| PHP monorepo | 8 | 7 | 5 | 3 / 0 | 19 + 1 |
+| PHP monorepo | 8 | 7 | 4 | 4 / 0 | 22 + 0 |
 | Kubernetes | 8 | 5 | 5 | 3 / 0 | 22 + 3 |
-| Total | 50 | 37 | 39 | | |
+| Total | 50 | 37 | 38 | | |
 
-No wrong answer was recorded on Hugo, Laravel, the monorepo or Kubernetes (the Cobra and this-repository runs were graded only for the number correct). Laravel is the one clear difference: grep left four answers incomplete because it did not open the body that decides the answer, and the skeleton plus `File.php:method` got the agent there. On the monorepo and Kubernetes the Onfly arm lost points by stopping short, not by wrong results: it did not expand the helper that held the detail, or asked for `Cycle.php:end` and gave up, which `onfly_xray` now answers by expanding `endCycle`. Cost: B agents used 64k to 78k tokens per repository; the A arm was not measured on the same scale, so there is no token claim here.
+No wrong answer was recorded on Hugo, Laravel, the monorepo or Kubernetes (the Cobra and this-repository runs were graded only for the number correct). Laravel is the one clear difference: grep left four answers incomplete because it did not open the body that decides the answer, and the skeleton plus `File.php:method` got the agent there. On the monorepo and Kubernetes the Onfly arm lost points by stopping short, not by wrong results. The monorepo was run four times and the Onfly arm scored 5, 6, 5 and 4 of 8 against 7 for `Grep`, so its row is noise around five. The runs ended before fixes that the tools now carry (`File.php:end` expands `endCycle`; the handler's `called_by` shows the event handler that dispatches its command, and `CashbackCycle::clawBackCashback` shows the handler two hops up), and the last run, made with them, still scored lowest: the agent did not follow the chain it was shown, did not name the trigger handler, stated that an ended cycle throws where the handler returns silently, and did not find the environment binding. Cost: B agents used 64k to 78k tokens per repository; the A arm was not measured on the same scale, so there is no token claim here.
 
 `onfly_xray` costs 40 to 60% of the tokens of reading the files it covers (Cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies, such as an interface, costs about the same as the file.
 

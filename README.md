@@ -98,9 +98,9 @@ Naming a function is not the hard case: 30 sampled "where is `X` defined" questi
 | | Cobra | Hugo | Onfly | Laravel | PHP monorepo | Kubernetes | Total |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | A correct | 7/8 | 6/8 | 8/10 | 4/8 | 7/8 | 5/8 | 37/50 |
-| B correct | 7/8 | 6/8 | 8/10 | **8/8** | 5/8 | 5/8 | 39/50 |
+| B correct | 7/8 | 6/8 | 8/10 | **8/8** | 4/8 | 5/8 | 38/50 |
 
-Laravel is the clear win: the agent with `Grep` left four answers incomplete because it never opened the body that decides them. Elsewhere the two tie within noise, and the monorepo goes to `Grep` by two answers: the Onfly arm stopped before the helper that held the detail. No wrong answer was recorded in the runs that were graded for it. We do not claim a token saving.
+Laravel is the clear win: the agent with `Grep` left four answers incomplete because it never opened the body that decides them. Elsewhere the two tie within noise, and the monorepo goes to `Grep` by three answers (the Onfly arm scored 5, 6, 5 and 4 of 8 in four runs, against 7 for `Grep`): its agent stops before the handler, the env binding or the already-closed branch that holds the detail, even after `onfly_xray` started showing the command-bus chain. No wrong answer was recorded in the runs that were graded for it. We do not claim a token saving.
 
 ## Configuration
 
