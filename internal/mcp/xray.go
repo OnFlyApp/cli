@@ -177,9 +177,9 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 		case closest:
 			note = joinNotes(note, fmt.Sprintf("no symbol %q in this file; expanded the closest by name: %s", focus, strings.Join(names, ", ")))
 		}
-		if over != math.MaxInt {
-			focusText = h.focusSections(string(src), spans, chunks, names)
-		}
+		// Also for a file shown whole: its body sits among the licence and the imports,
+		// and a reader that looks at the start of the answer should find it there.
+		focusText = h.focusSections(string(src), spans, chunks, names, over == math.MaxInt)
 	}
 	srcs := h.newSources()
 	srcs.text[rel] = string(src)
@@ -487,7 +487,7 @@ func closestSymbols(spans []skeleton.Span, name string) ([]string, bool) {
 // then, in the room that is left, the longest helpers of the same file that
 // those functions call: they are collapsed in the skeleton, and the next call
 // would be for them.
-func (h *tools) focusSections(src string, spans []skeleton.Span, chunks []parser.Chunk, names []string) string {
+func (h *tools) focusSections(src string, spans []skeleton.Span, chunks []parser.Chunk, names []string, whole bool) string {
 	var b strings.Builder
 	used := 0
 	for _, name := range names {
@@ -498,6 +498,9 @@ func (h *tools) focusSections(src string, spans []skeleton.Span, chunks []parser
 		b.WriteString("## " + name + "\n" + body + "\n")
 		n, _ := tokens.Count(body)
 		used += n
+	}
+	if whole {
+		return b.String() // every helper is in the file shown below
 	}
 	for _, helper := range sameFileCallees(spans, chunks, names, h.lim()) {
 		body := focusBody(src, spans, helper, h.maxTokens)

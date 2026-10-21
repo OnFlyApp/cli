@@ -93,14 +93,17 @@ Five open-source code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `
 
 Naming a function is not the hard case: 30 sampled "where is `X` defined" questions per repository (Cobra, Hugo, Onfly, Laravel, Kubernetes) find it in the top five **150 of 150 times** (recall@5 1.00, MRR 0.96 to 0.98).
 
-**Agents**, `Grep`/`Read` (A) against `onfly_xray`/`onfly_focus` (B), answers graded against the source:
+**Agents**, `Grep`/`Read` (A) against `onfly_xray`/`onfly_focus` (B), one run each, run one at a time, answers graded against the source (42 questions):
 
 | | Cobra | Hugo | Onfly | Laravel | Kubernetes | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| A correct | 7/8 | 6/8 | 8/10 | 4/8 | 5/8 | 30/42 |
-| B correct | 7/8 | 6/8 | 8/10 | **8/8** | 5/8 | 34/42 |
+| A: correct / partial / wrong | 8/0/0 | 8/0/0 | 10/0/0 | 8/0/0 | 7/1/0 | **41/1/0** |
+| B: correct / partial / wrong | 6/2/0 | 5/3/0 | 7/3/0 | 7/1/0 | 6/2/0 | **31/11/0** |
+| Tokens A / B | 47.7k / 63.4k | 67.2k / 82.6k | 66.4k / 66.9k | 49.9k / 68.8k | 70.8k / 88.7k | 302k / 370k (+23%) |
+| Seconds A / B | 37 / 62 | 110 / 95 | 85 / 53 | 41 / 62 | 86 / 71 | 358 / 343 (-4%) |
+| Calls A / B (onfly + native) | 5 / 13+2 | 17 / 23+3 | 9 / 24+2 | 5 / 25+0 | 20 / 21+1 | 56 / 106+8 |
 
-Laravel is the clear win: the agent with `Grep` left four answers incomplete because it never opened the body that decides them. Elsewhere the two tie within noise. No wrong answer was recorded in the runs that were graded for it. We do not claim a token saving.
+Honest reading: on questions that describe behavior in words, the agent with `Grep` was as complete and cheaper; the Onfly agent stopped earlier and hedged ("I did not see…") on 11 of 42 answers, made twice the calls because `onfly_focus` often needed a second query, and spent 23% more tokens. No answer was wrong in either arm. Onfly was faster on three repositories (the ones where `Grep` needed 17 to 20 calls) and about even in total time. An earlier run in which Onfly beat `Grep` on Laravel (8 of 8 against 4 of 8) did not repeat: `Grep` scored 8 of 8 in five calls this time. Per-kind breakdown and the reasons: [Evaluation](docs/evaluation.md#agents).
 
 ## Configuration
 

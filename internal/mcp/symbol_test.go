@@ -337,3 +337,15 @@ func TestXrayLimitsComeFromTheConfiguration(t *testing.T) {
 		t.Fatalf("zero means the defaults: %+v", got)
 	}
 }
+
+func TestXrayPutsTheBodyFirstEvenInAFileShownWhole(t *testing.T) {
+	h := helperFixture(t, 8192) // smallFile is its default here: the file is shown whole
+	out := xrayText(t, h, "h.go:Main")
+	body, skel := strings.Index(out, "## Main\n"), strings.Index(out, "## skeleton")
+	if body < 0 || skel < 0 || body > skel {
+		t.Fatalf("the body comes before the whole file:\n%s", out)
+	}
+	if strings.Contains(out, "(called by the above, same file)") {
+		t.Fatalf("the helpers are in the file already, not repeated:\n%s", out)
+	}
+}
