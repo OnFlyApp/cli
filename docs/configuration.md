@@ -67,6 +67,7 @@ search:                          # optional; how the result lists are fused (val
 #   preview_callers: 3
 #   max_helpers: 2
 #   max_dir_entries: 40
+#   preamble_lines: 6
 
 # resolver:                      # how a name in a chunk is attributed to a definition
 #   max_unambiguous_definitions: 1
@@ -229,6 +230,7 @@ By default each chunk is embedded with `path: <file>`, `kind: <type>` and `symbo
 | `focus_keyword_weight` | 0.5 | weight of the keyword, per-word and name lists |
 | `file_summary_weight` | 0.7 | weight of a [file summary](indexing.md#file-summaries) next to a symbol; `type_weights: {file_summary: ...}` wins over it |
 | `summary_symbols` | 1 | how many symbols of a file replace its summary in a result. More takes the places of other files' matches: 3 halved Hugo's recall. |
+| `focus_max_per_file` | 1 | after the first two results, a file that already has this many results waits behind other files' results, unless the question names the function; a negative value turns it off. A flow's second file is no longer crowded out by the methods of the first: at 1, recall@5 on the paraphrase suites rose 0.12 to 0.14 on Laravel and Hugo and 0.06 on Cobra, and exact-name lookup stayed at 150 of 150 |
 | `candidate_pool` | 20 | candidates each list gathers before fusion when `limit` is smaller |
 
 A result that is a file summary is replaced, at its place, by the method of that file that scores best against the question (the cosine of its vector with the query's, plus the share of the question's words in its name and text), or by a method the ranking already holds. A weight of 0 is accepted; a negative one fails when the config loads. Measure a change with `onfly eval --focus` ([evaluation](evaluation.md)) before keeping it: in the sweeps behind these defaults, semantic 1 to 2 with lexical 0.5 to 1 never beat 2 and 0.5, and a file-cluster boost of 0.2 or more lowered Hugo and Laravel.
@@ -246,6 +248,7 @@ A result that is a file summary is replaced, at its place, by the method of that
 | `preview_callers` | 3 | a caller that has this many callers or fewer shows them on its line, `<- Handler::handle (Handler.php)`; one with more is an interface, not an entrypoint, and shows none |
 | `max_helpers` | 2 | same-file functions the asked symbol calls that are expanded after it, in the room the token budget leaves |
 | `max_dir_entries` | 40 | files listed for a directory |
+| `preamble_lines` | 6 | the lines above a file's first symbol (licence, package or namespace line, imports) are replaced by one marker, keeping the package line, when there are more than this many |
 
 The token budget itself is `server.max_tokens`. When the symbol asked for is not in the file (`File.php:end`), `onfly_xray` expands the closest names (equal ignoring case, then prefix, then substring; at most three) and says so.
 

@@ -67,6 +67,7 @@ rules:
 #   focus_semantic_weight: 2         # onfly_focus: vector list
 #   focus_keyword_weight: 0.5        # onfly_focus: lexical lists
 #   file_summary_weight: 0.7         # a file's summary next to its symbols
+#   focus_max_per_file: 1            # results of one file before other files' results (negative: off)
 #   candidate_pool: 20               # candidates per list before fusion
 # xray:
 #   signature_clip: 120              # characters of a signature
@@ -75,6 +76,7 @@ rules:
 #   max_edges: 15                    # callers and callees listed
 #   preview_callers: 3               # a caller with this many callers or fewer shows them
 #   max_helpers: 2                   # same-file helpers expanded with a symbol
+#   preamble_lines: 6                # licence, package and imports above the first symbol are hidden past this many lines
 # resolver:
 #   max_unambiguous_definitions: 1   # a method only this many classes define is attributed to a call on an untyped value
 # (embedder: timeout_seconds 120, batch_size 32, query_prefix; onfly doctor shows what is customized)

@@ -92,6 +92,9 @@ type Xray struct {
 	MaxHelpers int `yaml:"max_helpers"`
 	// MaxDirEntries caps the files listed for a directory (40).
 	MaxDirEntries int `yaml:"max_dir_entries"`
+	// PreambleLines: the lines above a file's first symbol (licence, package,
+	// imports) are replaced by one marker when there are more than this many (6).
+	PreambleLines int `yaml:"preamble_lines"`
 }
 
 // Resolver tunes how a name used in a chunk is attributed to a definition.
@@ -123,6 +126,10 @@ type Search struct {
 	// SummarySymbols is how many symbols of a file replace its summary in a
 	// result (1); more takes the places of other files' matches.
 	SummarySymbols int `yaml:"summary_symbols"`
+	// FocusMaxPerFile is how many results of one file onfly_focus lists before the
+	// results of other files (2); the rest follow, so a flow's second file is not
+	// crowded out by the methods of the first.
+	FocusMaxPerFile int `yaml:"focus_max_per_file"`
 	// CandidatePool is how many candidates each list gathers before fusion, when
 	// the limit asked for is smaller (20).
 	CandidatePool int `yaml:"candidate_pool"`
@@ -644,6 +651,9 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	if child.Search.SummarySymbols != 0 {
 		out.Search.SummarySymbols = child.Search.SummarySymbols
 	}
+	if child.Search.FocusMaxPerFile != 0 {
+		out.Search.FocusMaxPerFile = child.Search.FocusMaxPerFile
+	}
 	if child.Search.CandidatePool != 0 {
 		out.Search.CandidatePool = child.Search.CandidatePool
 	}
@@ -1020,6 +1030,7 @@ func mergeXray(out *Xray, child Xray) {
 	set(&out.PreviewCallers, child.PreviewCallers)
 	set(&out.MaxHelpers, child.MaxHelpers)
 	set(&out.MaxDirEntries, child.MaxDirEntries)
+	set(&out.PreambleLines, child.PreambleLines)
 }
 
 var directiveWord = regexp.MustCompile(`^\w+$`)
@@ -1060,8 +1071,8 @@ func (c Config) validateTuning() error {
 		"xray.signature_clip": c.Xray.SignatureClip, "xray.whole_file_lines": c.Xray.WholeFileLines,
 		"xray.collapse_over": c.Xray.CollapseOver, "xray.max_edges": c.Xray.MaxEdges,
 		"xray.preview_callers": c.Xray.PreviewCallers, "xray.max_helpers": c.Xray.MaxHelpers,
-		"xray.max_dir_entries": c.Xray.MaxDirEntries, "search.summary_symbols": c.Search.SummarySymbols,
-		"search.candidate_pool": c.Search.CandidatePool, "embedder.timeout_seconds": c.Embedder.TimeoutSeconds,
+		"xray.max_dir_entries": c.Xray.MaxDirEntries, "xray.preamble_lines": c.Xray.PreambleLines, "search.summary_symbols": c.Search.SummarySymbols,
+		"search.candidate_pool": c.Search.CandidatePool, "search.focus_max_per_file": c.Search.FocusMaxPerFile, "embedder.timeout_seconds": c.Embedder.TimeoutSeconds,
 		"embedder.batch_size": c.Embedder.BatchSize,
 	} {
 		if v < 0 {

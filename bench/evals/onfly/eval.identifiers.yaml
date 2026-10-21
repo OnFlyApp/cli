@@ -49,8 +49,8 @@ cases:
     expect: [{file: internal/index/progress.go, symbol: reportOpt}]
   - query: where is addSummaries defined and what does it do
     expect: [{file: internal/index/summary.go, symbol: addSummaries}]
-  - query: where is CandidatePool defined and what does it do
-    expect: [{file: internal/query/query.go, symbol: CandidatePool}]
+  - query: where is candidatePool defined and what does it do
+    expect: [{file: internal/query/query.go, symbol: candidatePool}]
   - query: where is contextHints defined and what does it do
     expect: [{file: cmd/stats.go, symbol: contextHints}]
   - query: where is addToolWith defined and what does it do

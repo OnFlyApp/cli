@@ -78,6 +78,7 @@ type Searcher struct {
 	FocusSemantic, FocusKeyword   *float64
 	SummaryWeight                 *float64
 	SummarySymbols, Pool          int
+	MaxPerFile                    int
 	Root                          string
 	Expander                      *Expander
 }
@@ -257,7 +258,7 @@ func NewSearcher(cfg config.Config, store vectorstore.Store, emb embedder.Embedd
 	s.AltWeight, s.SummaryWordWeight = cfg.Search.AltWeight, cfg.Search.SummaryWordWeight
 	s.SectionWeight = cfg.Search.SectionWeight
 	s.FocusSemantic, s.FocusKeyword, s.SummaryWeight = cfg.Search.FocusSemanticWeight, cfg.Search.FocusKeywordWeight, cfg.Search.FileSummaryWeight
-	s.SummarySymbols, s.Pool = cfg.Search.SummarySymbols, cfg.Search.CandidatePool
+	s.SummarySymbols, s.Pool, s.MaxPerFile = cfg.Search.SummarySymbols, cfg.Search.CandidatePool, cfg.Search.FocusMaxPerFile
 	if len(cfg.Search.TypeWeights) > 0 {
 		s.TypeWeights = make(map[string]float64, len(cfg.Search.TypeWeights))
 		for t, w := range cfg.Search.TypeWeights {

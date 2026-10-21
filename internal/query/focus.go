@@ -70,11 +70,47 @@ func (s *Searcher) RunFocus(ctx context.Context, r Request) ([]parser.Chunk, err
 			}
 		}
 	}
-	fused := s.expandFileSummaries(ctx, r.Query, s.rerank(ctx, r.Query, ranked))
+	fused := diversify(s.expandFileSummaries(ctx, r.Query, s.rerank(ctx, r.Query, ranked)), defaultFocusHead, orDefaultInt(s.MaxPerFile, defaultMaxPerFile), r.Query)
 	if n := ClampLimit(r.Limit); len(fused) > n {
 		fused = fused[:n]
 	}
 	return fused, nil
+}
+
+const (
+	// defaultMaxPerFile is how many results of one file onfly_focus lists, after
+	// the first defaultFocusHead results, before the results of other files:
+	// methods of one file that all match the question should not leave no room
+	// for the second file of a flow.
+	defaultMaxPerFile = 1
+	defaultFocusHead  = 2
+)
+
+// diversify keeps the order of the ranking but moves a result of a file that
+// already has max results, past the first head, to the end, behind every other
+// file's. A result whose name is a word of the question stays where it is: a
+// question that names a function wants that function, whatever else its file
+// holds. Nothing is dropped; the limit cuts the list after it.
+func diversify(ranked []parser.Chunk, head, max int, query string) []parser.Chunk {
+	if max <= 0 || len(ranked) <= head {
+		return ranked
+	}
+	named := map[string]bool{}
+	for _, w := range strings.Fields(query) {
+		named[strings.ToLower(strings.Trim(w, ".,;:?!()\"'`"))] = true
+	}
+	seen := map[string]int{}
+	out := make([]parser.Chunk, 0, len(ranked))
+	var rest []parser.Chunk
+	for i, c := range ranked {
+		if i >= head && seen[c.FilePath] >= max && !named[strings.ToLower(c.Metadata["name"])] {
+			rest = append(rest, c)
+			continue
+		}
+		seen[c.FilePath]++
+		out = append(out, c)
+	}
+	return append(out, rest...)
 }
 
 // focusRank is the ranking of onfly_focus before the reranker.

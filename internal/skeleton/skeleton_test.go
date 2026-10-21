@@ -359,3 +359,26 @@ func TestCollapseNumberedKeepsTheNumbersOfTheOriginalFile(t *testing.T) {
 		t.Fatalf("%q", plain)
 	}
 }
+
+func TestCollapsePreambleKeepsTheNumbersAndThePackageLine(t *testing.T) {
+	var src strings.Builder
+	src.WriteString("<?php\n/*\n * Licence line one\n * Licence line two\n */\nnamespace App\\Thing;\n\nuse A\\B;\nuse A\\C;\nuse A\\D;\n\n/** Docs. */\nfunction f() {}\n")
+	numbered := CollapseNumbered(src.String(), nil, "", 100)
+	got := CollapsePreamble(numbered, 12, 6, 6)
+	for _, want := range []string{" 1| // ... [lines 1-5: header and imports omitted] ...", " 6| namespace App\\Thing;", " 7| // ... [lines 7-11: header and imports omitted] ...", "12| /** Docs. */", "13| function f() {}"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Licence line") || strings.Contains(got, "use A") {
+		t.Fatalf("the preamble is hidden:\n%s", got)
+	}
+	if short := CollapsePreamble(numbered, 4, 0, 6); short != numbered {
+		t.Fatal("a short preamble is left alone")
+	}
+	// The tip line of a skeleton with collapsed bodies is not a numbered line and stays.
+	withTip := ExpandTip + "\n" + numbered
+	if !strings.HasPrefix(CollapsePreamble(withTip, 12, 6, 6), ExpandTip+"\n") {
+		t.Fatal("the tip stays first")
+	}
+}

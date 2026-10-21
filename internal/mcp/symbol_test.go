@@ -349,3 +349,25 @@ func TestXrayPutsTheBodyFirstEvenInAFileShownWhole(t *testing.T) {
 		t.Fatalf("the helpers are in the file already, not repeated:\n%s", out)
 	}
 }
+
+func TestXrayHidesTheLicenceAndImportsAboveTheFirstSymbol(t *testing.T) {
+	root := t.TempDir()
+	src := "// Licence\n// Licence\n// Licence\n// Licence\n// Licence\n// Licence\n\npackage big\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\n// Run runs.\nfunc Run() {\n\tfmt.Println(os.Args)\n}\n"
+	if err := os.WriteFile(filepath.Join(root, "big.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := openTestStore(t)
+	chunk := vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "big.go", Type: "function", Content: "func Run() {}", Metadata: map[string]string{"name": "Run", "package": "big", "start_line": "15", "end_line": "18"}}, Vector: []float32{1, 0, 0, 1}}
+	if err := saveHashed(store, root, []vectorstore.EmbeddedChunk{chunk}); err != nil {
+		t.Fatal(err)
+	}
+	out := xrayText(t, &tools{root: root, store: store, maxTokens: 8192}, "big.go")
+	for _, want := range []string{"1| // ... [lines 1-7: header and imports omitted]", " 8| package big", "9| // ... [lines 9-14", "15| // Run runs.", "16| func Run() {"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Licence") || strings.Contains(out, `"fmt"`) {
+		t.Fatalf("the preamble is hidden:\n%s", out)
+	}
+}

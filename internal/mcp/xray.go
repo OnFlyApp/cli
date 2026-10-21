@@ -26,7 +26,7 @@ var smallFile = 120
 // xrayLimits are the limits of the output of onfly_xray, from the xray: section
 // of the configuration.
 type xrayLimits struct {
-	signatureClip, wholeFile, collapseOver, edges, previewCallers, helpers, dirEntries int
+	signatureClip, wholeFile, collapseOver, edges, previewCallers, helpers, dirEntries, preamble int
 }
 
 func (h *tools) lim() xrayLimits {
@@ -40,7 +40,7 @@ func (h *tools) lim() xrayLimits {
 	return xrayLimits{
 		signatureClip: pick(x.SignatureClip, 120), wholeFile: pick(x.WholeFileLines, smallFile),
 		collapseOver: pick(x.CollapseOver, 10), edges: pick(x.MaxEdges, 15), previewCallers: pick(x.PreviewCallers, 3),
-		helpers: pick(x.MaxHelpers, 2), dirEntries: pick(x.MaxDirEntries, 40),
+		helpers: pick(x.MaxHelpers, 2), dirEntries: pick(x.MaxDirEntries, 40), preamble: pick(x.PreambleLines, 6),
 	}
 }
 
@@ -168,7 +168,11 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	}
 	// The body asked for comes first and apart: in a long file the skeleton is cut
 	// to the budget, and a body expanded inside it can fall past the cut.
-	sk, focusText := cutToBudget(skeleton.CollapseNumbered(string(src), spans, "", over), h.maxTokens), ""
+	numbered := skeleton.CollapseNumbered(string(src), spans, "", over)
+	if first := firstSymbolLine(chunks); first > 0 {
+		numbered = skeleton.CollapsePreamble(numbered, first, packageLine(string(src), chunks, first), lim.preamble)
+	}
+	sk, focusText := cutToBudget(numbered, h.maxTokens), ""
 	if focus != "" {
 		names, closest := closestSymbols(spans, focus)
 		switch {
@@ -609,4 +613,66 @@ func upPreview(ups []parser.Chunk, most int) string {
 		parts = append(parts, name+" ("+path.Base(u.FilePath)+")")
 	}
 	return " <- " + strings.Join(parts, ", ")
+}
+
+// firstSymbolLine is the first line of the first chunk that holds code: what
+// is above it is the licence, the package or namespace line and the imports.
+// 0 when no chunk says where it starts.
+func firstSymbolLine(chunks []parser.Chunk) int {
+	first := 0
+	for _, c := range chunks {
+		switch c.Type {
+		case "file", parser.FileSummaryType, "section", "block", "use", "namespace", "import":
+			continue
+		}
+		if n := lineNum(c.Metadata["start_line"]); n > 0 && (first == 0 || n < first) {
+			first = n
+		}
+	}
+	return first
+}
+
+// packageLine finds the line above first that declares the package or namespace
+// the chunks carry, by that name standing alone in the line. 0 when there is none.
+func packageLine(src string, chunks []parser.Chunk, first int) int {
+	name := ""
+	for _, c := range chunks {
+		if name = c.Metadata["namespace"]; name != "" {
+			break
+		}
+		if name = c.Metadata["package"]; name != "" {
+			break
+		}
+	}
+	if name == "" {
+		return 0
+	}
+	lines := strings.Split(src, "\n")
+	for i := 0; i < min(first-1, len(lines)); i++ {
+		if standsAlone(lines[i], name) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func standsAlone(line, name string) bool {
+	for from := 0; ; {
+		i := strings.Index(line[from:], name)
+		if i < 0 {
+			return false
+		}
+		i += from
+		end := i + len(name)
+		before := i == 0 || !isWordByte(line[i-1])
+		after := end == len(line) || !isWordByte(line[end])
+		if before && after {
+			return true
+		}
+		from = end
+	}
+}
+
+func isWordByte(b byte) bool {
+	return b == '_' || b == '\\' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }

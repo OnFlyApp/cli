@@ -105,3 +105,28 @@ func TestFileSummaryIsReplacedByTheSymbolThatAnswersTheQuery(t *testing.T) {
 		t.Fatalf("the smaller method named for the question beats the largest one: %+v", got)
 	}
 }
+
+func TestDiversifyMovesLaterResultsOfAFilePastOtherFiles(t *testing.T) {
+	c := func(file, name string) parser.Chunk {
+		return parser.Chunk{FilePath: file, Type: "method", Metadata: map[string]string{"name": name}}
+	}
+	ranked := []parser.Chunk{c("a.go", "a1"), c("a.go", "a2"), c("a.go", "a3"), c("a.go", "a4"), c("b.go", "b1"), c("c.go", "c1")}
+	names := func(in []parser.Chunk) string {
+		var out []string
+		for _, r := range in {
+			out = append(out, r.Metadata["name"])
+		}
+		return strings.Join(out, " ")
+	}
+	// The first two stay; after them a file that already has a result waits.
+	if got := names(diversify(ranked, 2, 1, "how does a work")); got != "a1 a2 b1 c1 a3 a4" {
+		t.Fatalf("%s", got)
+	}
+	// A result named by a word of the question stays in its place.
+	if got := names(diversify(ranked, 2, 1, "where is a4 defined")); got != "a1 a2 a4 b1 c1 a3" {
+		t.Fatalf("%s", got)
+	}
+	if got := names(diversify(ranked, 2, 0, "x")); got != names(ranked) {
+		t.Fatalf("0 turns it off: %s", got)
+	}
+}

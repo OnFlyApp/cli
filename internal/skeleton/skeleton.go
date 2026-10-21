@@ -219,3 +219,49 @@ func isNote(t string) bool {
 func indentOf(line string) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
+
+// CollapsePreamble shortens the numbered text from CollapseNumbered: the lines
+// before first (the first line of the first symbol, with its docblock) are
+// the licence, the package or namespace line and the imports, and nothing in
+// them is a body to read. They are replaced by one marker that names the lines it
+// hides, except line keep (the package or namespace line, when there is one).
+// A preamble of minLines lines or fewer is left as it is. The text is not parsed
+// as code: only the line numbers CollapseNumbered put in front of each line are used.
+func CollapsePreamble(numbered string, first, keep, minLines int) string {
+	if first-1 <= minLines {
+		return numbered
+	}
+	lines := strings.Split(numbered, "\n")
+	var out []string
+	runStart, runEnd, width := 0, 0, 0
+	flush := func() {
+		if runStart == 0 {
+			return
+		}
+		out = append(out, fmt.Sprintf("%*d| // ... [lines %d-%d: header and imports omitted] ...", width, runStart, runStart, runEnd))
+		runStart = 0
+	}
+	for _, l := range lines {
+		bar := strings.Index(l, "| ")
+		n, err := strconv.Atoi(strings.TrimSpace(l[:max(bar, 0)]))
+		if bar < 0 || err != nil || n >= first {
+			flush()
+			out = append(out, l)
+			continue
+		}
+		if width == 0 {
+			width = bar
+		}
+		if n == keep {
+			flush()
+			out = append(out, l)
+			continue
+		}
+		if runStart == 0 {
+			runStart = n
+		}
+		runEnd = n
+	}
+	flush()
+	return strings.Join(out, "\n")
+}
