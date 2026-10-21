@@ -19,6 +19,7 @@ type Config struct {
 	Embedder    Embedder    `yaml:"embedder"`
 	Reranker    Reranker    `yaml:"reranker"`
 	Search      Search      `yaml:"search"`
+	Resolver    Resolver    `yaml:"resolver"`
 	Rules       []string    `yaml:"rules"`
 	RulesEngine RulesEngine `yaml:"rules_engine"`
 	Indexer     Indexer     `yaml:"indexer"`
@@ -62,6 +63,17 @@ type Reranker struct {
 	APIKey     string `yaml:"api_key"`
 	Candidates int    `yaml:"candidates"`
 	TimeoutMS  int    `yaml:"timeout_ms"`
+}
+
+// Resolver tunes how a name used in a chunk is attributed to a definition.
+type Resolver struct {
+	// MaxUnambiguousDefinitions: a method that this many classes or fewer define
+	// in the whole project is attributed to a call on a value of unknown type, since
+	// it cannot be anything else. 0 is the default, 1; negative turns it off.
+	MaxUnambiguousDefinitions int `yaml:"max_unambiguous_definitions"`
+	// SelfQualifiers are the member-access prefixes that mean "this class"; the
+	// default is the PHP set: $this, self, static, parent.
+	SelfQualifiers []string `yaml:"self_qualifiers"`
 }
 
 type Search struct {
@@ -522,6 +534,12 @@ func mergeConfig(parent, child Config, gitRoot, childRoot string) Config {
 	}
 	if child.Indexer.DebounceMS != 0 {
 		out.Indexer.DebounceMS = child.Indexer.DebounceMS
+	}
+	if child.Resolver.MaxUnambiguousDefinitions != 0 {
+		out.Resolver.MaxUnambiguousDefinitions = child.Resolver.MaxUnambiguousDefinitions
+	}
+	if len(child.Resolver.SelfQualifiers) > 0 {
+		out.Resolver.SelfQualifiers = child.Resolver.SelfQualifiers
 	}
 	return out
 }

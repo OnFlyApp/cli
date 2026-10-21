@@ -8,6 +8,7 @@ package resolve
 import (
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -18,6 +19,45 @@ import (
 // def by the name def carries. When src is empty (the file is gone) or the
 // language has no rules here, it accepts.
 func Accepts(src string, caller, def parser.Chunk) bool {
+	return Rules{}.Accepts(src, caller, def, 0)
+}
+
+// Rules are the settings of the resolver. The zero value is the defaults.
+type Rules struct {
+	// MaxUnambiguous is how many definitions a method name may have in the whole
+	// project for a call on a value of unknown type to be attributed to it: a
+	// name only one class defines cannot be anything else. 0 means the default (1);
+	// a negative value turns the rule off.
+	MaxUnambiguous int
+	// SelfQualifiers are the member-access prefixes that mean "this class" (PHP:
+	// $this, self, static, parent). Empty means the defaults.
+	SelfQualifiers []string
+}
+
+// DefaultSelfQualifiers are the PHP prefixes that name the class itself.
+var DefaultSelfQualifiers = []string{"$this", "self", "static", "parent"}
+
+// DefaultMaxUnambiguous is Rules.MaxUnambiguous when it is not set.
+const DefaultMaxUnambiguous = 1
+
+func (r Rules) maxUnambiguous() int {
+	if r.MaxUnambiguous == 0 {
+		return DefaultMaxUnambiguous
+	}
+	return r.MaxUnambiguous
+}
+
+func (r Rules) isSelf(qual string) bool {
+	list := r.SelfQualifiers
+	if len(list) == 0 {
+		list = DefaultSelfQualifiers
+	}
+	return slices.Contains(list, qual)
+}
+
+// Accepts is the package function with the rules, and with the number of
+// definitions the project has under def's name (0 when it is not known).
+func (r Rules) Accepts(src string, caller, def parser.Chunk, siblings int) bool {
 	if src == "" {
 		return true
 	}
@@ -29,7 +69,7 @@ func Accepts(src string, caller, def parser.Chunk) bool {
 	case ".go":
 		return goAccepts(src, caller, def, name)
 	case ".php":
-		return phpAccepts(src, caller, def, name)
+		return r.phpAccepts(src, caller, def, name, siblings)
 	}
 	return true
 }
@@ -369,7 +409,7 @@ func phpPropertyTypes(src, prop string) []string {
 	return out
 }
 
-func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
+func (r Rules) phpAccepts(src string, caller, def parser.Chunk, name string, siblings int) bool {
 	uses := cachedUses(src)
 	ns := caller.Metadata["namespace"]
 	defClass := def.Metadata["receiver"]
@@ -392,10 +432,11 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 			case !isMethod && !classLike && def.Metadata["namespace"] == ns:
 				return true
 			}
-		case strings.HasPrefix(qual, "$") || qual == "self" || qual == "static" || qual == "parent" || m.arrow:
+		case strings.HasPrefix(qual, "$") || r.isSelf(qual) || m.arrow:
+			isVar := strings.HasPrefix(qual, "$") && !r.isSelf(qual)
 			// $this->limiter->tooManyAttempts(): when the file says what the property
 			// holds, that class decides, not a neighbour in the same namespace.
-			if types := phpPropertyTypes(src, qual); m.arrow && !strings.HasPrefix(qual, "$") && len(types) > 0 {
+			if types := phpPropertyTypes(src, strings.TrimPrefix(qual, "$")); (m.arrow || isVar) && !r.isSelf(qual) && len(types) > 0 && (isVar || !strings.HasPrefix(qual, "$")) {
 				if isMethod {
 					for _, t := range types {
 						if phpClass(t, uses, ns) == defClass {
@@ -405,7 +446,18 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 				}
 				continue
 			}
-			if isMethod && phpRelated(def, caller, uses, ns) && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
+			if !isMethod {
+				continue
+			}
+			// $cashbackCycle->clawBackCashback(): a variable named for the class.
+			if isVar && sameClassName(qual[1:], defClass) {
+				return true
+			}
+			if phpRelated(def, caller, uses, ns) && (!phpUbiquitous[name] || def.FilePath == caller.FilePath) {
+				return true
+			}
+			// A name that only one class in the project defines is that class's.
+			if limit := r.maxUnambiguous(); limit > 0 && siblings > 0 && siblings <= limit && !phpUbiquitous[name] {
 				return true
 			}
 		default:
@@ -415,4 +467,13 @@ func phpAccepts(src string, caller, def parser.Chunk, name string) bool {
 		}
 	}
 	return false
+}
+
+// sameClassName says that a variable is named for a class: $cashbackCycle for
+// App\Cashback\CashbackCycle.
+func sameClassName(variable, class string) bool {
+	if i := strings.LastIndexAny(class, `\.`); i >= 0 {
+		class = class[i+1:]
+	}
+	return class != "" && strings.EqualFold(variable, class)
 }

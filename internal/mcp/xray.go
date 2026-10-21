@@ -284,7 +284,7 @@ func (h *tools) referencedDefinitions(ctx context.Context, chunks []parser.Chunk
 	for ref, cands := range all {
 		for _, d := range cands {
 			for _, caller := range src.by[ref] {
-				if srcs.accepts(caller, d) {
+				if srcs.accepts(caller, d, len(cands)) {
 					defs[ref] = append(defs[ref], d)
 					break
 				}

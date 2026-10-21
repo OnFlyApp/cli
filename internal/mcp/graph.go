@@ -222,7 +222,7 @@ func resolvable(srcs *sources, defs []parser.Chunk, t definition, refs []parser.
 	var out []parser.Chunk
 	for _, c := range refs {
 		for _, d := range here {
-			if srcs.accepts(c, d) {
+			if srcs.accepts(c, d, len(defs)) {
 				out = append(out, c)
 				break
 			}
@@ -240,7 +240,7 @@ func attributedWith(srcs *sources, defs []parser.Chunk, t definition, refs []par
 		own := pathCloseness(c.FilePath, t.file)
 		keep := true
 		for _, d := range defs {
-			if d.FilePath != t.file && pathCloseness(c.FilePath, d.FilePath) > own && srcs.accepts(c, d) {
+			if d.FilePath != t.file && pathCloseness(c.FilePath, d.FilePath) > own && srcs.accepts(c, d, len(defs)) {
 				keep = false
 				break
 			}

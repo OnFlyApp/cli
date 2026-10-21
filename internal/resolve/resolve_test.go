@@ -160,3 +160,49 @@ func TestPHPPropertyTypeDecidesBeforeTheNamespace(t *testing.T) {
 		}
 	}
 }
+
+func TestPHPCallOnAVariableNamedForTheClass(t *testing.T) {
+	src := "<?php\nnamespace App\\Application;\nclass Handler {}\n"
+	call := "$cashbackCycle->clawBackCashback($id);"
+	caller := ch("src/Application/Handler.php", call, map[string]string{"name": "__invoke", "namespace": "App\\Application"})
+	def := ch("src/Domain/CashbackCycle.php", "", map[string]string{"name": "clawBackCashback", "receiver": "App\\Domain\\CashbackCycle", "namespace": "App\\Domain"})
+	other := ch("src/Domain/Other.php", "", map[string]string{"name": "clawBackCashback", "receiver": "App\\Domain\\Other", "namespace": "App\\Domain"})
+	if !Accepts(src, caller, def) {
+		t.Fatal("$cashbackCycle is a CashbackCycle, imported or not")
+	}
+	if Accepts(src, caller, other) {
+		t.Fatal("and not an Other")
+	}
+}
+
+func TestPHPParameterTypeDecidesForAVariable(t *testing.T) {
+	src := "<?php\nnamespace App\\Application;\nuse App\\Domain\\Account;\nclass Handler { function run(Account $acc) { $acc->close(); } }\n"
+	caller := ch("src/Application/Handler.php", "$acc->close();", map[string]string{"name": "run", "namespace": "App\\Application"})
+	account := ch("src/Domain/Account.php", "", map[string]string{"name": "close", "receiver": "App\\Domain\\Account", "namespace": "App\\Domain"})
+	door := ch("src/Application/Door.php", "", map[string]string{"name": "close", "receiver": "App\\Application\\Door", "namespace": "App\\Application"})
+	if !Accepts(src, caller, account) || Accepts(src, caller, door) {
+		t.Fatal("the parameter is an Account, so the neighbour in the namespace is not the target")
+	}
+}
+
+func TestPHPNameThatOneClassDefinesIsThatClassesEvenOnAnUntypedValue(t *testing.T) {
+	src := "<?php\nnamespace App\\Application;\nclass Handler {}\n"
+	caller := ch("src/Application/Handler.php", "$store->findByIban($iban);", map[string]string{"name": "run", "namespace": "App\\Application"})
+	def := ch("src/Infra/Repo.php", "", map[string]string{"name": "findByIban", "receiver": "App\\Infra\\Repo", "namespace": "App\\Infra"})
+	r := Rules{}
+	if r.Accepts(src, caller, def, 3) {
+		t.Fatal("three classes define it: the call could be to any of them")
+	}
+	if !r.Accepts(src, caller, def, 1) {
+		t.Fatal("one class defines it: the call is to that one")
+	}
+	if (Rules{MaxUnambiguous: -1}).Accepts(src, caller, def, 1) {
+		t.Fatal("the rule can be turned off")
+	}
+	if !(Rules{MaxUnambiguous: 3}).Accepts(src, caller, def, 3) {
+		t.Fatal("and widened")
+	}
+	if r.Accepts(src, caller, ch("src/Infra/Repo.php", "", map[string]string{"name": "__construct", "receiver": "App\\Infra\\Repo"}), 1) {
+		t.Fatal("a name every class has is never unambiguous")
+	}
+}

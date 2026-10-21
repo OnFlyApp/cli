@@ -101,11 +101,17 @@ func resultText(res *sdkmcp.CallToolResult) string {
 // sources reads project files once per request, for resolving which definition
 // a name in a chunk refers to.
 type sources struct {
-	root string
-	text map[string]string
+	root  string
+	text  map[string]string
+	rules resolve.Rules
 }
 
-func (h *tools) newSources() *sources { return &sources{root: h.root, text: map[string]string{}} }
+func (h *tools) newSources() *sources {
+	return &sources{root: h.root, text: map[string]string{}, rules: resolve.Rules{
+		MaxUnambiguous: h.cfg.Resolver.MaxUnambiguousDefinitions,
+		SelfQualifiers: h.cfg.Resolver.SelfQualifiers,
+	}}
+}
 
 func (s *sources) get(rel string) string {
 	if s == nil {
@@ -122,9 +128,11 @@ func (s *sources) get(rel string) string {
 	return t
 }
 
-func (s *sources) accepts(caller, def parser.Chunk) bool {
+// accepts says whether caller can be using def; siblings is how many
+// definitions of that name the project has, 0 when not known.
+func (s *sources) accepts(caller, def parser.Chunk, siblings int) bool {
 	if s == nil {
 		return true
 	}
-	return resolve.Accepts(s.get(caller.FilePath), caller, def)
+	return s.rules.Accepts(s.get(caller.FilePath), caller, def, siblings)
 }
