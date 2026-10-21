@@ -117,6 +117,33 @@ func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error)
 	return h.impactFrom(ctx, []definition{target}, in.Depth, h.newSources())
 }
 
+// callersByTarget is one level of impactFrom, kept per target: who calls each of
+// them. It costs two queries however many targets there are.
+func (h *tools) callersByTarget(ctx context.Context, targets []definition, srcs *sources) (map[definition][]parser.Chunk, error) {
+	names := make([]string, len(targets))
+	for i, t := range targets {
+		names[i] = t.name
+	}
+	refsBy, err := h.store.ReferencesByNames(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	defsBy, err := h.store.ComponentsByNames(ctx, names)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[definition][]parser.Chunk, len(targets))
+	for _, t := range targets {
+		refs := refsBy[t.name]
+		if t.file != "" {
+			refs = attributedWith(srcs, defsBy[t.name], t, refs)
+			refs = resolvable(srcs, defsBy[t.name], t, refs)
+		}
+		out[t] = refs
+	}
+	return out, nil
+}
+
 // impactFrom walks callers level by level. Each level costs two queries, one
 // for the references to every name on the frontier and one for their
 // definitions, however many targets there are.

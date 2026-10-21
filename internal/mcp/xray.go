@@ -14,6 +14,7 @@ import (
 	"github.com/axitdev/onfly/internal/parser"
 	"github.com/axitdev/onfly/internal/rules"
 	"github.com/axitdev/onfly/internal/skeleton"
+	"github.com/axitdev/onfly/internal/tokens"
 	"github.com/axitdev/onfly/internal/vectorstore"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -79,7 +80,10 @@ func (h *tools) runXray(ctx context.Context, _ *sdkmcp.CallToolRequest, in xrayI
 		if rerr != nil || len(defs) == 0 {
 			// "file.go:Missing": the file is real, so give it, and say what it has.
 			if file, ok := h.fileOfTarget(target, files); ok {
-				res, err = h.xrayFile(ctx, file, focus, in.Depth, "", h.missingSymbolNote(ctx, file, target))
+				if focus == "" {
+					_, focus, _ = splitTarget(target)
+				}
+				res, err = h.xrayFile(ctx, file, focus, in.Depth, "", "")
 				return res, struct{}{}, err
 			}
 			return nil, struct{}{}, fmt.Errorf("%q is not a file, directory or symbol in this project", target)
@@ -145,8 +149,17 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	// The body asked for comes first and apart: in a long file the skeleton is cut
 	// to the budget, and a body expanded inside it can fall past the cut.
 	sk, focusText := cutToBudget(skeleton.CollapseNumbered(string(src), spans, "", over), h.maxTokens), ""
-	if focus != "" && over != math.MaxInt {
-		focusText = focusBody(string(src), spans, focus, h.maxTokens)
+	if focus != "" {
+		names, closest := closestSymbols(spans, focus)
+		switch {
+		case len(names) == 0 && symbols == "":
+			note = joinNotes(note, h.missingSymbolNote(ctx, rel, rel+":"+focus))
+		case closest:
+			note = joinNotes(note, fmt.Sprintf("no symbol %q in this file; expanded the closest by name: %s", focus, strings.Join(names, ", ")))
+		}
+		if over != math.MaxInt {
+			focusText = h.focusSections(string(src), spans, chunks, names)
+		}
 	}
 	srcs := h.newSources()
 	srcs.text[rel] = string(src)
@@ -155,9 +168,7 @@ func (h *tools) xrayFile(ctx context.Context, rel, focus string, depth int, symb
 	if note != "" {
 		b.WriteString("> " + note + "\n")
 	}
-	if focusText != "" {
-		b.WriteString("## " + focus + "\n" + focusText + "\n")
-	}
+	b.WriteString(focusText)
 	b.WriteString("## skeleton\n" + sk + "\n")
 	if calls != "" {
 		b.WriteString("## calls\n" + calls)
@@ -203,16 +214,22 @@ func (h *tools) blastRadius(ctx context.Context, rel string, chunks []parser.Chu
 		return calls.String(), "", len(deps)
 	}
 	seen := map[string]bool{}
-	n := 0
+	var shown []parser.Chunk
 	for _, r := range refs {
 		key := r.FilePath + "|" + r.Metadata["name"] + "|" + r.Metadata["receiver"]
-		if r.FilePath == rel || seen[key] || n >= maxXrayEdges || vectorstore.IsProse(r.FilePath) {
+		if r.FilePath == rel || seen[key] || len(shown) >= maxXrayEdges || vectorstore.IsProse(r.FilePath) {
 			continue
 		}
 		seen[key] = true
-		fmt.Fprintf(&calledBy, "- %s [%s]\n", signature(r), location(r))
+		shown = append(shown, r)
 		deps[r.FilePath] = true
-		n++
+	}
+	var ups map[definition][]parser.Chunk
+	if depth <= 1 {
+		ups = h.callersOfCallers(ctx, shown, rel, srcs)
+	}
+	for _, r := range shown {
+		fmt.Fprintf(&calledBy, "- %s [%s]%s\n", signature(r), location(r), upPreview(ups[definition{r.Metadata["name"], r.FilePath}]))
 	}
 	return calls.String(), calledBy.String(), len(deps)
 }
@@ -400,4 +417,178 @@ func focusBody(src string, spans []skeleton.Span, name string, maxTokens int) st
 		}
 	}
 	return strings.TrimRight(cutToBudget(b.String(), maxTokens), "\n")
+}
+
+func joinNotes(a, b string) string {
+	if a == "" {
+		return b
+	}
+	return a + "; " + b
+}
+
+const maxClosest = 3
+
+// closestSymbols finds the functions of a file that a name stands for: the name
+// itself, else the ones that differ only in case, else those that begin with
+// it, else those that contain it ("end" for endCycle). The second result is true
+// when the name was not found as it is.
+func closestSymbols(spans []skeleton.Span, name string) ([]string, bool) {
+	has := func(match func(string) bool) []string {
+		var out []string
+		seen := map[string]bool{}
+		for _, sp := range spans {
+			if sp.Name != "" && !seen[sp.Name] && match(sp.Name) {
+				seen[sp.Name] = true
+				out = append(out, sp.Name)
+			}
+		}
+		if len(out) > maxClosest {
+			out = out[:maxClosest]
+		}
+		return out
+	}
+	low := strings.ToLower(name)
+	if exact := has(func(n string) bool { return n == name }); len(exact) > 0 {
+		return exact, false
+	}
+	for _, match := range []func(string) bool{
+		func(n string) bool { return strings.ToLower(n) == low },
+		func(n string) bool { return strings.HasPrefix(strings.ToLower(n), low) },
+		func(n string) bool { return strings.Contains(strings.ToLower(n), low) },
+	} {
+		if got := has(match); len(got) > 0 {
+			return got, true
+		}
+	}
+	return nil, false
+}
+
+const maxHelpers = 2
+
+// focusSections is the body of each function asked for, each under its name,
+// then, in the room that is left, the longest helpers of the same file that
+// those functions call: they are collapsed in the skeleton, and the next call
+// would be for them.
+func (h *tools) focusSections(src string, spans []skeleton.Span, chunks []parser.Chunk, names []string) string {
+	var b strings.Builder
+	used := 0
+	for _, name := range names {
+		body := focusBody(src, spans, name, h.maxTokens)
+		if body == "" {
+			continue
+		}
+		b.WriteString("## " + name + "\n" + body + "\n")
+		n, _ := tokens.Count(body)
+		used += n
+	}
+	for _, helper := range sameFileCallees(spans, chunks, names) {
+		body := focusBody(src, spans, helper, h.maxTokens)
+		n, err := tokens.Count(body)
+		if body == "" || err != nil || used+n > h.maxTokens {
+			continue
+		}
+		b.WriteString("## " + helper + " (called by the above, same file)\n" + body + "\n")
+		used += n
+	}
+	return b.String()
+}
+
+// sameFileCallees lists the functions of the file that the named ones call and
+// that the skeleton collapses, in the order the first call appears.
+func sameFileCallees(spans []skeleton.Span, chunks []parser.Chunk, names []string) []string {
+	long := map[string]bool{}
+	for _, sp := range spans {
+		if sp.End-sp.Start+1 > collapseOver {
+			long[sp.Name] = true
+		}
+	}
+	asked := map[string]bool{}
+	for _, n := range names {
+		asked[n] = true
+	}
+	type callee struct {
+		name string
+		at   int
+	}
+	var found []callee
+	seen := map[string]bool{}
+	for _, c := range chunks {
+		if !asked[c.Metadata["name"]] || (c.Type != "function" && c.Type != "method") {
+			continue
+		}
+		for _, ref := range c.Outbound {
+			if !long[ref] || asked[ref] || seen[ref] {
+				continue
+			}
+			seen[ref] = true
+			at := strings.Index(c.Content, ref)
+			found = append(found, callee{ref, at})
+		}
+	}
+	sort.SliceStable(found, func(i, j int) bool { return found[i].at < found[j].at })
+	var out []string
+	for _, f := range found {
+		if len(out) == maxHelpers {
+			break
+		}
+		out = append(out, f.name)
+	}
+	return out
+}
+
+const (
+	maxUpCallers = 3 // a caller with more callers than this is an interface, not an entrypoint
+	maxUpNames   = 3
+)
+
+// callersOfCallers finds, in two queries, who calls each of the callers shown, so
+// that the entrypoint two hops up can be named on the caller's line. Test
+// files and the file being read do not count.
+func (h *tools) callersOfCallers(ctx context.Context, callers []parser.Chunk, rel string, srcs *sources) map[definition][]parser.Chunk {
+	var targets []definition
+	seen := map[definition]bool{}
+	for _, c := range callers {
+		d := definition{c.Metadata["name"], c.FilePath}
+		if d.name != "" && !seen[d] {
+			seen[d] = true
+			targets = append(targets, d)
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+	by, err := h.callersByTarget(ctx, targets, srcs)
+	if err != nil {
+		return nil
+	}
+	for t, cs := range by {
+		var keep []parser.Chunk
+		for _, c := range cs {
+			if c.FilePath != rel && c.FilePath != t.file && !isTestFile(c.FilePath) && !vectorstore.IsProse(c.FilePath) {
+				keep = append(keep, c)
+			}
+		}
+		by[t] = keep
+	}
+	return by
+}
+
+// upPreview is " <- Handler::handle (Handler.php)" for a caller with one to
+// three callers of its own, and nothing for any other.
+func upPreview(ups []parser.Chunk) string {
+	if len(ups) == 0 || len(ups) > maxUpCallers {
+		return ""
+	}
+	var parts []string
+	for _, u := range ups[:min(len(ups), maxUpNames)] {
+		name := u.Metadata["name"]
+		if r := u.Metadata["receiver"]; r != "" {
+			if i := strings.LastIndexAny(r, `\.`); i >= 0 {
+				r = r[i+1:]
+			}
+			name = r + "::" + name
+		}
+		parts = append(parts, name+" ("+path.Base(u.FilePath)+")")
+	}
+	return " <- " + strings.Join(parts, ", ")
 }

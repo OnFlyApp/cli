@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -328,5 +329,41 @@ func TestSignatureOfALaterPartNamesTheFunction(t *testing.T) {
 	first := parser.Chunk{Content: "func TestPrepare(t *testing.T) {\n\tx := 1", Metadata: map[string]string{"name": "TestPrepare", "part": "1/3"}}
 	if got := signature(first); got != "func TestPrepare(t *testing.T) {" {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestXrayCalledByNamesTheEntrypointTwoHopsUp(t *testing.T) {
+	cfg, store, _ := macroFixture(t)
+	cfg.Server.LogFile = filepath.Join(t.TempDir(), "server.log")
+	vec := []float32{1, 0, 0, 1}
+	caller := func(file, name, calls string) vectorstore.EmbeddedChunk {
+		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: file, Type: "function", Content: "func " + name + "() { " + calls + "() }",
+			Metadata: map[string]string{"name": name, "start_line": "1", "end_line": "1"}, Outbound: []string{calls}}, Vector: vec}
+	}
+	for file, c := range map[string]vectorstore.EmbeddedChunk{
+		"src/routes.go":     caller("src/routes.go", "Route", "Handle"),
+		"tests/web_test.go": caller("tests/web_test.go", "TestHandle", "Handle"),
+	} {
+		if err := store.CommitFile(context.Background(), file, "fixture", []vectorstore.EmbeddedChunk{c}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := openServer(t, cfg, store, fakeEmbedder{})
+	got := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go"})
+	if !strings.Contains(got, "func Handle() { Charge() } [src/web.go:1] <- Route (routes.go)\n") {
+		t.Fatalf("the caller's line names who calls it, and not a test:\n%s", got)
+	}
+	deep := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go", "depth": 2})
+	if strings.Contains(deep, " <- ") {
+		t.Fatalf("at depth 2 the second hop is listed as a caller, not previewed:\n%s", deep)
+	}
+	for i := 0; i < 4; i++ {
+		file := fmt.Sprintf("src/more%d.go", i)
+		if err := store.CommitFile(context.Background(), file, "fixture", []vectorstore.EmbeddedChunk{caller(file, fmt.Sprintf("More%d", i), "Handle")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if busy := callText(t, session, "onfly_xray", map[string]any{"target": "src/pay.go"}); strings.Contains(busy, "[src/web.go:1] <-") {
+		t.Fatalf("a caller with more than three callers is not previewed:\n%s", busy)
 	}
 }

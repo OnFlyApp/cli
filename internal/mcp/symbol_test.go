@@ -243,3 +243,79 @@ func TestXrayExpandsEverySymbolOfTheSameName(t *testing.T) {
 		}
 	}
 }
+
+func TestXrayFallsBackToTheClosestSymbolNameInTheFile(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
+	h := bigFixture(t)
+	for _, target := range []string{"big.go:Sec", "big.go:second", "big.go:eco"} {
+		out := xrayText(t, h, target)
+		if !strings.Contains(out, "## Second\n20| func Second() int {") || !strings.Contains(out, "34| \treturn b") {
+			t.Fatalf("%s: Second must be expanded:\n%s", target, out)
+		}
+		if strings.Contains(out, "a := a + 1") {
+			t.Fatalf("%s: only the closest symbol is expanded:\n%s", target, out)
+		}
+	}
+	out := xrayText(t, h, "big.go:Sec")
+	if !strings.Contains(out, `> no symbol "Sec" in this file; expanded the closest by name: Second`) {
+		t.Fatalf("it says what it expanded instead:\n%s", out)
+	}
+	res, _, err := h.runXray(context.Background(), nil, xrayIn{Target: "pkg/big.go", FocusSymbol: "Fir"})
+	if err != nil || !strings.Contains(resultText(res), "4| \ta := a + 1") {
+		t.Fatalf("focus_symbol gets the same fallback: %v\n%s", err, resultText(res))
+	}
+	if exact := xrayText(t, h, "big.go:First"); strings.Contains(exact, "expanded the closest") {
+		t.Fatalf("a name that exists is not fuzzy matched:\n%s", exact)
+	}
+}
+
+func helperFixture(t *testing.T, maxTokens int) *tools {
+	t.Helper()
+	root := t.TempDir()
+	body := func(name, v string) string {
+		s := "func " + name + "() int {\n"
+		for i := 0; i < 13; i++ {
+			s += "\t" + v + " := " + v + " + 1\n"
+		}
+		return s + "\treturn " + v + "\n}\n"
+	}
+	src := "package h\n\n" + body("Main", "m") + "\n" + body("helperA", "a") + "\n" + body("helperB", "b") + "\n" + body("helperC", "c")
+	if err := os.WriteFile(filepath.Join(root, "h.go"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(src, "\n")
+	chunk := func(name string, start int, out ...string) vectorstore.EmbeddedChunk {
+		end := start + 15
+		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: "h.go", Type: "function", Content: strings.Join(lines[start-1:end], "\n"), Outbound: out,
+			Metadata: map[string]string{"name": name, "start_line": itoa(start), "end_line": itoa(end)}}, Vector: []float32{1, 0, 0, 1}}
+	}
+	store := openTestStore(t)
+	chunks := []vectorstore.EmbeddedChunk{chunk("Main", 3, "helperB", "helperA", "fmt"), chunk("helperA", 20), chunk("helperB", 37), chunk("helperC", 54)}
+	if err := saveHashed(store, root, chunks); err != nil {
+		t.Fatal(err)
+	}
+	return &tools{root: root, store: store, maxTokens: maxTokens}
+}
+
+func TestXrayExpandsTheHelpersOfTheSameFileThatTheSymbolCalls(t *testing.T) {
+	defer func(v int) { smallFile = v }(smallFile)
+	smallFile = 0
+	out := xrayText(t, helperFixture(t, 8192), "h.go:Main")
+	for _, want := range []string{"## Main\n", "## helperA (called by the above, same file)\n", "## helperB (called by the above, same file)\n", "38| \tb := b + 1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("lost %q in\n%s", want, out)
+		}
+	}
+	if a, b := strings.Index(out, "## helperB"), strings.Index(out, "## helperA"); a < 0 || b < 0 || a > b {
+		t.Fatalf("helpers come in the order the body calls them (helperB first):\n%s", out)
+	}
+	if strings.Contains(out, "## helperC") || strings.Contains(out, "c := c + 1") {
+		t.Fatalf("a function nobody calls is not expanded:\n%s", out)
+	}
+	// With no room beyond the body itself, no helper is added.
+	tight := xrayText(t, helperFixture(t, 150), "h.go:Main")
+	if strings.Contains(tight, "## helperA") || !strings.Contains(tight, "## Main\n") {
+		t.Fatalf("helpers only take the room that is left:\n%s", tight)
+	}
+}
