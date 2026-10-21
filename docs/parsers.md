@@ -115,7 +115,7 @@ indexer:
 
 If another parser already owns one of the new extensions, a terminal asks `Replace parser for .php, .inc? [y/N] `. `--yes` overwrites. Enter or `n` returns `ext: install cancelled` and leaves the project unchanged. Without a terminal, the command returns `parser for ".php, .inc" already exists; rerun with --yes` and writes nothing. The same wasm path is updated in place.
 
-`onfly ext update` upgrades registry plugins. `onfly ext remove go` deletes that wasm file and its config entry. A lock file name that contains a slash or `..` is refused, and no file is deleted. `onfly ext list` prints `active`, `outdated`, or `corrupted`. The registry fetch stops after three seconds. If it fails, the table still prints and a `registry:` line follows it. A hash mismatch is `corrupted`.
+`onfly ext update` upgrades registry plugins. A parser is current only when its version and its SHA-256 both match the registry's: a version that was fixed in place and published again with other bytes is downloaded and replaced, and `onfly ext list` shows it as `outdated` until then. `onfly ext remove go` deletes that wasm file and its config entry. A lock file name that contains a slash or `..` is refused, and no file is deleted. `onfly ext list` prints `active`, `outdated`, or `corrupted`. The registry fetch stops after three seconds. If it fails, the table still prints and a `registry:` line follows it. A hash mismatch is `corrupted`.
 
 Official parsers: `go`, `php`, `typescript` (`.ts`, `.tsx`, `.mts`, `.cts`), `javascript` (`.js`, `.jsx`, `.mjs`, `.cjs`), `python` (`.py`, `.pyi`) and `rust` (`.rs`). Each lives in its own `ext-parser-<name>` repository.
 

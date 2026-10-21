@@ -120,13 +120,18 @@ func (p *staged) stage(ctx context.Context, opt Options) (current bool, err erro
 	p.version, p.exts, p.source = version, rel.Extensions, "registry"
 	p.file = p.ref.Name + "-parser.wasm"
 	p.relPath = ".onfly/plugins/" + p.file
-	ok, err := alreadyCurrent(p.root, p.cfgPath, p.ref.Name, version, p.relPath, p.exts)
+	ok, err := alreadyCurrent(p.root, p.cfgPath, p.ref.Name, version, rel.SHA256, p.relPath, p.exts)
 	if err != nil {
 		return false, err
 	}
 	if ok {
 		fmt.Fprintf(opt.Stdout, "%s %s is current\n", p.ref.Name, version)
 		return true, nil
+	}
+	if lock, lerr := LoadLock(p.root); lerr == nil {
+		if item, held := lock[p.ref.Name]; held && item.Source == "registry" && item.Version == version && !strings.EqualFold(item.SHA256, rel.SHA256) {
+			fmt.Fprintf(opt.Stdout, "%s %s: the registry now has a different checksum, replacing the installed file\n", p.ref.Name, version)
+		}
 	}
 	p.temp, p.sum, err = Download(ctx, opt.Client, rel.URL, rel.SHA256)
 	return false, err
@@ -353,9 +358,13 @@ func List(ctx context.Context, opt Options) error {
 	defer cancel()
 	manifest, regErr := FetchManifest(fetchCtx, opt.Client)
 	latest := map[string]string{}
+	published := map[string]string{} // the registry's checksum of the installed version
 	if regErr == nil {
 		for name, plugin := range manifest {
 			latest[name] = plugin.Latest
+			if item, held := lock[name]; held {
+				published[name] = plugin.Versions[item.Version].SHA256
+			}
 		}
 	}
 	names := make([]string, 0, len(lock))
@@ -387,7 +396,7 @@ func List(ctx context.Context, opt Options) error {
 		if item.Source != "registry" || ver == "" {
 			ver = "local"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", name, ver, pluginStatus(root, item, latest[name], regErr == nil))
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", name, ver, pluginStatus(root, item, latest[name], published[name], regErr == nil))
 	}
 	if err := tw.Flush(); err != nil {
 		return err
@@ -398,7 +407,7 @@ func List(ctx context.Context, opt Options) error {
 	return nil
 }
 
-func pluginStatus(root string, item Installed, latest string, registryOK bool) string {
+func pluginStatus(root string, item Installed, latest, published string, registryOK bool) string {
 	if !pluginFileOK(item.File) {
 		return "corrupted"
 	}
@@ -409,6 +418,9 @@ func pluginStatus(root string, item Installed, latest string, registryOK bool) s
 	}
 	if registryOK && item.Source == "registry" && latest != "" && versionLess(item.Version, latest) {
 		return "outdated"
+	}
+	if registryOK && item.Source == "registry" && published != "" && !strings.EqualFold(published, item.SHA256) {
+		return "outdated" // same version, but the registry has other bytes now
 	}
 	return "active"
 }
@@ -532,13 +544,16 @@ func stageLocal(src string) (string, string, error) {
 	return path, fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
-func alreadyCurrent(root, cfgPath, name, version, relPath string, exts []string) (bool, error) {
+// alreadyCurrent says that the installed parser is the registry's: the same
+// version and the same checksum. A registry that re-publishes a version with
+// different bytes (a parser fixed in place) is not current.
+func alreadyCurrent(root, cfgPath, name, version, registrySHA, relPath string, exts []string) (bool, error) {
 	lock, err := LoadLock(root)
 	if err != nil {
 		return false, err
 	}
 	item, ok := lock[name]
-	if !ok || item.Source != "registry" || item.Version != version || item.File != filepath.Base(relPath) {
+	if !ok || item.Source != "registry" || item.Version != version || item.File != filepath.Base(relPath) || !strings.EqualFold(item.SHA256, registrySHA) {
 		return false, nil
 	}
 	got, err := HashFile(filepath.Join(root, ".onfly", "plugins", item.File))

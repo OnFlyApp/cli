@@ -715,3 +715,62 @@ func TestInstallLocalDoesNotDial(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A parser fixed in place keeps its version and changes its bytes: install and
+// update must notice by the checksum, and list must call the old file outdated.
+func TestSameVersionWithANewChecksumIsReplaced(t *testing.T) {
+	first, second := []byte("wasm-first"), []byte("wasm-second")
+	sumFirst, sumSecond := fmt.Sprintf("%x", sha256.Sum256(first)), fmt.Sprintf("%x", sha256.Sum256(second))
+	served, sum := first, sumFirst
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/registry.json":
+			fmt.Fprintf(w, `{"php": {"latest": "1.2.0", "versions": {"1.2.0": {"url": "https://%s/php.wasm", "sha256": %q, "extensions": [".php"]}}}}`, r.Host, sum)
+		case "/php.wasm":
+			_, _ = w.Write(served)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("ONFLY_REGISTRY_URL", srv.URL+"/registry.json")
+	client := NewClient()
+	client.Transport = srv.Client().Transport
+	dir := writeProject(t)
+	var out bytes.Buffer
+	opt := Options{Dir: dir, Stdout: &out, Client: client}
+	if err := Install(context.Background(), opt, "php"); err != nil {
+		t.Fatal(err)
+	}
+	wasm := filepath.Join(dir, ".onfly", "plugins", "php-parser.wasm")
+
+	out.Reset()
+	if err := Update(context.Background(), opt, "php"); err != nil || !strings.Contains(out.String(), "php 1.2.0 is current") {
+		t.Fatalf("same version, same checksum: %v %q", err, out.String())
+	}
+
+	served, sum = second, sumSecond // the registry re-publishes 1.2.0 with other bytes
+	out.Reset()
+	if err := List(context.Background(), opt); err != nil || !strings.Contains(pluginRow(out.String(), "php"), "outdated") {
+		t.Fatalf("list must flag it: %v %q", err, out.String())
+	}
+	out.Reset()
+	if err := Update(context.Background(), opt, "php"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(wasm)
+	lock, _ := LoadLock(dir)
+	if string(got) != "wasm-second" || lock["php"].SHA256 != sumSecond || lock["php"].Version != "1.2.0" ||
+		!strings.Contains(out.String(), "different checksum") || !strings.Contains(out.String(), "installed php 1.2.0") {
+		t.Fatalf("the file and the lock follow the registry: %q %+v\n%s", got, lock["php"], out.String())
+	}
+
+	out.Reset()
+	if err := Install(context.Background(), opt, "php"); err != nil || !strings.Contains(out.String(), "php 1.2.0 is current") {
+		t.Fatalf("and then it is current: %v %q", err, out.String())
+	}
+	out.Reset()
+	if err := List(context.Background(), opt); err != nil || !strings.Contains(pluginRow(out.String(), "php"), "active") {
+		t.Fatalf("%v %q", err, out.String())
+	}
+}
