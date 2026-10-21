@@ -84,26 +84,30 @@ Under the hood:
 
 Five open-source code bases (Cobra, Hugo, this repository, Laravel, Kubernetes `pkg/`), `qwen3-embedding:0.6b` through Ollama. Every number below is one run; with 8 questions a difference of one or two answers is noise. Method, suites and caveats: [Evaluation](docs/evaluation.md#benchmarks).
 
-**Retrieval**, `onfly_focus`, file-level recall@5 on questions that name no function:
+**Retrieval**, `onfly_focus`, file-level recall@5 on questions that name no function (two suites per repository: `eval.yaml` and the shorter, differently worded `eval.symbols.yaml`):
 
 | | Cobra | Hugo | Onfly | Laravel | Kubernetes |
 | --- | --- | --- | --- | --- | --- |
 | Lexical index (no embedder) | 0.75 | 0.43 | 0.30 | 0.12 | 0.12 |
-| Hybrid index | **1.00** | **0.57** | **0.60** | **0.50** | **0.50** |
+| Hybrid index | **1.00** | **0.71** | **0.70** | **0.62** | **0.50** |
+| Hybrid, second suite | 1.00 | 0.78 | 0.85 | 0.33 | 0.36 |
+| Exact name ("where is `X` defined"), 30 per repository | 30/30 | 30/30 | 30/30 | 30/30 | 30/30 |
 
-Naming a function is not the hard case: 30 sampled "where is `X` defined" questions per repository (Cobra, Hugo, Onfly, Laravel, Kubernetes) find it in the top five **150 of 150 times** (recall@5 1.00, MRR 0.96 to 0.98).
+All 150 exact-name lookups find the function in the top five (MRR 0.96 to 0.98). The paraphrase suites are the hard case: the words of the question are not in the code, which is what the vectors, the file summaries and the one-file-per-result limit are for.
 
-**Agents**, `Grep`/`Read` (A) against `onfly_xray`/`onfly_focus` (B), one run each, run one at a time, answers graded against the source (42 questions):
+**Agents**, `Grep`/`Read` (A) against `onfly_xray`/`onfly_focus` (B), answers graded against the source (42 questions, one run per cell, latest run shown):
 
 | | Cobra | Hugo | Onfly | Laravel | Kubernetes | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| A: correct / partial / wrong | 8/0/0 | 8/0/0 | 10/0/0 | 8/0/0 | 7/1/0 | **41/1/0** |
-| B: correct / partial / wrong | 6/2/0 | 5/3/0 | 7/3/0 | 7/1/0 | 6/2/0 | **31/11/0** |
-| Tokens A / B | 47.7k / 63.4k | 67.2k / 82.6k | 66.4k / 66.9k | 49.9k / 68.8k | 70.8k / 88.7k | 302k / 370k (+23%) |
-| Seconds A / B | 37 / 62 | 110 / 95 | 85 / 53 | 41 / 62 | 86 / 71 | 358 / 343 (-4%) |
-| Calls A / B (onfly + native) | 5 / 13+2 | 17 / 23+3 | 9 / 24+2 | 5 / 25+0 | 20 / 21+1 | 56 / 106+8 |
+| A: correct / partial / wrong | 8/0/0 | 8/0/0 | 10/0/0 | 7/1/0 | 8/0/0 | **41/1/0** |
+| B: correct / partial / wrong | 6/2/0 | 5/3/0 | 9/1/0 | 8/0/0 | 4/4/0 | **32/10/0** |
+| Tokens A / B | 47.7k / 63.4k | 67.2k / 82.6k | 66.4k / 69.8k | 49.9k / 66.7k | 70.8k / 87.5k | 302k / 370k (+23%) |
+| Seconds A / B | 37 / 62 | 110 / 95 | 85 / 53 | 41 / 75 | 86 / 79 | 358 / 363 (+1%) |
+| Calls A / B (onfly + native) | 5 / 13+2 | 17 / 23+3 | 9 / 18+4 | 5 / 33+0 | 20 / 19+1 | 56 / 106+10 |
 
-Honest reading: on questions that describe behavior in words, the agent with `Grep` was as complete and cheaper; the Onfly agent stopped earlier and hedged ("I did not see…") on 11 of 42 answers, made twice the calls because `onfly_focus` often needed a second query, and spent 23% more tokens. No answer was wrong in either arm. Onfly was faster on three repositories (the ones where `Grep` needed 17 to 20 calls) and about even in total time. An earlier run in which Onfly beat `Grep` on Laravel (8 of 8 against 4 of 8) did not repeat: `Grep` scored 8 of 8 in five calls this time. Re-running the Onfly arm on three repositories after the licence-and-imports collapse and the one-file-per-result limit gave 21 correct instead of 20 of 26, the same tokens and calls: no measurable effect. Per-kind breakdown and the reasons: [Evaluation](docs/evaluation.md#agents).
+B for Cobra and Hugo is from the first run; for Onfly, Laravel and Kubernetes from a second run after `onfly_xray` stopped printing licence and imports and `onfly_focus` stopped listing three methods of one file ahead of the second file. The first run of those three was 7/3/0, 7/1/0 and 6/2/0, with the same tokens: the change is inside run-to-run noise (graders and agents both vary by one or two answers). A's tokens and seconds are from its only run.
+
+Honest reading: on questions that describe behavior in words, the agent with `Grep` was as complete and cheaper. The Onfly agent stopped earlier and hedged ("I did not see…") on 10 of 42 answers, made twice the calls because `onfly_focus` often needed a second query, and spent 23% more tokens. No answer was wrong in either arm. Onfly was faster where `Grep` needed 17 to 20 calls (Hugo, this repository) and about even in total time. An earlier run in which Onfly beat `Grep` on Laravel (8 of 8 against 4 of 8) did not repeat. Per-kind breakdown and the reasons: [Evaluation](docs/evaluation.md#agents).
 
 ## Configuration
 

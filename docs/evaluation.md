@@ -73,59 +73,50 @@ Five code bases: Cobra (Go, 40 files), this repository (Go, 200 files), Hugo (Go
 
 ### Retrieval
 
-File-level recall@5 of `onfly_focus` (`onfly eval --file-level --k 5 --focus`) on questions that describe behavior and name no function. Lexical is an index without an embedder. Hybrid is the default index: vectors plus the lexical lists plus file summaries.
+File-level recall@5 of `onfly_focus` (`onfly eval --file-level --k 5 --focus`). Lexical is an index without an embedder; hybrid is the default index (vectors, the lexical lists, file summaries). The first suite asks questions that describe behavior and name no function; the second is a shorter, differently worded set of questions about one concept each, most of which name no identifier either.
 
-| Repository | Lexical only | Hybrid before the retrieval work | Hybrid now |
-| --- | --- | --- | --- |
-| Cobra | 0.75 | 0.75 | 1.00 |
-| Hugo | 0.43 | 0.29 | 0.57 |
-| This repository | 0.30 | 0.40 | 0.60 |
-| Laravel | 0.12 | not built | 0.50 |
-| Kubernetes | 0.12 | not built | 0.50 |
+| Repository | Lexical only | Hybrid | Hybrid, second suite | Exact names (symbol-level, 30 questions) |
+| --- | --- | --- | --- | --- |
+| Cobra | 0.75 | 1.00 | 1.00 | 30/30 |
+| Hugo | 0.43 | 0.71 | 0.78 | 30/30 |
+| This repository | 0.30 | 0.70 | 0.85 | 30/30 |
+| Laravel | 0.12 | 0.62 | 0.33 | 30/30 |
+| Kubernetes | 0.12 | 0.50 | 0.36 | 30/30 |
 
-"Before" was measured on the three smaller repositories only; the other three had no embeddings then. It is a lexical-weighted fusion with bare-code vectors and no instruction prefix on the Qwen3 queries; the work was embedding each chunk with its path, kind and symbol, the instruction prefix, weighing the vectors four times the lexical lists, dropping the whole-file boost next to vectors, and the file summaries. On the second suite of each repository (shorter paraphrases, `eval.symbols.yaml`) recall@5 is 0.94 on Cobra, 0.72 on Hugo, 0.90 on this repository, 0.36 on Kubernetes and 0.20 on Laravel; those questions mostly do not name an identifier either, which is why Laravel is low.
+What got the hybrid column there: each chunk is embedded with its path, kind and symbol; the Qwen3 query instruction; the vector list weighing four times the lexical lists; leaving the whole-file keyword boost out next to vectors; a short summary chunk per file; and listing a second result of one file only after other files' results. Before that, the three repositories that had vectors scored 0.75, 0.29 and 0.40 on the first suite. Lexical-only indexes are unchanged by all of it.
 
-Exact names are not the problem: `eval.identifiers.yaml` asks "where is X defined and what does it do" for 30 sampled functions per repository, and symbol-level recall@5 is 150 of 150 (1.00, MRR 0.96 to 0.98). A lexical-only paraphrase question stays hard, because the words are not in the code; that gap is what the vectors close. A question whose code says `release`, `backoff` and `exception` for "tried again later" can still miss, and no ranking weight tried here fixed it.
+Exact names are not the problem: `eval.identifiers.yaml` asks "where is X defined and what does it do" for 30 sampled functions per repository, and all 150 are found in the top five (MRR 0.96 to 0.98). A paraphrase question stays hard when the words are not in the code. A question whose code says `release`, `backoff` and `exception` for "tried again later" can still miss, and no ranking weight tried here fixed it.
 
 ### Agents
 
-Two agents got the same questions on each repository, run one at a time so the timings do not share the machine: A with `Grep`, `Glob`, `Read` and read-only `Bash`, B with `onfly_xray` and `onfly_focus` (through a helper that starts `onfly serve` per call, 0.3 to 1 s) and `Grep`/`Read` as fallback, told to use Onfly for symbols, types and call or handler graphs and grep or read for env vars, string literals and flat config files. A third agent read the real source and graded every answer correct, partial or wrong. One run per arm and repository, 42 questions (8 each on Cobra, Hugo, Laravel and Kubernetes, 10 on this repository), on indexes whose parsers and file summaries were current and whose vectors were not recomputed. Tokens and seconds are the harness's totals for the agent, so they include reading the prompt and the final reply.
+Two agents got the same questions on each repository, run one at a time so the timings do not share the machine: A with `Grep`, `Glob`, `Read` and read-only `Bash`, B with `onfly_xray` and `onfly_focus` (through a helper that starts `onfly serve` per call, 0.3 to 1 s) and `Grep`/`Read` as fallback, told to use Onfly for symbols, types and call or handler graphs and grep or read for env vars, string literals and flat config files. A third agent read the real source and graded every answer correct, partial or wrong. 42 questions (8 each on Cobra, Hugo, Laravel and Kubernetes, 10 on this repository), on indexes whose parsers and file summaries were current and whose vectors were not recomputed. Tokens and seconds are the harness's totals for the agent, so they include reading the prompt and the final reply.
 
 | Repository | A correct / partial / wrong | B correct / partial / wrong | Tokens A | Tokens B | Seconds A | Seconds B | Calls A | Calls B (onfly + native) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Cobra | 8 / 0 / 0 | 6 / 2 / 0 | 47,660 | 63,419 (+33%) | 37 | 62 (+67%) | 5 | 13 + 2 |
 | Hugo | 8 / 0 / 0 | 5 / 3 / 0 | 67,243 | 82,594 (+23%) | 110 | 95 (-14%) | 17 | 23 + 3 |
-| This repository | 10 / 0 / 0 | 7 / 3 / 0 | 66,351 | 66,886 (+1%) | 85 | 53 (-38%) | 9 | 24 + 2 |
-| Laravel | 8 / 0 / 0 | 7 / 1 / 0 | 49,907 | 68,826 (+38%) | 41 | 62 (+53%) | 5 | 25 + 0 |
-| Kubernetes | 7 / 1 / 0 | 6 / 2 / 0 | 70,787 | 88,677 (+25%) | 86 | 71 (-17%) | 20 | 21 + 1 |
-| Total (42 questions) | 41 / 1 / 0 | 31 / 11 / 0 | 301,948 | 370,402 (+23%) | 358 | 343 (-4%) | 56 | 106 + 8 |
+| This repository | 10 / 0 / 0 | 9 / 1 / 0 | 66,351 | 69,847 (+5%) | 85 | 53 (-38%) | 9 | 18 + 4 |
+| Laravel | 7 / 1 / 0 | 8 / 0 / 0 | 49,907 | 66,687 (+34%) | 41 | 75 (+84%) | 5 | 33 + 0 |
+| Kubernetes | 8 / 0 / 0 | 4 / 4 / 0 | 70,787 | 87,457 (+24%) | 86 | 79 (-8%) | 20 | 19 + 1 |
+| Total (42 questions) | 41 / 1 / 0 | 32 / 10 / 0 | 301,948 | 370,004 (+23%) | 358 | 363 (+1%) | 56 | 106 + 10 |
 
-Per question that is 7.2k tokens and 8.5 s for A, 8.8k and 8.2 s for B. The harness reports tokens and time per agent, not per question, so the per-question figures are averages; the calls each agent reported per question are in the agents' answers and average 1.3 for A and 2.7 for B.
+Each cell is its latest run. B for Cobra and Hugo is the first run; B for this repository, Laravel and Kubernetes was run a second time after the changes below (the first run: 7/3/0, 7/1/0 and 6/2/0, at 66.9k, 68.8k and 88.7k tokens), and the graders graded the A answers of those three again (this repository 10, Laravel 8 → 7, Kubernetes 7 → 8), which shows how much a grade moves on its own. A's tokens and seconds are from its single run. The changes between B's runs: `onfly_xray` hides the licence, package line and imports above a file's first symbol behind one marker, puts a symbol's body first even in a file shown whole, and syncs the file of a bare symbol before showing its lines; `onfly_focus` lists a second result of one file after the other files' results unless the question names the function. They moved recall on the paraphrase suites (table above) and did not measurably move the agents: 21 instead of 20 correct of 26, the same tokens, the same calls.
 
-**Onfly lost this comparison on accuracy and tokens.** No answer was wrong in either arm, but the Grep arm was complete on 41 of 42 questions and the Onfly arm on 31. Every one of B's partials is an answer that says it did not read something, or is imprecise about a detail the code settles; the Onfly arm stops earlier. Its agents made twice the calls of the Grep arm, because `onfly_focus` often returned the wrong symbols for a question that describes behavior (Cobra's completion, Hugo's shortcodes and cascade, Kubernetes' scheduler and job controller) and a second or third query was needed, and then a native call for the detail it did not return. The Laravel result of the earlier runs (grep 4 of 8 against Onfly 8 of 8) did not repeat: the same Grep arm scored 8 of 8 in 5 calls, which suggests it answered from what the model already knows about Laravel. A framework that famous says little about an unfamiliar code base, and a comparison on one run of 8 questions says little about either.
+Per question that is 7.2k tokens and 8.5 s for A and 8.8k and 8.6 s for B. The harness reports tokens and time per agent, not per question, so these are averages; the calls each agent reported per question average 1.3 for A and 2.8 for B.
 
-**By kind of question** (my classification, one question can be argued into another group):
+**Onfly lost this comparison on accuracy and tokens.** No answer was wrong in either arm, but the Grep arm was complete on 41 of 42 questions and the Onfly arm on 32. Every one of B's partials is an answer that says it did not read something, or is imprecise about a detail the code settles; the Onfly arm stops earlier. Its agents made twice the calls, because `onfly_focus` often returned the wrong symbols for a question that describes behavior (Cobra's completion, Hugo's shortcodes and cascade, Kubernetes' scheduler and job controller) and a second or third query was needed, then a native call for the detail it did not return. The Laravel result of the earlier runs (grep 4 of 8 against Onfly 8 of 8) did not repeat: the same Grep arm scored 8 of 8, in 5 calls, which suggests it answered from what the model already knows about Laravel. A framework that famous says little about an unfamiliar code base, and a comparison on one run of 8 questions says little about either.
+
+**By kind of question** (my classification; one question can be argued into another group):
 
 | Kind | Questions | A correct | B correct | Where Onfly did better or worse |
 | --- | --- | --- | --- | --- |
-| Call-graph, sequence and handler tracing ("what runs before and after", "who must change", "how does X reach Y") | 15 | 15 | 13 | Closest to even: `called_by`, the run order in one `execute` and the flow through a handler were found in few calls. B lost two where it did not trace the call site it needed (`WithBreaker`, the CLI caller of lint). |
-| Conceptual discovery ("where is X decided") | 20 | 20 | 15 | `onfly_focus` found the file on 15 of 20, but its second file was often missing (the sourcing of completion candidates, the help command, shortcode rendering and substitution), and B reported what it had not seen. |
-| Large-file anatomy (one long function or file whose parts decide the answer) | 5 | 4 | 2 | The skeleton gives the shape cheaply, but B did not expand the helper that held the detail (`rankDiskPressureFunc`, the concurrency policy, `setMetaPost`). A read the file. |
-| Config, env and literal lookup | 2 | 2 | 1 | B missed the body of `ConfigCacheCommand::handle`, which `onfly_xray` had returned below the licence and the imports, in a file short enough to be shown whole; the body now comes first. |
+| Call-graph, sequence and handler tracing ("what runs before and after", "who must change", "how does X reach Y") | 15 | 14 | 14 | Even: `called_by`, the run order in one `execute` and the flow through a handler were found in few calls. |
+| Conceptual discovery ("where is X decided") | 20 | 20 | 15 | `onfly_focus` found the file on 15 of 20, but its second file was often missing (the sourcing of completion candidates, the help command, shortcode rendering and substitution), and B said what it had not seen. |
+| Large-file anatomy (one long function or file whose parts decide the answer) | 5 | 5 | 1 | The skeleton gives the shape cheaply, but B did not expand the helper that held the detail (`rankDiskPressureFunc`, the concurrency policy, `setMetaPost`, the failure condition in the job controller). A read the file. |
+| Config, env and literal lookup | 2 | 2 | 2 | Even. |
 
-Where Onfly **saved time**: Hugo (-14%), Kubernetes (-17%) and this repository (-38%), the three where the Grep arm needed 17 to 20 calls to find its way around; where it cost more time and tokens: Cobra and Laravel, where Grep answered in five calls. Where it **cost more tokens** than Grep: everywhere but this repository, by 23% overall, mostly the second and third `onfly_focus` queries and the bundles they return. Where it **gave a more complete answer**: not on this run; its extras were small (the `Middleware::preventRequestForgery` route on Laravel's CSRF exemption).
+Where Onfly **saved time**: this repository (-38%), Hugo (-14%) and Kubernetes (-8%), the three where the Grep arm needed 9 to 20 calls; where it cost more time and tokens: Cobra and Laravel, where Grep answered in five calls. Where it **cost more tokens** than Grep: everywhere, by 23% overall, mostly the second and third `onfly_focus` queries and the bundles they return. Where it **gave a more complete answer**: once, on Laravel's retry question, where the Grep answer named a function the handler does not call; not on the whole.
 
 `onfly_xray` costs 40 to 60% of the tokens of reading the files it covers (Cobra 41%, Hugo 57%, this repository 53%), and a file with no function bodies costs about the same as the file.
 
-**After hiding file preambles and limiting one file's share of `onfly_focus`.** The Onfly arm was run again on this repository, Laravel and Kubernetes (same prompts, same setup, one at a time) with the licence and imports above the first symbol collapsed in `onfly_xray`, the symbol's body first even in a short file, and a second result from one file moved behind other files'. The Grep arm was not run again; the graders graded both answers again, so the Grep columns of the three repositories move by their own noise (this repository 10 → 10, Laravel 8 → 7, Kubernetes 7 → 8).
-
-| Repository | B correct / partial / wrong before → after | Tokens B before → after | Seconds B | Calls B (onfly + native) |
-| --- | --- | --- | --- | --- |
-| This repository | 7/3/0 → 9/1/0 | 66,886 → 69,847 | 53 → 53 | 24+2 → 18+4 |
-| Laravel | 7/1/0 → 8/0/0 | 68,826 → 66,687 | 62 → 75 | 25+0 → 33+0 |
-| Kubernetes | 6/2/0 → 4/4/0 | 88,677 → 87,457 | 71 → 79 | 21+1 → 19+1 |
-| Total | 20/6/0 → 21/5/0 | 224,389 → 223,991 | 186 → 206 | 73 → 75 |
-
-One more correct answer out of 26, no change in tokens, ten percent more time, the same number of calls: inside the run-to-run noise, so no effect is claimed. Kubernetes got worse (the agent read the grep lines of the job controller and the webhook dispatchers and said so) while this repository and Laravel got better; the partials that remain are still answers that say "I did not read…". What the changes did do is measurable offline: recall@5 on the paraphrase suites rose 0.12 to 0.14 on Laravel and Hugo, with exact-name lookup unchanged at 150 of 150 ([configuration](configuration.md#ranking-in-onfly_focus)).
-
-What the numbers support: on questions that describe behavior in words, in repositories of 40 to 4,000 files, the Grep arm was as fast and complete and used less. They do not show that Onfly helps an agent that already searches well; they show where it is weak (the second file of a flow, the hedged answer) and that its retrieval works on its own (the recall table above, 150 of 150 for exact names).
+What the numbers support: on questions that describe behavior in words, in repositories of 40 to 4,000 files, the Grep arm was as complete and used less. They do not show that Onfly helps an agent that already searches well; they show where it is weak (the second file of a flow, the long function whose helper decides the answer, the hedged answer) and that its retrieval works on its own (the recall table above).
