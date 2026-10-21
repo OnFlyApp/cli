@@ -117,6 +117,61 @@ func (h *tools) impact(ctx context.Context, in impactIn) ([]parser.Chunk, error)
 	return h.impactFrom(ctx, []definition{target}, in.Depth, h.newSources())
 }
 
+// dispatchersOf finds the code that makes what a handler handles. A method the
+// parser marks as handling a type (handle(SomeCommand $c), __invoke(SomeEvent $e))
+// is reached from the places that build a SomeCommand, since the bus, not a call,
+// joins them.
+func (h *tools) dispatchersOf(ctx context.Context, handler parser.Chunk, srcs *sources) []parser.Chunk {
+	handled := handler.Metadata["handles"]
+	if handled == "" {
+		return nil
+	}
+	short := handled[strings.LastIndexAny(handled, `\.`)+1:]
+	classes, err := h.store.ComponentsByNames(ctx, []string{short})
+	if err != nil {
+		return nil
+	}
+	var class []parser.Chunk
+	for _, d := range classes[short] {
+		switch d.Type {
+		case "class", "struct", "type", "interface":
+			if fqn := d.Metadata["fqn"]; fqn == "" || fqn == handled {
+				class = append(class, d)
+			}
+		}
+	}
+	if len(class) == 0 {
+		return nil
+	}
+	refs, err := h.store.ReferencesByNames(ctx, []string{short})
+	if err != nil {
+		return nil
+	}
+	var out []parser.Chunk
+	for _, c := range refs[short] {
+		if c.Metadata["handles"] == handled {
+			continue // another handler of it only names the type in its signature
+		}
+		for _, d := range class {
+			if srcs.constructs(c, d) {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// handlerAt is the chunk named name in file among defs.
+func handlerAt(defs []parser.Chunk, t definition) (parser.Chunk, bool) {
+	for _, d := range defs {
+		if d.FilePath == t.file && d.Metadata["handles"] != "" {
+			return d, true
+		}
+	}
+	return parser.Chunk{}, false
+}
+
 // callersByTarget is one level of impactFrom, kept per target: who calls each of
 // them. It costs two queries however many targets there are.
 func (h *tools) callersByTarget(ctx context.Context, targets []definition, srcs *sources) (map[definition][]parser.Chunk, error) {
@@ -138,6 +193,9 @@ func (h *tools) callersByTarget(ctx context.Context, targets []definition, srcs 
 		if t.file != "" {
 			refs = attributedWith(srcs, defsBy[t.name], t, refs)
 			refs = resolvable(srcs, defsBy[t.name], t, refs)
+		}
+		if handler, ok := handlerAt(defsBy[t.name], t); ok && t.file != "" {
+			refs = append(refs, h.dispatchersOf(ctx, handler, srcs)...)
 		}
 		out[t] = refs
 	}
@@ -182,6 +240,9 @@ func (h *tools) impactFrom(ctx context.Context, targets []definition, depth int,
 			if t.file != "" {
 				refs = attributedWith(srcs, defsBy[t.name], t, refs)
 				refs = resolvable(srcs, defsBy[t.name], t, refs)
+				if handler, ok := handlerAt(defsBy[t.name], t); ok {
+					refs = append(refs, h.dispatchersOf(ctx, handler, srcs)...)
+				}
 			}
 			for _, c := range refs {
 				key := query.ChunkKey(c)

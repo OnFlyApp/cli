@@ -367,3 +367,54 @@ func TestXrayCalledByNamesTheEntrypointTwoHopsUp(t *testing.T) {
 		t.Fatalf("a caller with more than three callers is not previewed:\n%s", busy)
 	}
 }
+
+func TestXrayCalledByTiesTheHandlerToTheCodeThatDispatchesItsCommand(t *testing.T) {
+	cfg, store, root := macroFixture(t)
+	cfg.Server.LogFile = filepath.Join(t.TempDir(), "server.log")
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("src/Domain/ClawBack.php", "<?php\nnamespace App\\Domain;\nclass ClawBack {}\n")
+	write("src/App/Handler.php", "<?php\nnamespace App\\App;\nuse App\\Domain\\ClawBack;\nclass Handler {\n    public function __invoke(ClawBack $c): void {}\n}\n")
+	write("src/Api/Controller.php", "<?php\nnamespace App\\Api;\nuse App\\Domain\\ClawBack;\nclass Controller {\n    public function post() { $this->bus->dispatch(new ClawBack()); }\n}\n")
+	write("src/Api/Docs.php", "<?php\nnamespace App\\Api;\nuse App\\Domain\\ClawBack;\nclass Docs {\n    public function describe(ClawBack $c) { return 1; }\n}\n")
+	vec := []float32{1, 0, 0, 1}
+	meta := func(name, ns, receiver, line string, extra map[string]string) map[string]string {
+		m := map[string]string{"name": name, "namespace": ns, "start_line": line, "end_line": line}
+		if receiver != "" {
+			m["receiver"] = receiver
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	chunk := func(file, typ, content string, m map[string]string, out ...string) vectorstore.EmbeddedChunk {
+		return vectorstore.EmbeddedChunk{Chunk: parser.Chunk{FilePath: file, Type: typ, Content: content, Metadata: m, Outbound: out}, Vector: vec}
+	}
+	for _, c := range []vectorstore.EmbeddedChunk{
+		chunk("src/Domain/ClawBack.php", "class", "class ClawBack {}", meta("ClawBack", "App\\Domain", "", "3", map[string]string{"fqn": "App\\Domain\\ClawBack"})),
+		chunk("src/App/Handler.php", "method", "public function __invoke(ClawBack $c): void {}", meta("__invoke", "App\\App", "App\\App\\Handler", "5", map[string]string{"handles": "App\\Domain\\ClawBack", "param_types": "App\\Domain\\ClawBack"}), "ClawBack"),
+		chunk("src/Api/Controller.php", "method", "public function post() { $this->bus->dispatch(new ClawBack()); }", meta("post", "App\\Api", "App\\Api\\Controller", "5", nil), "dispatch", "ClawBack"),
+		chunk("src/Api/Docs.php", "method", "public function describe(ClawBack $c) { return 1; }", meta("describe", "App\\Api", "App\\Api\\Docs", "5", nil), "ClawBack"),
+	} {
+		if err := saveHashed(store, root, []vectorstore.EmbeddedChunk{c}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session := openServer(t, cfg, store, fakeEmbedder{})
+	got := callText(t, session, "onfly_xray", map[string]any{"target": "src/App/Handler.php"})
+	calledBy := got[strings.Index(got, "## called_by"):]
+	if !strings.Contains(calledBy, "public function post() [src/Api/Controller.php") && !strings.Contains(calledBy, "post()") {
+		t.Fatalf("the handler is called by the code that builds its command:\n%s", got)
+	}
+	if strings.Contains(calledBy, "describe") {
+		t.Fatalf("code that only names the command's type does not dispatch it:\n%s", got)
+	}
+}

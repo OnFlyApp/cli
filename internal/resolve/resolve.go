@@ -476,3 +476,31 @@ func sameClassName(variable, class string) bool {
 	}
 	return class != "" && strings.EqualFold(variable, class)
 }
+
+// Constructs says that the caller builds or starts from the class: new Name,
+// Name::fromRequest(...) for PHP, any use of the type elsewhere. It is how code
+// that dispatches a command is tied to the handler of that command.
+func (r Rules) Constructs(src string, caller, class parser.Chunk) bool {
+	if src == "" {
+		return true
+	}
+	if strings.ToLower(path.Ext(caller.FilePath)) != ".php" {
+		return r.Accepts(src, caller, class, 0)
+	}
+	name := class.Metadata["name"]
+	if name == "" || !strings.Contains(caller.Content, name) {
+		return false
+	}
+	uses, ns := cachedUses(src), caller.Metadata["namespace"]
+	// new Name, new \A\B\Name, Name::make(...): group 1 is `new`, 2 the qualifier
+	// written before the name, 3 a static call after it.
+	re := cachedRegexp("phpconstructs|"+name, func() string {
+		return `(?:(\bnew\s+)|(?:^|[^\w\\$>:]))(\\?(?:\w+\\)*)` + regexp.QuoteMeta(name) + `\b(\s*::\s*\w+\s*\()?`
+	})
+	for _, m := range re.FindAllStringSubmatch(caller.Content, -1) {
+		if (m[1] != "" || m[3] != "") && phpClass(m[2]+name, uses, ns) == class.Metadata["fqn"] {
+			return true
+		}
+	}
+	return false
+}

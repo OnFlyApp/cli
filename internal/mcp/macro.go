@@ -131,6 +131,14 @@ func (s *sources) get(rel string) string {
 
 // accepts says whether caller can be using def; siblings is how many
 // definitions of that name the project has, 0 when not known.
+// constructs says that caller builds the class, for tying a dispatcher to a handler.
+func (s *sources) constructs(caller, class parser.Chunk) bool {
+	if s == nil {
+		return true
+	}
+	return s.rules.Constructs(s.get(caller.FilePath), caller, class)
+}
+
 func (s *sources) accepts(caller, def parser.Chunk, siblings int) bool {
 	if s == nil {
 		return true

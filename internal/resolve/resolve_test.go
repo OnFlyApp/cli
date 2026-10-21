@@ -206,3 +206,27 @@ func TestPHPNameThatOneClassDefinesIsThatClassesEvenOnAnUntypedValue(t *testing.
 		t.Fatal("a name every class has is never unambiguous")
 	}
 }
+
+func TestConstructsTiesTheCodeThatMakesACommandToIt(t *testing.T) {
+	cmd := ch("src/Domain/ClawBack.php", "", map[string]string{"name": "ClawBack", "fqn": "App\\Domain\\ClawBack", "namespace": "App\\Domain"})
+	src := "<?php\nnamespace App\\Api;\nuse App\\Domain\\ClawBack;\nclass Controller {}\n"
+	ns := map[string]string{"name": "post", "namespace": "App\\Api"}
+	r := Rules{}
+	for call, want := range map[string]bool{
+		"$bus->dispatch(new ClawBack($id));":             true,
+		"$bus->dispatch(ClawBack::fromRequest($r));":     true,
+		"$bus->dispatch(new \\App\\Domain\\ClawBack());": true,
+		"function f(ClawBack $c) {}":                     false, // names the type, makes none
+		"$x = ClawBack::class;":                          false,
+		"$bus->dispatch(new Other());":                   false,
+	} {
+		caller := ch("src/Api/Controller.php", call, ns)
+		if got := r.Constructs(src, caller, cmd); got != want {
+			t.Errorf("%q: got %v, want %v", call, got, want)
+		}
+	}
+	elsewhere := ch("src/Api/Controller.php", "new ClawBack()", ns)
+	if r.Constructs("<?php\nnamespace App\\Api;\nclass Controller {}\n", elsewhere, cmd) {
+		t.Error("a ClawBack of another namespace, not imported, is not this one")
+	}
+}
